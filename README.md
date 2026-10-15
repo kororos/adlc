@@ -94,11 +94,45 @@ Then open **claude.ai/code** or the Claude app and pick the session **`adlc-myap
 **Secrets** asked by `adlc secrets`:
 | Name | What | Used for |
 |---|---|---|
-| `gh_pat` | Fine-grained PAT, **this repo only**: Contents, Issues, Pull requests (read/write), Metadata (read). No admin. | everything agents do on GitHub |
-| `claude_oauth_token` | Output of `claude setup-token` (one-year token, uses your subscription) | unattended `claude -p` runs |
-| `registry_token` | Classic PAT with `read:packages` (optional) | pulling images for the dev environment |
+| `gh_pat` | **Fine-grained** token, **this repo only**. Read/write: Contents, Issues, Pull requests, **Workflows**. Read: Actions, Commit statuses, Metadata. Nothing else (no Administration, Secrets, Environments). | everything agents do on GitHub |
+| `claude_oauth_token` | Output of `claude setup-token` (one-year token, uses your subscription). One line, starting with `sk-ant-oat` | unattended `claude -p` runs |
+| `ci_admin_pat` | **Fine-grained**, this repo only, **Administration: read and write**, nothing else. Optional: empty = no CI runner | registering ephemeral CI runners. Held only by the CI registrar, never by agents or jobs |
+| `registry_token` | Pull-only credential: Harbor robot secret (pull), or a classic token with `read:packages` for GHCR. Optional until CI publishes images | the dev deployer pulling images |
 
 Run `adlc up <slug>` again after pulling a new ADLC version or changing secrets. It's idempotent.
+
+### Bootstrapping a brand-new project
+Fine-grained tokens are scoped to existing repos, so create the (empty) repo first, as yourself:
+```bash
+gh repo create kororos/<slug> --private --add-readme     # your own gh login on the host
+# create gh_pat (and ci_admin_pat) for kororos/<slug> on github.com, see the table above
+adlc secrets <slug> && adlc up <slug> --repo kororos/<slug>
+adlc login <slug> && adlc attach <slug>                   # one-time login + "Enable Remote Control? y"
+adlc session <slug>                                       # → /adlc-core:init
+cd /srv/adlc/projects/<slug>/sessions/main && bash .adlc/provision.sh   # on the host, with YOUR gh login (admin)
+```
+
+### CI runner (self-hosted, sandboxed)
+Tests run on GitHub-hosted runners. Jobs that need your network, such as **publishing images to an internal registry**, run on the **ADLC CI runner**: `runs-on: [self-hosted, adlc-publish]`. It's enabled per project by setting `ci_admin_pat`:
+- A **registrar** container holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time**. It never runs workflow code.
+- Jobs run in a **separate Docker engine** (`ci-docker`) that agents can't reach, behind the same egress proxy. Before each new job, everything the previous job left behind is removed.
+- Because agents can edit workflows, two GitHub-side rules (set by `provision.sh`) complete the picture: `.github/` changes need **your review** (CODEOWNERS + "Require review from Code Owners"), and registry **push credentials live in the `publish` environment, limited to `main`**, so PR-branch workflows can't read them.
+
+`adlc logs <slug> ci` shows the registrar. Runners appear under the repo's Settings → Actions → Runners while waiting for a job.
+
+### Using Harbor (or another private registry)
+```bash
+adlc up <slug> --registry harbor.example.com \
+               --registry-user 'robot$<project>+adlc-pull' \
+               [--registry-ca /path/to/internal-ca.crt]          # only for a private CA
+adlc secrets <slug>                                              # registry_token = the pull robot's secret
+```
+In Harbor, create two robot accounts on the project: **pull-only** (for the dev server, as above) and **push** (stored as secrets in the GitHub `publish` environment, used by the publish job). In `/adlc-core:init` choose registry `harbor`, set the namespace `<host>/<project>/<slug>`, and add the Harbor host to `network.extra_domains`. Publishing runs on the ADLC CI runner, since GitHub-hosted runners can't reach an internal Harbor.
+
+### Hardening with Sysbox (recommended)
+Without [Sysbox](https://github.com/nestybox/sysbox), the per-project Docker engines run as **privileged** containers. That isolates test environments from the host's Docker, but it isn't a strong security boundary. To harden:
+1. Stop running containers (the installer restarts Docker), install the `sysbox-ce` package for your distro from the Sysbox releases page, and check that `docker info | grep -i sysbox` shows `sysbox-runc`. Check the release notes for supported Docker Engine versions first.
+2. New projects use it automatically. For existing ones: `adlc up <slug> --dind sysbox`. This also applies to the CI engine.
 
 ### Working in a terminal over SSH
 ```bash
@@ -128,7 +162,7 @@ cd ~/adlc
 | `adlc shell <slug>` | bash inside the runner, with `gh` authenticated |
 | `adlc attach <slug>` | tmux with windows **rc** (Remote Control), **poller**, **deployer**, **shell** and your sessions (detach: Ctrl-b d) |
 | `adlc pause` / `resume <slug>` | stop/start launching new runs (running ones finish) |
-| `adlc logs <slug> [poller\|deployer\|rc\|egress\|run <n>]` | follow logs. `run <n>` shows the agent's narrative and cost for the latest run of issue n |
+| `adlc logs <slug> [poller\|deployer\|rc\|egress\|ci\|run <n>]` | follow logs. `run <n>` shows the agent's narrative and cost for the latest run of issue n |
 | `adlc audit <slug>` | domains reached through the egress proxy and whether each is allowlisted |
 | `adlc down <slug>` | stop the project (workspace, volumes and login are kept) |
 | `adlc doctor` | host checks |

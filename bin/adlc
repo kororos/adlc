@@ -8,6 +8,9 @@
 #       --domain <base>              base domain for preview URLs (default: <host-ip>.nip.io)
 #       --stacks <a,b>               runner image stack layers (default: from adlc.yaml, else none)
 #       --dind privileged|sysbox     Docker-in-Docker mode (default: sysbox if installed)
+#       --registry <host>            container registry host (default ghcr.io), e.g. harbor.example.com
+#       --registry-user <user>       registry pull user (Harbor: robot$<project>+<name>)
+#       --registry-ca <file>         CA certificate for a registry with a private CA
 #   adlc login <slug>                one-time Claude login inside the runner
 #   adlc session <slug> [name]       interactive Claude session in its own worktree (also reachable
 #                                    from claude.ai/app); re-running re-attaches
@@ -17,7 +20,7 @@
 #   adlc attach <slug>               attach to the runner's tmux (rc / poller / deployer / shell / sessions)
 #   adlc status [slug]               runners, active runs, pause/backoff state
 #   adlc pause|resume <slug>         stop/start launching new delivery runs
-#   adlc logs <slug> [poller|deployer|rc|egress|run <issue>]
+#   adlc logs <slug> [poller|deployer|rc|egress|ci|run <issue>]
 #   adlc audit <slug>                egress domains seen (to build the allowlist)
 #   adlc down <slug>                 stop the runner (workspace and volumes are kept)
 set -euo pipefail
@@ -55,9 +58,16 @@ compose() { # compose <slug> <args...>
   local f; f=$(cfg_file "$slug")
   local files=(-f "$SANDBOX/compose.project.yml" -f "$SANDBOX/compose.dind-${ADLC_DIND_MODE:-privileged}.yml")
   [ -e /dev/kvm ] && files+=(-f "$SANDBOX/compose.kvm.yml")
+  [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.registry-ca.yml")
+  if ci_enabled "$slug"; then
+    files+=(-f "$SANDBOX/compose.ci.yml")
+    [ "${ADLC_DIND_MODE:-}" = sysbox ] && files+=(-f "$SANDBOX/compose.ci-sysbox.yml")
+    [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.ci-registry-ca.yml")
+  fi
   docker compose --env-file "$f" "${files[@]}" "$@"
 }
 runner_exec() { local slug=$1; shift; compose "$slug" exec runner "$@"; }
+ci_enabled() { [ -s "$ADLC_ROOT/secrets/$1/ci_admin_pat" ]; }
 
 default_domain() {
   local ip
@@ -92,6 +102,7 @@ cmd_doctor() {
     for s in gh_pat claude_oauth_token; do
       [ -s "$ADLC_ROOT/secrets/$slug/$s" ] && ok "$slug: secret $s" || bad "$slug: secret $s missing (adlc secrets $slug)"
     done
+    ci_enabled "$slug" && ok "$slug: CI runner enabled" || warn "$slug: CI runner disabled (no ci_admin_pat)"
   done
 }
 
@@ -99,25 +110,37 @@ cmd_secrets() {
   local slug=$1 dir="$ADLC_ROOT/secrets/$1" v
   need_slug "$slug"; mkdir -p "$dir"; chmod 700 "$dir"
   say "Secrets for '$slug' are stored in $dir (mode 600). Press Enter to keep an existing value."
-  say "  gh_pat:             fine-grained PAT for this repo only: Contents, Issues, Pull requests (read/write), Metadata (read). No admin."
-  say "  claude_oauth_token: output of 'claude setup-token' (used for unattended runs)"
-  say "  registry_token:     classic PAT with read:packages (GHCR pulls for the dev deployer); optional"
-  for s in gh_pat claude_oauth_token registry_token; do
+  say "  gh_pat:             FINE-GRAINED token, only this repo. Read/write: Contents, Issues, Pull requests, Workflows."
+  say "                      Read: Actions, Commit statuses, Metadata. Nothing else (no Administration/Secrets)."
+  say "  claude_oauth_token: output of 'claude setup-token' (unattended runs). One string starting with sk-ant-oat"
+  say "  ci_admin_pat:       FINE-GRAINED token, only this repo, Administration: read/write (registers ephemeral CI"
+  say "                      runners; held only by the CI registrar, never by agents or jobs). Optional: empty = no CI runner"
+  say "  registry_token:     PULL credential for the dev deployer: Harbor robot secret (pull only), or a classic"
+  say "                      GitHub token with read:packages for GHCR. Optional until CI publishes images"
+  say "  Long tokens may wrap when copied: whitespace is removed automatically."
+  local -A prefix=([gh_pat]=github_pat_ [claude_oauth_token]=sk-ant-oat [ci_admin_pat]=github_pat_ [registry_token]="")
+  for s in gh_pat claude_oauth_token ci_admin_pat registry_token; do
     read -r -s -p "$s: " v; echo
-    if [ -n "$v" ]; then (umask 077; printf '%s' "$v" >"$dir/$s"); ok "$s saved"
+    v=$(tr -d '[:space:]' <<<"$v")
+    if [ -n "$v" ]; then
+      (umask 077; printf '%s' "$v" >"$dir/$s"); ok "$s saved (${#v} chars)"
+      [[ "$v" == "${prefix[$s]}"* ]] || warn "$s doesn't start with '${prefix[$s]}': check it's the right token and wasn't cut by a line wrap"
     elif [ ! -e "$dir/$s" ]; then (umask 077; : >"$dir/$s"); warn "$s left empty"; fi
   done
 }
 
 cmd_up() {
   local slug=$1; shift; need_slug "$slug"
-  local repo="" domain="" stacks="" dind=""
+  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca=""
   while [ $# -gt 0 ]; do
     case $1 in
       --repo) repo=$2; shift 2 ;;
       --domain) domain=$2; shift 2 ;;
       --stacks) stacks=$2; shift 2 ;;
       --dind) dind=$2; shift 2 ;;
+      --registry) reg=$2; shift 2 ;;
+      --registry-user) reg_user=$2; shift 2 ;;
+      --registry-ca) reg_ca=$2; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -129,6 +152,15 @@ cmd_up() {
     set_cfg "$f" ADLC_SLUG "$slug"
     set_cfg "$f" ADLC_SUBNET_PREFIX "$(next_subnet)"
   fi
+  grep -q '^ADLC_CI_SUBNET_PREFIX=' "$f" \
+    || set_cfg "$f" ADLC_CI_SUBNET_PREFIX "$(grep '^ADLC_SUBNET_PREFIX=' "$f" | cut -d= -f2 | sed 's/^172\.31\./172.30./')"
+  [ -n "$reg" ] && set_cfg "$f" ADLC_REGISTRY_HOST "$reg"
+  [ -n "$reg_user" ] && set_cfg "$f" ADLC_REGISTRY_USER "'$reg_user'"
+  if [ -n "$reg_ca" ]; then
+    [ -f "$reg_ca" ] || die "CA file '$reg_ca' not found"
+    cp "$reg_ca" "$ADLC_ROOT/config/$slug-registry-ca.crt"
+    set_cfg "$f" ADLC_REGISTRY_CA "$ADLC_ROOT/config/$slug-registry-ca.crt"
+  fi
   [ -n "$repo" ] && set_cfg "$f" ADLC_REPO "$repo"
   grep -q '^ADLC_BASE_DOMAIN=' "$f" || set_cfg "$f" ADLC_BASE_DOMAIN "${domain:-$(default_domain)}"
   [ -n "$domain" ] && set_cfg "$f" ADLC_BASE_DOMAIN "$domain"
@@ -138,7 +170,7 @@ cmd_up() {
   set_cfg "$f" ADLC_HOME "$ADLC_HOME"
   set_cfg "$f" ADLC_RUNNER_IMAGE "adlc/runner-$slug:local"
   load_cfg "$slug"
-  for s in gh_pat claude_oauth_token registry_token; do
+  for s in gh_pat claude_oauth_token ci_admin_pat registry_token; do
     [ -e "$ADLC_ROOT/secrets/$slug/$s" ] || die "secret $s missing: run 'adlc secrets $slug' first"
   done
 
@@ -222,6 +254,7 @@ cmd_logs() {
   case $what in
     poller|deployer|rc) tail -n 100 -f "$d/$what.log" ;;
     egress) tail -n 100 -f "$d/egress/access.log" ;;
+    ci) load_cfg "$slug"; compose "$slug" logs -f --tail 100 ci ;;
     run)
       [ -n "${3:-}" ] || die "usage: adlc logs <slug> run <issue>"
       local latest; latest=$(ls -t "$d/runs/$3"-*.jsonl 2>/dev/null | head -1)

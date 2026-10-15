@@ -27,13 +27,16 @@ repo:
 
 ci:
   provider: github-actions
-  runners: { default: ubuntu-latest, ios: macos-latest, android_e2e: ubuntu-latest }
+  runners: { default: ubuntu-latest, ios: macos-latest, android_e2e: ubuntu-latest, publish: "[self-hosted, adlc-publish]" }
+  publish: { on: push-default-branch, environment: publish, pull_base_images: true }
   required_checks: [lint, typecheck, arch-check, test, e2e-web, e2e-android, e2e-ios]
   budget: tbd
 
 registry:
-  provider: ghcr
-  namespace: tbd                     # ghcr.io/<owner>/<slug>
+  provider: ghcr                     # ghcr | harbor | dockerhub | ecr | gar | acr
+  namespace: tbd                     # ghcr.io/<owner>/<slug>  ·  harbor: <host>/<project>/<slug>
+  reachable_from_github: true        # false for an internal Harbor → publish runs on the ADLC CI runner
+  private_ca: false                  # true → adlc up --registry-ca <file>
   images: [api, web]
   tags: [sha, semver]                # never deploy `latest`
   retention: { untagged_days: 14, keep_sha_tags: 20 }

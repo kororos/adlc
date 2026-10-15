@@ -1,0 +1,5 @@
+# Added by `adlc up` when ADLC_REGISTRY_CA is set: trust a private registry CA (e.g. internal Harbor).
+services:
+  docker:
+    volumes:
+      - ${ADLC_REGISTRY_CA}:/etc/docker/certs.d/${ADLC_REGISTRY_HOST}/ca.crt:ro

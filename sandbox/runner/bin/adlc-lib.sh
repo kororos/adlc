@@ -17,7 +17,7 @@ die() { log "FATAL: $*"; exit 1; }
 # Print a secret's value (no trailing newline); empty if missing.
 secret() {
   local f="$SECRETS_DIR/$1"
-  [ -s "$f" ] && tr -d '\r\n' <"$f"
+  [ -s "$f" ] && tr -d '[:space:]' <"$f"
   return 0
 }
 

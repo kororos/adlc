@@ -49,19 +49,23 @@ Ask in this order. Propose the default and explain it in one line. Accept "defau
 | key | question | default |
 |---|---|---|
 | ci.provider | CI provider | GitHub Actions |
-| ci.runners | Where jobs run | GitHub-hosted (Linux); `macos-latest` for iOS; self-hosted `dev-server` only for Android e2e if hosted KVM is insufficient |
+| ci.runners | Where jobs run | Tests: GitHub-hosted (`ubuntu-latest`; `macos-latest` for iOS). **Publish** (build + push images) and anything needing the internal network: the **ADLC CI runner** (labels `[self-hosted, adlc-publish]`), an ephemeral, sandboxed runner per project on the dev server, enabled by the `ci_admin_pat` secret |
+| ci.publish | How images get published | job `publish` on `push` to the default branch only, `runs-on: [self-hosted, adlc-publish]`, `environment: publish`, `docker build --pull` (never trusts cached base images) |
 | ci.required_checks | Required for merge | lint, typecheck, arch-check, test, e2e-web, e2e-android, e2e-ios |
 | ci.budget | Monthly CI minute/cost limit, especially macOS | `tbd` |
 
 ### I — Container registry & images
 | key | question | default |
 |---|---|---|
-| registry.provider | ghcr / dockerhub / ecr / gar / acr / harbor (self-hosted) | **ghcr** (same GitHub auth and permissions, no extra account) |
-| registry.namespace | Image path prefix | `ghcr.io/<owner>/<slug>` |
+| registry.provider | ghcr / harbor / dockerhub / ecr / gar / acr | **ghcr** (same GitHub auth and permissions, no extra account) |
+| registry.namespace | Image path prefix | ghcr: `ghcr.io/<owner>/<slug>`; harbor: `<harbor-host>/<harbor-project>/<slug>` |
+| registry.reachability | Can GitHub-hosted runners reach it? | ghcr: yes. Internal Harbor: no, so publish runs on the ADLC CI runner |
+| registry.tls | Certificate | public CA, or a private CA (then `adlc up <slug> --registry-ca <file>`) |
+| registry.credentials | Who pushes, who pulls | **push:** a robot/CI identity stored only in the GitHub Environment `publish` (Harbor: robot account with push on the project); **pull (dev deployer):** a pull-only robot (Harbor) or classic token with `read:packages` (GHCR), set with `adlc secrets` (`registry_token`) and `adlc up --registry <host> --registry-user <user>` |
 | registry.images | Images built | `api`, `web` (plus the runner image, which lives in the ADLC repo) |
 | registry.tags | Tag scheme | `sha-<short>` on every merge; `vX.Y.Z` on release; never `latest` in deploys |
 | registry.retention | Cleanup policy | untagged > 14 days deleted; keep the last 20 sha tags |
-| registry.scan | Image vulnerability scan | Trivy in CI, fail on critical |
+| registry.scan | Image vulnerability scan | ghcr: Trivy in CI, fail on critical; harbor: Harbor's built-in scan-on-push + "prevent vulnerable images from running" (critical) |
 
 ### E — Environments & deployment
 Every environment gets a **profile**. Ask about `dev` and `prod` (and `staging` if wanted). Show one table per environment. The `test` environment (per delivery run) is managed by ADLC and only shown for information.
@@ -173,5 +177,7 @@ Why: one line
 
 ## Provisioning rules
 - Init never runs privileged actions with the runner's credentials. The runner's PAT intentionally has no admin rights. Init writes `.adlc/provision.sh`, the user reviews it and runs it with their own admin `gh` auth (`! bash .adlc/provision.sh` in a local Claude Code session, or in any terminal).
+- **CI hardening (always):** `CODEOWNERS` with `/.github/ @<owner>` plus branch protection "Require review from Code Owners", so GitHub itself makes workflow changes wait for a human, even with auto-merge. A GitHub Environment **`publish`** with deployment branches limited to the default branch, holding the registry push credentials, so workflows on PR branches can't read them. The Environment **`prod`** has required reviewers.
+- **ADLC CI runner:** print how to create `ci_admin_pat` (fine-grained, this repo only, **Administration: read and write**, nothing else), then `adlc secrets <slug>` + `adlc up <slug>` on the dev server. It is held only by the CI registrar container. Agents and jobs never see it.
 - The script is idempotent (check, then create) and prints each action. It covers: repo create/settings, branch protection + required checks, merge settings, labels, milestones, Project board, CODEOWNERS, GHCR package visibility/retention notes, GitHub Environments (+ required reviewers for prod), self-hosted deploy-runner registration instructions for the prod swarm manager (restricted runner group), a checklist of swarm secret names to create on the manager, placeholder secrets (names only, values entered by the user via `gh secret set` prompts), Renovate/Dependabot config, and registration of the project on the dev-server runner (`adlc up <slug>`).
 - Anything that needs an external account (Apple, Google Play, Sentry, a DNS provider) becomes a checklist item in setup.md "Open items". It is never automated with guessed credentials.

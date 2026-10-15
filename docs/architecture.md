@@ -1,6 +1,6 @@
 # ADLC — Architecture
 
-Status: draft v0.6 · 2026-10-15
+Status: draft v0.7 · 2026-10-15
 Verified against Claude Code 2.1.299 docs (code.claude.com) on 2026-10-14. Items marked **[verify]** still need a hands-on test.
 
 ## 1. Decisions
@@ -90,6 +90,22 @@ adlc-<slug>-docker   Docker engine (DinD) with /dev/kvm; runs all test environme
 edge traefik (one per host) → *.<slug>.<base> → adlc-<slug>-docker:80   (base defaults to <host-ip>.nip.io)
 ```
 The runner never gets the host's Docker socket (that would be root on the dev server). Sysbox is a later hardening option.
+
+### CI runner (optional, per project, when `ci_admin_pat` is set)
+```
+adlc-<slug>-ci         registrar: holds ci_admin_pat (repo Administration: write), creates JIT runner configs,
+                       starts one ephemeral runner at a time, resets ci-docker between jobs; runs no job code
+adlc-<slug>-ci-docker  separate Docker engine (DinD) on its own internal network "ci". Unreachable from the
+                       agents' runner, so agents can't exec into a running publish job and read its secrets
+  └── adlc-<slug>-<ts> ghcr.io/actions/actions-runner, --jitconfig, labels self-hosted,linux,adlc-publish
+```
+Threat model: agents have Workflows: write, and PR workflows run the PR branch's definition, so agent-written job code can land on this runner before review. Controls:
+1. **Isolation:** ephemeral container, separate engine, egress proxy, no host access.
+2. **No persistence:** each job gets a fresh runner, and leftovers are removed before the next one. Publish builds use `--pull`.
+3. **Secrets scoped to `main`:** the `publish` environment has a deployment-branch policy.
+4. **Human review of `.github/`:** enforced by GitHub through CODEOWNERS.
+
+The registry pull credential (dev deployer) sits in the agents' runner. It's read-only by design.
 
 ### Environments
 | Env | Runtime | Built from | Deploys | Who |
@@ -218,6 +234,8 @@ Controls, strongest first:
 - `CLAUDE_CODE_OAUTH_TOKEN` is exported **only** for `claude -p` runs. Remote Control needs the `/login` session, and the token would take precedence.
 - GHCR pulls need a classic PAT (`read:packages`), hence the separate `registry_token` secret. **[verify]** fine-grained PAT support for packages.
 - The react-native stack layer is x86_64-only (Android platform-tools).
+- Squid rejects allowlists where one entry is covered by another. The egress entrypoint drops covered entries and validates the config before activating it (keeping the previous one on error).
+- Personal GitHub accounts only have repo-level self-hosted runners: one CI registrar per project. Org-level runner groups would allow sharing.
 - `isolation: worktree` branches from the **default branch**. Implementers `git switch -c <task-branch> <feature-branch>` first.
 - Plugin subagents ignore `hooks`, `mcpServers`, `permissionMode` frontmatter. Guards live in `hooks/hooks.json`. The permission mode comes from the CLI flag.
 - Agent teams: experimental, interactive only, not under `-p`.

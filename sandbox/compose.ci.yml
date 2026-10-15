@@ -1,0 +1,72 @@
+# Optional per-project CI runner (added by `adlc up` when the ci_admin_pat secret is set).
+#
+#   ci         registrar: holds ci_admin_pat, starts one ephemeral JIT runner at a time; runs no job code
+#   ci-docker  separate Docker engine for CI jobs. Agents (runner service) can't reach it, so they
+#              can't inspect a running publish job and read its registry credentials.
+#   network ci internal; the only way out is the egress proxy.
+services:
+  egress:
+    environment:
+      ADLC_CI: "1"
+    networks:
+      ci:
+        ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.2
+
+  ci-docker:
+    image: ${ADLC_DIND_IMAGE:-docker:29-dind}
+    hostname: ci-docker
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+      HTTPS_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+      NO_PROXY: localhost,127.0.0.1,ci-docker,${ADLC_CI_SUBNET_PREFIX}.0/24
+    volumes:
+      - ci-certs:/certs
+      - ci-data:/var/lib/docker
+    networks:
+      ci:
+        ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.3
+    restart: unless-stopped
+
+  ci:
+    image: ${ADLC_RUNNER_IMAGE}
+    entrypoint: ["adlc-ci"]
+    init: true
+    depends_on: [egress, ci-docker]
+    environment:
+      ADLC_ROOT: ${ADLC_ROOT}
+      ADLC_SLUG: ${ADLC_SLUG}
+      ADLC_REPO: ${ADLC_REPO}
+      ADLC_REGISTRY_HOST: ${ADLC_REGISTRY_HOST:-}
+      ADLC_CI_LABELS: ${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish}
+      ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
+      ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+      HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+      HTTPS_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+      NO_PROXY: localhost,127.0.0.1,ci-docker
+      DOCKER_HOST: tcp://ci-docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+    secrets: [ci_admin_pat]
+    volumes:
+      - ci-certs:/certs:ro
+    networks:
+      ci:
+        ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.4
+    restart: unless-stopped
+
+networks:
+  ci:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${ADLC_CI_SUBNET_PREFIX}.0/24
+
+volumes:
+  ci-certs: {}
+  ci-data: {}
+
+secrets:
+  ci_admin_pat:
+    file: ${ADLC_ROOT}/secrets/${ADLC_SLUG}/ci_admin_pat

@@ -1,0 +1,5 @@
+# Hardened CI Docker engine (Sysbox runtime instead of privileged).
+services:
+  ci-docker:
+    privileged: false
+    runtime: sysbox-runc

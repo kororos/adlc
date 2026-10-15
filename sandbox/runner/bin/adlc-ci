@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# ADLC CI registrar: keeps one ephemeral GitHub Actions runner available for the project's repo.
+#
+# - Only this container holds ci_admin_pat (repo Administration: write, needed to create
+#   just-in-time runner configs). It never runs workflow code.
+# - Each job runs in a fresh runner container inside the CI Docker engine (ci-docker), which
+#   agents can't reach. A JIT runner takes exactly one job and exits.
+# - Before every new runner, everything the previous job left in ci-docker is removed, so a
+#   pull-request job can't plant anything for a later main-branch publish job.
+set -uo pipefail
+ADLC_COMPONENT=ci
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+
+R="$ADLC_REPO"
+IMAGE=${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
+LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish}
+INTERVAL=${ADLC_CI_INTERVAL:-15}
+
+mkdir -p ~/.docker
+cat >~/.docker/config.json <<EOF
+{ "proxies": { "default": {
+    "httpProxy": "${ADLC_INNER_PROXY:-}", "httpsProxy": "${ADLC_INNER_PROXY:-}",
+    "noProxy": "localhost,127.0.0.1" } } }
+EOF
+
+for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done
+docker info >/dev/null 2>&1 || die "cannot reach the CI Docker engine at ${DOCKER_HOST:-?}"
+
+runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
+
+# Remove everything except running runner containers; keep image layers (build cache).
+reset_engine() {
+  local ids
+  ids=$(docker ps -aq | grep -vxF -f <(docker ps -q --filter label=adlc.ci=runner) || true)
+  if [ -n "$ids" ]; then
+    xargs docker rm -f <<<"$ids" >/dev/null 2>&1
+    log "removed $(wc -l <<<"$ids") leftover container(s) from the previous job"
+  fi
+  docker volume prune -af >/dev/null 2>&1 || true
+  docker network prune -f >/dev/null 2>&1 || true
+}
+
+last_pull=0
+ensure_image() {
+  local now; now=$(date +%s)
+  if [ $((now - last_pull)) -gt 86400 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    docker pull -q "$IMAGE" >/dev/null && last_pull=$now && log "runner image $IMAGE up to date"
+  fi
+}
+
+start_runner() {
+  local token name jit gid label_args=() l
+  token=$(secret ci_admin_pat)
+  name="adlc-$ADLC_SLUG-$(date +%s)"
+  for l in ${LABELS//,/ }; do label_args+=(-f "labels[]=$l"); done
+  jit=$(GH_TOKEN=$token gh api -X POST "repos/$R/actions/runners/generate-jitconfig" \
+          -f name="$name" -F runner_group_id=1 -f work_folder=_work "${label_args[@]}" \
+          --jq .encoded_jit_config 2>&1) || {
+    log "ERROR: cannot create a JIT runner config ($jit). ci_admin_pat needs Administration: read and write on $R"
+    return 1
+  }
+  gid=$(docker run --rm --entrypoint stat -v /var/run/docker.sock:/s "$IMAGE" -c %g /s 2>/dev/null || echo 0)
+  docker run -d --rm --name "$name" --label adlc.ci=runner \
+    -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" \
+    "$IMAGE" ./run.sh --jitconfig "$jit" >/dev/null \
+    && log "runner $name waiting for a job (labels: $LABELS)"
+}
+
+while :; do
+  if [ -z "$(secret ci_admin_pat)" ]; then
+    log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue
+  fi
+  if ! runner_running; then
+    reset_engine
+    ensure_image
+    start_runner || sleep 60
+  fi
+  sleep "$INTERVAL"
+done

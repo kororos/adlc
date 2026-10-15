@@ -1,0 +1,5 @@
+# Same as compose.registry-ca.yml, for the CI Docker engine.
+services:
+  ci-docker:
+    volumes:
+      - ${ADLC_REGISTRY_CA}:/etc/docker/certs.d/${ADLC_REGISTRY_HOST}/ca.crt:ro
