@@ -23,8 +23,8 @@ Arguments: $ARGUMENTS
    - Insert or replace the generated block in `CLAUDE.md` (create the file if missing; never touch content outside the markers).
    - Copy `.claude/settings.json` from the ADLC template if missing.
    - Write `.adlc/provision.sh` (idempotent; see the skill), `chmod +x` it.
-5. **Repository bootstrap:** if the repo doesn't exist yet, `provision.sh` creates it and pushes this initial commit. If it exists, commit on branch `adlc/setup` and open a PR. Setup PRs are never auto-merged.
-6. **Hand-off:** show the open items (`tbd`) with when each is needed. Ask the user to review and run `.adlc/provision.sh` with their admin GitHub credentials (suggest `! bash .adlc/provision.sh`). Then the next step is `/adlc-core:discover`.
+5. **Repository bootstrap:** if the repo doesn't exist yet, `provision.sh` creates it and pushes this initial commit. If it exists, `git fetch`, create branch `adlc/setup` from `origin/<default>` (switching branches inside this session's worktree is fine), commit, push and open a PR. Setup PRs are never auto-merged.
+6. **Hand-off:** show the open items (`tbd`) with when each is needed. Ask the user to review the PR, then run `.adlc/provision.sh` **on the dev-server host** with their own admin `gh` login (`cd $(pwd) && bash .adlc/provision.sh`: same path on the host), then merge the PR. Then the next step is `/adlc-core:discover` (on a fresh branch from the default branch).
 
 ## Rules
 - Never ask for, display or write secret values. Only names and locations.

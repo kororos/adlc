@@ -75,11 +75,11 @@ Every environment gets a **profile**. Ask about `dev` and `prod` (and `staging` 
 | enabled | Use this environment? | yes | yes (staging: no, add later) |
 | runtime | docker-compose / docker-swarm / kubernetes / managed (Fly, Render, ECS…) | **docker-compose** | **docker-swarm** |
 | hosts | Machines. For swarm: managers/workers | `dev-server` | managers `tbd` (recommend 1 manager + 2 workers to start, 3 managers for HA) |
-| url / domains | Public or internal URLs | `*.dev-server.lan` (internal DNS) | `tbd` |
+| url / domains | Public or internal URLs | **ADLC Traefik** (no new infrastructure): `http://app.<slug>.$ADLC_BASE_DOMAIN[:$ADLC_EDGE_PORT]` and `http://api.<slug>.…` (read both env vars in the runner; omit the port when 80). Internal only. Optional HTTPS aliases through the user's own reverse proxy (needed for real phones: iOS/Android block plain HTTP) are an open item | `tbd` |
 | deploy.trigger | When it deploys | on merge to main | on release tag |
 | deploy.approval | Human approval required | no | **yes** (GitHub Environment `prod`, required reviewer = owner) |
 | deploy.mechanism | How the deployment reaches the target | **pull-deployer**: the ADLC runner pulls new images and runs `docker compose up -d` (no inbound access to dev-server needed) | **GitHub Actions** job in the `prod` Environment on a **self-hosted runner on a swarm manager** (restricted to this repo and the deploy workflow) running `docker stack deploy --with-registry-auth` |
-| ingress | Reverse proxy and TLS | Traefik, internal TLS | Traefik, Let's Encrypt |
+| ingress | Reverse proxy and TLS | ADLC Traefik (edge + inner): web-facing services join `adlc-web` with Traefik labels; no TLS | Traefik, Let's Encrypt |
 | replicas | Per service | 1 each | api 2, web 2 |
 | update | Rollout policy | recreate | rolling `start-first`, parallelism 1, healthcheck-gated, `failure_action: rollback` |
 | config & secrets | Delivery of config/secrets | env file + Docker secrets | **Swarm secrets/configs** with versioned names (`api_db_password_v3`) |
@@ -102,7 +102,7 @@ Consequences that init records for the architect (in setup.md, "Constraints for 
 | key | question | default |
 |---|---|---|
 | mobile.ids | iOS bundle id / Android package | `com.<owner>.<slug>` |
-| mobile.build | Build service | Expo EAS Build |
+| mobile.build | Build service | EAS Build **cloud** (no Mac needed for iOS). Alternatives: `eas build --local` on own runners (Android: ADLC CI runner; iOS: GitHub macOS), or no EAS (prebuild + Gradle/Xcode/fastlane). Build credentials (`EXPO_TOKEN`, keystores) only in a GitHub `release` environment with required reviewer |
 | mobile.accounts | Apple Developer team, Google Play account | `tbd` (needed before the first store build) |
 | mobile.signing | Credential management | EAS-managed credentials |
 | mobile.ota | Over-the-air updates | EAS Update, one channel per environment, prod requires approval |
@@ -115,7 +115,8 @@ Consequences that init records for the architect (in setup.md, "Constraints for 
 | secrets.ci | CI secrets | GitHub Environments secrets (per env) |
 | secrets.runtime | Runtime secrets per env | dev: Docker secrets on dev-server; others `tbd` |
 | secrets.local | Local development | `.env.example` committed; real `.env` never committed |
-| secrets.runner | ADLC runner credentials | Docker secrets: `claude_oauth_token`, `gh_pat` (fine-grained, this repo only, no admin) |
+| secrets.runner | ADLC runner credentials | Docker secrets: `claude_oauth_token`, `gh_pat` (fine-grained, this repo only, no admin), optional `ci_admin_pat` (Administration only, CI registrar) |
+| identity.agents | Who agents act as on GitHub | the owner's account via `gh_pat` (agent PRs are authored by the owner, who then can't approve them; high-risk merges use the admin override). Record an open item for a dedicated bot identity (GitHub App) |
 
 ### V — Versioning, release & dependencies
 | key | question | default |
@@ -176,7 +177,7 @@ Why: one line
 ```
 
 ## Provisioning rules
-- Init never runs privileged actions with the runner's credentials. The runner's PAT intentionally has no admin rights. Init writes `.adlc/provision.sh`, the user reviews it and runs it with their own admin `gh` auth (`! bash .adlc/provision.sh` in a local Claude Code session, or in any terminal).
+- Init never runs privileged actions with the runner's credentials. The runner's PAT intentionally has no admin rights. Init writes `.adlc/provision.sh`, the user reviews it and runs it **on the dev-server host (or their own machine), not inside the runner**, with their own admin `gh` login: `cd <this worktree's host path> && bash .adlc/provision.sh`. Never suggest `! bash …` in a runner or Remote Control session: that runs inside the runner with the agents' token. The host path of the current worktree is the same as `pwd` (the workspace is bind-mounted at an identical path).
 - **CI hardening (always):** `CODEOWNERS` with `/.github/ @<owner>` plus branch protection "Require review from Code Owners", so GitHub itself makes workflow changes wait for a human, even with auto-merge. A GitHub Environment **`publish`** with deployment branches limited to the default branch, holding the registry push credentials, so workflows on PR branches can't read them. The Environment **`prod`** has required reviewers.
 - **ADLC CI runner:** print how to create `ci_admin_pat` (fine-grained, this repo only, **Administration: read and write**, nothing else), then `adlc secrets <slug>` + `adlc up <slug>` on the dev server. It is held only by the CI registrar container. Agents and jobs never see it.
 - The script is idempotent (check, then create) and prints each action. It covers: repo create/settings, branch protection + required checks, merge settings, labels, milestones, Project board, CODEOWNERS, GHCR package visibility/retention notes, GitHub Environments (+ required reviewers for prod), self-hosted deploy-runner registration instructions for the prod swarm manager (restricted runner group), a checklist of swarm secret names to create on the manager, placeholder secrets (names only, values entered by the user via `gh secret set` prompts), Renovate/Dependabot config, and registration of the project on the dev-server runner (`adlc up <slug>`).

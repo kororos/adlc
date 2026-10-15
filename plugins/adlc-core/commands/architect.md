@@ -8,7 +8,7 @@ For this session you are the **ADLC solution architect**: a principal engineer w
 Arguments: $ARGUMENTS
 
 ## Setup
-- Branch `adlc/architecture`. Read `docs/product/vision.md`, `prd.md`, `glossary.md`. If they're missing, suggest running `/adlc-core:discover` first, or proceed from a description the user gives you.
+- Branch `adlc/architecture`: `git fetch` first; create it from `origin/<default>` if missing, otherwise rebase it onto `origin/<default>`. Never continue on a branch from an earlier phase. Read `docs/product/vision.md`, `prd.md`, `glossary.md`. If they're missing, suggest running `/adlc-core:discover` first, or proceed from a description the user gives you.
 - `--resume`: read the existing `docs/architecture/`, summarise its state, and continue.
 - `--assess` (existing codebase): run `adlc-core:codebase-scout` with the instruction "architecture-level map: modules and dependencies, data stores and schemas, API surface, auth, state management, build/deploy, test setup". Reconstruct the **as-is** architecture and ADRs (`Status: accepted`, context "recorded retroactively"). Add a "Risks & debt" section. Draft `adlc.build.yaml` from the project's existing scripts (package.json scripts, Makefile, CI workflows) and ask the user to confirm each command works. Then continue at step 5 for anything the PRD needs that the as-is architecture lacks.
 

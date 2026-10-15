@@ -207,6 +207,7 @@ cmd_up() {
   # Edge proxy (shared) and this project's route. A busy port must not block the project itself.
   [ -n "$edge_port" ] && set_cfg "$(edge_cfg)" ADLC_EDGE_PORT "$edge_port"
   local eport; eport=$(edge_port)
+  set_cfg "$f" ADLC_EDGE_PORT "$eport"
   if ! ADLC_ROOT=$ADLC_ROOT ADLC_EDGE_PORT=$eport docker compose -f "$SANDBOX/edge/compose.yml" up -d --quiet-pull >/dev/null 2>"$ADLC_ROOT/edge/up.err"; then
     warn "edge proxy could not start on port $eport ($(grep -oE 'address already in use|port is already allocated' "$ADLC_ROOT/edge/up.err" | head -1 || echo "see $ADLC_ROOT/edge/up.err")). Preview URLs are unavailable."
     warn "fix: adlc up $slug --edge-port 8088   (or free port $eport)"

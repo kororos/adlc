@@ -34,8 +34,9 @@ prepare_rc_worktree() {
     fi
     log "created worktree $RC_DIR ($RC_BRANCH)"
   elif [ -z "$(git -C "$RC_DIR" status --porcelain)" ] \
-       && [ -z "$(git -C "$RC_DIR" rev-list "origin/$b..HEAD" 2>/dev/null)" ]; then
-    git -C "$RC_DIR" reset --quiet --hard "origin/$b"
+       && [ -z "$(git -C "$RC_DIR" rev-list HEAD --not --remotes 2>/dev/null)" ]; then
+    # Clean and everything pushed (possibly already squash-merged): start from the latest default branch.
+    git -C "$RC_DIR" checkout --quiet -B "$RC_BRANCH" "origin/$b"
   else
     log "worktree $RC_DIR has uncommitted or unpushed work; leaving it as is"
   fi
