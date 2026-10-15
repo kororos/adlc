@@ -1,0 +1,16 @@
+# deploy/compose.yml: base shared by test, dev and prod (prod adds stack.prod.yml).
+services:
+  api:
+    image: ${REGISTRY_NS}/api:${IMAGE_TAG}
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      REDIS_URL: redis://redis:6379/0
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 10s, retries: 3 }
+  web:
+    image: ${REGISTRY_NS}/web:${IMAGE_TAG}
+  postgres:
+    image: postgres:16-alpine
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U app"], interval: 5s, retries: 20 }
+  redis:
+    image: redis:7-alpine
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 20 }

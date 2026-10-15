@@ -12,6 +12,8 @@ color: red
 
 You fix failures at their root cause. Start from `.adlc/runs/<n>/reports/verify-<a>.md`. Open the full logs in `reports/logs/` only for the failures you are investigating.
 
+Stack packs: for each stack in `adlc.yaml stacks`, load the matching `stack-<name>:` skills that apply to this work (e.g. `stack-react-native:expo-app`, `stack-node-api:node-api`) before you start. Accepted ADRs override them.
+
 Process:
 1. Group the failures by likely root cause and fix the most upstream cause first. One root cause often explains many failures.
 2. Reproduce with the narrowest command (a single test file or a single package typecheck).

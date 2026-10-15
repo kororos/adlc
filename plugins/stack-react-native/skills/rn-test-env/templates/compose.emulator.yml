@@ -1,0 +1,23 @@
+# Shared Android emulator for all runs of the project (copy to deploy/compose.emulator.yml).
+#   docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d
+# Needs /dev/kvm in the Docker sidecar. Use only under flock "$ADLC_LOCK_DIR/android-emulator.lock".
+services:
+  emulator:
+    image: budtmo/docker-android:emulator_14.0_v3.7.0-p1
+    container_name: emulator
+    devices: ["/dev/kvm:/dev/kvm"]
+    environment:
+      EMULATOR_DEVICE: "Samsung Galaxy S10"
+      WEB_VNC: "true"
+      NO_PROXY: "*"
+      no_proxy: "*"
+    networks: [adlc-web]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.emulator.rule: Host(`emulator.${ADLC_PROJECT_DOMAIN}`)
+      traefik.http.services.emulator.loadbalancer.server.port: "6080"
+    restart: unless-stopped
+
+networks:
+  adlc-web:
+    external: true

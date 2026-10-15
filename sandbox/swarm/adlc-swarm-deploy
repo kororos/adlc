@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# adlc-swarm-deploy: human-run production deploy on a Docker Swarm manager.
+#
+# Replaces a self-hosted CI runner on the manager: nothing on the manager executes workflow
+# code, and agents can't trigger a deploy. It deploys ONLY commits that are on the repo's
+# default branch, i.e. code that went through branch protection, CI and (for /deploy/ and
+# /.github/) CODEOWNERS review.
+#
+#   adlc-swarm-deploy <owner/repo> <ref> [--stack <name>] [--dry-run]
+#   adlc-swarm-deploy <owner/repo> --history
+#
+#   <ref>  a release tag (v1.4.0), a commit sha, or the default branch name (main)
+#
+# Uses from the repo at that commit:
+#   deploy/stack.prod.yml   swarm stack file; images reference ${IMAGE_TAG} (= sha-<7-char sha>)
+#   deploy/predeploy.sh     optional, executable; runs before the stack update (e.g. migrations)
+#
+# Needs on the manager: git, docker (manager node), `docker login <registry>` with a pull-only
+# robot, and read access to the repo (a read-only deploy key: ADLC_SWARM_GIT_URL=git@github.com:…).
+set -euo pipefail
+
+die() { printf 'adlc-swarm-deploy: %s\n' "$*" >&2; exit 1; }
+say() { printf '▶ %s\n' "$*"; }
+
+[ $# -ge 2 ] || { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+repo=$1; shift
+[[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "invalid repo '$repo' (owner/name)"
+state="${ADLC_SWARM_DIR:-/var/lib/adlc-swarm}/${repo//\//_}"
+mkdir -p "$state"
+
+if [ "$1" = --history ]; then
+  if [ -s "$state/deployments.log" ]; then
+    printf '%-21s %-12s %-8s %-12s %s\n' DATE REF COMMIT IMAGE_TAG BY
+    awk '{ printf "%-21s %-12s %-8s %-12s %s\n", $1, $2, $3, $4, $5 }' "$state/deployments.log"
+  else
+    echo "no deployments recorded"
+  fi
+  exit 0
+fi
+
+ref=$1; shift
+stack=${repo#*/} dry=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --stack) stack=$2; shift 2 ;;
+    --dry-run) dry=1; shift ;;
+    *) die "unknown option $1" ;;
+  esac
+done
+
+docker info --format '{{.Swarm.ControlAvailable}}' 2>/dev/null | grep -qx true || die "this node is not a swarm manager"
+
+src="$state/src"
+if [ ! -d "$src/.git" ]; then
+  git clone --quiet --no-checkout "${ADLC_SWARM_GIT_URL:-git@github.com:$repo.git}" "$src" || die "cannot clone $repo"
+fi
+git -C "$src" fetch --quiet --prune --tags --force origin || die "cannot fetch $repo"
+git -C "$src" remote set-head origin --auto >/dev/null 2>&1 || true
+default=$(git -C "$src" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+
+commit=$(git -C "$src" rev-parse --verify --quiet "$ref^{commit}" \
+         || git -C "$src" rev-parse --verify --quiet "origin/$ref^{commit}") || die "unknown ref '$ref'"
+git -C "$src" merge-base --is-ancestor "$commit" "$default" \
+  || die "refusing: $ref ($commit) is not on $default. Only reviewed code that reached $default is deployed"
+
+short=$(git -C "$src" rev-parse --short=7 "$commit")
+export IMAGE_TAG="sha-$short" ADLC_RELEASE="$ref" STACK="$stack"
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+git -C "$src" archive "$commit" deploy 2>/dev/null | tar -x -C "$work" || die "$ref has no deploy/ directory"
+stackfile="$work/deploy/stack.prod.yml"
+[ -f "$stackfile" ] || die "$ref has no deploy/stack.prod.yml"
+
+say "release $ref → commit $short (on $default), stack '$stack', images :$IMAGE_TAG"
+images=$(docker stack config -c "$stackfile" 2>/dev/null | awk '$1 == "image:" { print $2 }' | sort -u) \
+  || die "deploy/stack.prod.yml is invalid (docker stack config failed)"
+[ -n "$images" ] || die "no images found in deploy/stack.prod.yml"
+for img in $images; do
+  docker manifest inspect "$img" >/dev/null 2>&1 \
+    || die "image $img is not in the registry (did CI publish $IMAGE_TAG? is this node logged in?)"
+  printf '  ✔ %s\n' "$img"
+done
+
+if [ "$dry" = 1 ]; then say "dry run: nothing deployed"; exit 0; fi
+
+if [ -x "$work/deploy/predeploy.sh" ]; then
+  say "pre-deploy step (deploy/predeploy.sh)"
+  (cd "$work" && ./deploy/predeploy.sh) || die "pre-deploy step failed; the running stack was not changed"
+fi
+
+say "deploying"
+detach=(); docker stack deploy --help 2>/dev/null | grep -q -- '--detach' && detach=(--detach=false)
+docker stack deploy --with-registry-auth --prune "${detach[@]}" -c "$stackfile" "$stack"
+printf '%s %s %s %s %s\n' "$(date -u +%FT%TZ)" "$ref" "$short" "$IMAGE_TAG" "$(id -un)" >>"$state/deployments.log"
+say "done. Roll back with: adlc-swarm-deploy $repo <previous ref>   (history: --history)"

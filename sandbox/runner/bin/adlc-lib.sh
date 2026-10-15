@@ -58,5 +58,5 @@ sync_repo() {
 }
 
 ensure_dirs() {
-  mkdir -p "$RUNS_DIR" "$STATE_DIR/running" "$LOG_DIR/runs" "$ADLC_WS/sessions"
+  mkdir -p "$RUNS_DIR" "$STATE_DIR/running" "$LOG_DIR/runs" "$ADLC_WS/sessions" "$ADLC_WS/locks"
 }

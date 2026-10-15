@@ -1,0 +1,59 @@
+# .github/workflows/e2e.yml: required checks e2e-web, e2e-android; e2e-ios (macOS, not required by default).
+# STARTING POINT: the walking skeleton must prove each job end to end and adjust.
+name: e2e
+on:
+  pull_request:
+  push: { branches: [main] }
+permissions: { contents: read }
+concurrency: { group: "e2e-${{ github.ref }}", cancel-in-progress: true }
+env: { ADLC_RUN: "ci-${{ github.run_id }}" }
+
+jobs:
+  e2e-web:
+    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile && pnpm --filter app exec playwright install --with-deps chromium
+      - run: docker network create adlc-web || true
+      - run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)" && eval "$(yq '.env.start_build' adlc.build.yaml)"
+      # Reach the web service from the job: connect this container (self-hosted) or use published ports (hosted).
+      - run: docker network connect adlc-web "$(hostname)" 2>/dev/null || true
+      - run: E2E_BASE_URL=http://web pnpm --filter app exec playwright test --grep @smoke
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: playwright-report, path: apps/app/playwright-report, retention-days: 7 }
+      - if: always()
+        run: eval "$(yq '.env.down' adlc.build.yaml)"
+
+  e2e-android:
+    runs-on: ubuntu-latest           # hosted Linux runners have KVM; uses the community emulator action
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
+      - run: pnpm --filter app exec expo prebuild --platform android --no-install && (cd apps/app/android && ./gradlew assembleRelease)
+      - run: sudo udevadm control --reload-rules || true
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          script: adb install -r apps/app/android/app/build/outputs/apk/release/app-release.apk && $HOME/.maestro/bin/maestro test apps/app/e2e/flows --include-tags smoke
+
+  e2e-ios:
+    runs-on: macos-latest
+    if: github.event_name == 'push'   # macOS minutes are ~10× Linux: main only by default
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
+      - run: pnpm --filter app exec expo prebuild --platform ios && pnpm --filter app exec expo run:ios --configuration Release --no-install
+      - run: $HOME/.maestro/bin/maestro test apps/app/e2e/flows --include-tags smoke

@@ -1,0 +1,33 @@
+# deploy/compose.dev.yml: dev environment on the dev server (pull-deployer runs:
+#   IMAGE_TAG=sha-xxxxxxx docker compose -p <slug>-dev -f deploy/compose.yml -f deploy/compose.dev.yml up -d)
+x-runtime-env: &runtime-env { NO_PROXY: "*", no_proxy: "*" }
+services:
+  api:
+    environment:
+      <<: *runtime-env
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets: [database_url]
+    networks: [default, adlc-web]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dev-api.rule: Host(`api.${ADLC_PROJECT_DOMAIN}`)
+      traefik.http.services.dev-api.loadbalancer.server.port: "3000"
+  web:
+    environment: *runtime-env
+    networks: [default, adlc-web]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dev-app.rule: Host(`app.${ADLC_PROJECT_DOMAIN}`)
+      traefik.http.services.dev-app.loadbalancer.server.port: "80"
+  postgres:
+    environment: { <<: *runtime-env, POSTGRES_USER: app, POSTGRES_DB: app, POSTGRES_PASSWORD_FILE: /run/secrets/db_password }
+    secrets: [db_password]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  redis:
+    environment: *runtime-env
+    volumes: [redisdata:/data]
+secrets:
+  database_url: { file: ./secrets/dev/database_url }    # created on the dev server, never committed
+  db_password:  { file: ./secrets/dev/db_password }
+volumes: { pgdata: {}, redisdata: {} }
+networks: { adlc-web: { external: true } }

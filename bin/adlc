@@ -12,6 +12,8 @@
 #       --registry-user <user>       registry pull user (Harbor: robot$<project>+<name>)
 #       --registry-ca <file>         CA certificate for a registry with a private CA
 #       --edge-port <port>           host port for preview URLs (default 80; stored for all projects)
+#   adlc app <slug> --id <app-id> --key <private-key.pem>
+#                                    agents act as the ADLC GitHub App (recommended over gh_pat)
 #   adlc login <slug>                one-time Claude login inside the runner
 #   adlc session <slug> [name]       interactive Claude session in its own worktree (also reachable
 #                                    from claude.ai/app); re-running re-attaches
@@ -107,9 +109,10 @@ cmd_doctor() {
   for f in "$ADLC_ROOT"/config/*.env; do
     [ -e "$f" ] || continue
     slug=$(basename "$f" .env)
-    for s in gh_pat claude_oauth_token; do
-      [ -s "$ADLC_ROOT/secrets/$slug/$s" ] && ok "$slug: secret $s" || bad "$slug: secret $s missing (adlc secrets $slug)"
-    done
+    if [ -s "$ADLC_ROOT/secrets/$slug/gh_app_key" ]; then ok "$slug: agents act as the ADLC GitHub App"
+    elif [ -s "$ADLC_ROOT/secrets/$slug/gh_pat" ]; then warn "$slug: agents act as your account via gh_pat (prefer: adlc app $slug …)"
+    else bad "$slug: no GitHub credentials for agents (adlc app $slug … or adlc secrets $slug)"; fi
+    [ -s "$ADLC_ROOT/secrets/$slug/claude_oauth_token" ] && ok "$slug: secret claude_oauth_token" || bad "$slug: secret claude_oauth_token missing (adlc secrets $slug)"
     ci_enabled "$slug" && ok "$slug: CI runner enabled" || warn "$slug: CI runner disabled (no ci_admin_pat)"
   done
 }
@@ -118,7 +121,7 @@ cmd_secrets() {
   local slug=$1 dir="$ADLC_ROOT/secrets/$1" v
   need_slug "$slug"; mkdir -p "$dir"; chmod 700 "$dir"
   say "Secrets for '$slug' are stored in $dir (mode 600). Press Enter to keep an existing value."
-  say "  gh_pat:             FINE-GRAINED token, only this repo. Read/write: Contents, Issues, Pull requests, Workflows."
+  say "  gh_pat:             (only without the ADLC GitHub App; see 'adlc app') FINE-GRAINED token, only this repo. Read/write: Contents, Issues, Pull requests, Workflows."
   say "                      Read: Actions, Commit statuses, Metadata. Nothing else (no Administration/Secrets)."
   say "  claude_oauth_token: output of 'claude setup-token' (unattended runs). One string starting with sk-ant-oat"
   say "  ci_admin_pat:       FINE-GRAINED token, only this repo, Administration: read/write (registers ephemeral CI"
@@ -185,6 +188,10 @@ cmd_up() {
   for s in gh_pat claude_oauth_token ci_admin_pat registry_token; do
     [ -e "$ADLC_ROOT/secrets/$slug/$s" ] || die "secret $s missing: run 'adlc secrets $slug' first"
   done
+  [ -e "$ADLC_ROOT/secrets/$slug/gh_app_key" ] || (umask 077; : >"$ADLC_ROOT/secrets/$slug/gh_app_key")
+  if [ ! -s "$ADLC_ROOT/secrets/$slug/gh_app_key" ] && [ ! -s "$ADLC_ROOT/secrets/$slug/gh_pat" ]; then
+    die "no GitHub credentials for agents: run 'adlc app $slug --id <app-id> --key <file.pem>' (recommended) or set gh_pat with 'adlc secrets $slug'"
+  fi
 
   # Runner image: base + stack layers.
   say "Building runner image…"
@@ -234,6 +241,21 @@ EOF
     || say "  adlc login $slug        (one-time Claude login for Remote Control)"
   local suffix=""; [ "$eport" = 80 ] || suffix=":$eport"
   say "  adlc status $slug       ·  previews: http://<run>.app.$slug.$ADLC_BASE_DOMAIN$suffix"
+}
+
+cmd_app() {
+  local slug=${1:-}; need_slug "$slug"; shift
+  local id="" key=""
+  while [ $# -gt 0 ]; do
+    case $1 in --id) id=$2; shift 2 ;; --key) key=$2; shift 2 ;; *) die "unknown option $1" ;; esac
+  done
+  [[ "$id" =~ ^[0-9]+$ ]] || die "--id <numeric App ID> is required (GitHub → Settings → Developer settings → GitHub Apps → your app)"
+  [ -f "$key" ] && grep -q 'PRIVATE KEY' "$key" || die "--key must be the app's .pem private key file"
+  local dir="$ADLC_ROOT/secrets/$slug"; mkdir -p "$dir"; chmod 700 "$dir"
+  (umask 077; cp "$key" "$dir/gh_app_key")
+  set_cfg "$(cfg_file "$slug")" ADLC_GH_APP_ID "$id"
+  ok "GitHub App $id configured for $slug (key stored in $dir/gh_app_key)"
+  say "Delete the downloaded .pem from other places once it's stored here. Then: adlc up $slug"
 }
 
 cmd_down()   { need_slug "$1"; load_cfg "$1"; compose "$1" down; }
@@ -312,6 +334,7 @@ main() {
     up) cmd_up "$@" ;;
     down) cmd_down "${1:-}" ;;
     login) cmd_login "${1:-}" ;;
+    app) cmd_app "$@" ;;
     attach) cmd_attach "${1:-}" ;;
     session) cmd_session "$@" ;;
     shell) cmd_shell "${1:-}" ;;

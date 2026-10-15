@@ -1,0 +1,61 @@
+# Per-run test environment (copy to deploy/compose.test.yml). Used with deploy/compose.yml:
+#   docker compose -p adlc-${ADLC_RUN} -f deploy/compose.yml -f deploy/compose.test.yml up -d --wait
+# Rules: runtime NO_PROXY="*", no host ports, web-facing services on adlc-web with Traefik labels.
+x-runtime-env: &runtime-env
+  NO_PROXY: "*"
+  no_proxy: "*"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      <<: *runtime-env
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app_test
+    tmpfs: [/var/lib/postgresql/data]          # fresh and fast per run
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U app"], interval: 2s, retries: 30 }
+
+  redis:
+    image: redis:7-alpine
+    environment: *runtime-env
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 2s, retries: 30 }
+
+  mocks:                                       # third-party APIs (WireMock); mappings in e2e/mocks/
+    image: wiremock/wiremock:3.9.1
+    environment: *runtime-env
+    volumes: ["${ADLC_WORKTREE}/e2e/mocks:/home/wiremock:ro"]
+
+  api:
+    # ADLC_MODE_TARGET=dev (watch: source mounted, tsx watch) or prod (compiled); see adlc.build.yaml
+    build: { context: "${ADLC_WORKTREE}", dockerfile: apps/api/Dockerfile, target: "${ADLC_MODE_TARGET:-prod}" }
+    environment:
+      <<: *runtime-env
+      DATABASE_URL: postgres://app:app@postgres:5432/app_test
+      REDIS_URL: redis://redis:6379/0
+      THIRD_PARTY_BASE_URL: http://mocks:8080
+      NODE_ENV: test
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [default, adlc-web]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.r${ADLC_RUN}-api.rule: Host(`${ADLC_RUN}.api.${ADLC_PROJECT_DOMAIN}`)
+      traefik.http.services.r${ADLC_RUN}-api.loadbalancer.server.port: "3000"
+    healthcheck: { test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"], interval: 3s, retries: 40 }
+
+  web:
+    # prod-like: static export served by nginx (start_build); watch mode runs `expo start --web` instead
+    image: nginx:1.27-alpine
+    environment: *runtime-env
+    volumes: ["${ADLC_WORKTREE}/apps/app/dist:/usr/share/nginx/html:ro"]
+    networks: [default, adlc-web]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.r${ADLC_RUN}-app.rule: Host(`${ADLC_RUN}.app.${ADLC_PROJECT_DOMAIN}`)
+      traefik.http.services.r${ADLC_RUN}-app.loadbalancer.server.port: "80"
+
+networks:
+  adlc-web:
+    external: true

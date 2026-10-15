@@ -1,0 +1,51 @@
+name: ci
+on:
+  pull_request:
+  push: { branches: [main] }
+permissions: { contents: read }
+concurrency: { group: "ci-${{ github.ref }}", cancel-in-progress: true }
+
+env:
+  ADLC_RUN: ci-${{ github.run_id }}
+
+jobs:
+  lint:
+    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - run: eval "$(yq '.commands.lint' adlc.build.yaml)"
+  typecheck:
+    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - run: eval "$(yq '.commands.typecheck' adlc.build.yaml)"
+  arch-check:
+    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - run: eval "$(yq '.commands.arch_check' adlc.build.yaml)"
+  test:
+    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - run: docker network create adlc-web || true
+      - run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)"
+      - run: eval "$(yq '.commands.test' adlc.build.yaml)"
+      - if: always()
+        run: eval "$(yq '.env.down' adlc.build.yaml)"

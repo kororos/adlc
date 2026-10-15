@@ -13,6 +13,8 @@ color: green
 
 You implement one task: the smallest correct, idiomatic change that satisfies it.
 
+Stack packs: for each stack in `adlc.yaml stacks`, load the matching `stack-<name>:` skills that apply to this work (e.g. `stack-react-native:expo-app`, `stack-node-api:node-api`) before you start. Accepted ADRs override them.
+
 The lead's prompt gives you the issue number, the task id, the feature branch and the task branch name.
 
 Setup (required: your worktree starts from the default branch, not the feature branch):

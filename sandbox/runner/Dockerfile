@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl git gnupg jq tmux less procps openssh-client unzip xz-utils python3 make g++ \
+      ca-certificates curl git gnupg jq tmux less procps openssh-client openssl unzip xz-utils python3 make g++ \
  && install -m 0755 -d /etc/apt/keyrings \
  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
@@ -44,7 +44,7 @@ RUN (userdel -r node 2>/dev/null || true) && (groupdel node 2>/dev/null || true)
  && useradd -m -o -u "${ADLC_UID}" -g "${ADLC_GID}" -s /bin/bash adlc
 
 COPY bin/ /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/adlc-*
+RUN chmod 0755 /usr/local/bin/adlc-* /usr/local/bin/gh
 
 # Login shells (bash -l, tmux shells, agents' shells) reset PATH from /etc/profile;
 # re-add what the image puts on PATH via ENV.

@@ -1,0 +1,30 @@
+name: nightly
+on:
+  schedule: [{ cron: "0 2 * * *" }]
+  workflow_dispatch:
+permissions: { contents: read, issues: write }
+
+jobs:
+  full-suite:
+    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    env: { ADLC_RUN: "nightly-${{ github.run_id }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - run: docker network create adlc-web || true
+      - run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)"
+      - run: eval "$(yq '.commands.test' adlc.build.yaml)"
+      # full e2e: add the stack pack's e2e steps here (selection: full)
+      - if: always()
+        run: eval "$(yq '.env.down' adlc.build.yaml)"
+      - if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          title="Nightly regression on main ($(date -u +%F))"
+          body="Nightly suite failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          existing=$(gh issue list --label adlc:regression --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then gh issue comment "$existing" --body "$body"
+          else gh issue create --title "$title" --body "$body" --label adlc:regression --label adlc:ready; fi

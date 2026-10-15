@@ -1,0 +1,55 @@
+# deploy/stack.prod.yml: Swarm production (with deploy/compose.yml semantics, self-contained for `docker stack deploy`).
+# Deployed by the owner on the manager: adlc-swarm-deploy <owner/repo> <ref>  (sets IMAGE_TAG=sha-<7>)
+services:
+  api:
+    image: ${REGISTRY_NS:-harbor.example.com/project/app}/api:${IMAGE_TAG}
+    environment: { DATABASE_URL_FILE: /run/secrets/app_database_url_v1, REDIS_URL: "redis://redis:6379/0" }
+    secrets: [app_database_url_v1]
+    networks: [internal, traefik-public]
+    deploy:
+      replicas: 2
+      update_config: { order: start-first, parallelism: 1, failure_action: rollback, monitor: 30s }
+      rollback_config: { order: start-first, parallelism: 1 }
+      restart_policy: { condition: on-failure, max_attempts: 5 }
+      resources: { limits: { cpus: "1.0", memory: 512M }, reservations: { memory: 256M } }
+      labels:
+        traefik.enable: "true"
+        traefik.http.routers.api.rule: Host(`api.example.com`)
+        traefik.http.routers.api.tls.certresolver: le
+        traefik.http.services.api.loadbalancer.server.port: "3000"
+  web:
+    image: ${REGISTRY_NS:-harbor.example.com/project/app}/web:${IMAGE_TAG}
+    networks: [traefik-public]
+    deploy:
+      replicas: 2
+      update_config: { order: start-first, parallelism: 1, failure_action: rollback }
+      labels:
+        traefik.enable: "true"
+        traefik.http.routers.web.rule: Host(`app.example.com`)
+        traefik.http.routers.web.tls.certresolver: le
+        traefik.http.services.web.loadbalancer.server.port: "80"
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: app, POSTGRES_DB: app, POSTGRES_PASSWORD_FILE: /run/secrets/app_db_password_v1 }
+    secrets: [app_db_password_v1]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [internal]
+    deploy:
+      replicas: 1
+      placement: { constraints: ["node.labels.app.postgres == true"] }
+      update_config: { order: stop-first }
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    networks: [internal]
+    deploy:
+      replicas: 1
+      placement: { constraints: ["node.labels.app.postgres == true"] }
+secrets:
+  app_database_url_v1: { external: true }
+  app_db_password_v1:  { external: true }
+volumes: { pgdata: {}, redisdata: {} }
+networks:
+  internal: { driver: overlay }
+  traefik-public: { external: true }

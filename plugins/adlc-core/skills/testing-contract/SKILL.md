@@ -54,7 +54,7 @@ Third-party HTTP APIs are mocked in test environments (stack-pack mechanism, e.g
 ## Target scheduling
 Each `testing.e2e.targets.<name>` has `runner`, `cmd` and optionally:
 - `parallel: true`: may run concurrently with other runs.
-- `exclusive: true` + `requires: [<resource>]`: shared resource (e.g. one Android emulator). Hold the lock: `flock /locks/<resource>.lock <cmd>` (the runner image provides `/locks`).
+- `exclusive: true` + `requires: [<resource>]`: shared resource (e.g. one Android emulator). Hold the lock: `flock "$ADLC_LOCK_DIR/<resource>.lock" <cmd>` (the runner exports `ADLC_LOCK_DIR`, shared by all runs of the project).
 - `where: ci` (+ `workflow:`): not runnable in the runner (e.g. iOS). Covered by the PR's required checks only.
 
 ## Flaky policy

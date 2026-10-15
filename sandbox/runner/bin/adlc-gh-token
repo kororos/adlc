@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Prints a GitHub token for the agents.
+#   App mode (ADLC_GH_APP_ID + secret gh_app_key): a 1-hour installation token for $ADLC_REPO,
+#     minted from the app's private key and cached until 10 minutes before it expires.
+#   PAT mode (fallback): the gh_pat secret.
+#   --identity: prints "name<TAB>email" for git commits (the app's bot user in app mode).
+set -euo pipefail
+ADLC_COMPONENT=gh-token
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/adlc"
+CACHE="$CACHE_DIR/gh-token-${ADLC_SLUG}"
+API=https://api.github.com
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+app_mode() { [ -n "${ADLC_GH_APP_ID:-}" ] && [ -s "$SECRETS_DIR/gh_app_key" ]; }
+
+jwt() {
+  local now header payload unsigned sig
+  now=$(date +%s)
+  header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+  payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now - 60)) $((now + 540)) "$ADLC_GH_APP_ID" | b64url)
+  unsigned="$header.$payload"
+  sig=$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$SECRETS_DIR/gh_app_key" | b64url)
+  printf '%s.%s' "$unsigned" "$sig"
+}
+
+api() { # api <METHOD> <path> <bearer> [json-body]
+  curl -fsS -X "$1" "$API$2" -H "Authorization: Bearer $3" \
+    -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" ${4:+-d "$4"}
+}
+
+mint() {
+  local j inst repo_name resp
+  j=$(jwt)
+  inst=$(api GET "/repos/$ADLC_REPO/installation" "$j" | jq -r .id) \
+    || die "the GitHub App (id $ADLC_GH_APP_ID) is not installed on $ADLC_REPO, or the key/app id is wrong"
+  repo_name=${ADLC_REPO#*/}
+  resp=$(api POST "/app/installations/$inst/access_tokens" "$j" "{\"repositories\":[\"$repo_name\"]}") \
+    || die "could not create an installation token for $ADLC_REPO"
+  mkdir -p "$CACHE_DIR"; chmod 700 "$CACHE_DIR"
+  (umask 077; jq -c '{token, expires_at}' <<<"$resp" >"$CACHE.tmp" && mv "$CACHE.tmp" "$CACHE")
+}
+
+token() {
+  if ! app_mode; then secret gh_pat; return; fi
+  local exp
+  if [ -s "$CACHE" ]; then
+    exp=$(jq -r .expires_at "$CACHE" | xargs -I{} date -d {} +%s 2>/dev/null || echo 0)
+    if [ "$(( exp - $(date +%s) ))" -gt 600 ]; then jq -r .token "$CACHE"; return; fi
+  fi
+  mkdir -p "$CACHE_DIR"; chmod 700 "$CACHE_DIR"
+  ( flock 9; mint ) 9>"$CACHE.lock"
+  jq -r .token "$CACHE"
+}
+
+identity() {
+  if ! app_mode; then
+    printf '%s\t%s\n' "${ADLC_GIT_NAME:-ADLC Bot}" "${ADLC_GIT_EMAIL:-adlc-bot@users.noreply.github.com}"; return
+  fi
+  local slug id
+  slug=$(api GET /app "$(jwt)" | jq -r .slug) || die "cannot read the GitHub App (id $ADLC_GH_APP_ID)"
+  id=$(curl -fsS "$API/users/${slug}%5Bbot%5D" | jq -r .id) || die "cannot look up ${slug}[bot]"
+  printf '%s\t%s\n' "${slug}[bot]" "${id}+${slug}[bot]@users.noreply.github.com"
+}
+
+case "${1:-}" in
+  --identity) identity ;;
+  --mode) app_mode && echo app || echo pat ;;
+  *) token ;;
+esac

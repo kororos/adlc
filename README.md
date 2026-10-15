@@ -112,6 +112,28 @@ adlc session <slug>                                       # → /adlc-core:init
 cd /srv/adlc/projects/<slug>/sessions/main && bash .adlc/provision.sh   # on the host, with YOUR gh login (admin)
 ```
 
+### Agent identity: the ADLC GitHub App (recommended)
+With `gh_pat`, agents act as **your** account: you can't approve their PRs, and anything your admin role allows (pushing to `main`, creating release tags) is technically open to them. A GitHub App gives them their own identity, `<app>[bot]`, with short-lived (1 h) tokens minted on demand.
+
+**Create it once per GitHub account** (reuse it for every project): github.com → Settings → Developer settings → **GitHub Apps → New GitHub App**
+| Field | Value |
+|---|---|
+| Name | e.g. `adlc-kororos` (globally unique) · Homepage URL: `https://github.com/kororos/adlc` |
+| Webhook | **uncheck "Active"** |
+| Repository permissions | **Contents, Issues, Pull requests, Workflows: Read and write** · **Actions, Commit statuses: Read** · Metadata: Read (automatic) · everything else: No access |
+| Account permissions | none |
+| Where can it be installed | **Only on this account** |
+
+Then **Create** → note the **App ID** → **Generate a private key** (a `.pem` downloads) → **Install App** → *Only select repositories* → `kororos/<slug>` (add more projects to the same installation later).
+
+On the dev server:
+```bash
+scp ~/Downloads/adlc-kororos.*.private-key.pem dev-server:/tmp/app.pem     # from your Mac
+adlc app <slug> --id <APP_ID> --key /tmp/app.pem && shred -u /tmp/app.pem
+adlc up <slug>                     # runner log: "GitHub identity: adlc-kororos[bot] (app mode)"
+```
+Then empty `gh_pat` (`: > /srv/adlc/secrets/<slug>/gh_pat`) and revoke that token on GitHub. Result: the bot can't push to `main` (not an admin), its PRs auto-merge only through branch protection, and `/.github/` or `/deploy/` PRs wait for **your** approval. Limitation: GitHub Apps can't edit Project boards owned by a personal account.
+
 ### CI runner (self-hosted, sandboxed)
 Tests run on GitHub-hosted runners. Jobs that need your network, such as **publishing images to an internal registry**, run on the **ADLC CI runner**: `runs-on: [self-hosted, adlc-publish]`. It's enabled per project by setting `ci_admin_pat`:
 - A **registrar** container holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time**. It never runs workflow code.
@@ -128,6 +150,21 @@ adlc up <slug> --registry harbor.example.com \
 adlc secrets <slug>                                              # registry_token = the pull robot's secret
 ```
 In Harbor, create two robot accounts on the project: **pull-only** (for the dev server, as above) and **push** (stored as secrets in the GitHub `publish` environment, used by the publish job). In `/adlc-core:init` choose registry `harbor`, set the namespace `<host>/<project>/<slug>`, and add the Harbor host to `network.extra_domains`. Publishing runs on the ADLC CI runner, since GitHub-hosted runners can't reach an internal Harbor.
+
+### Production deploys (Docker Swarm)
+Prod is deployed **by you**, on the Swarm manager, with `adlc-swarm-deploy`. There's no CI runner on the manager: any workflow on any branch could target its label, so it would let agent-written code run on prod. Agents never deploy prod.
+```bash
+# once, on the manager
+sudo install -m 0755 ~/adlc/sandbox/swarm/adlc-swarm-deploy /usr/local/bin/   # or copy the file over
+docker login harbor.kororos.eu                         # prod pull-only robot
+# add a read-only deploy key for kororos/<slug> (repo → Settings → Deploy keys) and use it for git@github.com
+
+# each release
+adlc-swarm-deploy kororos/<slug> v1.4.0 --dry-run      # check: commit on main, all images exist
+adlc-swarm-deploy kororos/<slug> v1.4.0                # predeploy (migrations), then rolling update
+adlc-swarm-deploy kororos/<slug> --history             # what ran when; roll back = deploy the previous ref
+```
+It refuses any ref that isn't on `main`, so only code that passed branch protection, CI and (for `/deploy/`) your review can reach prod.
 
 ### Hardening with Sysbox (recommended)
 Without [Sysbox](https://github.com/nestybox/sysbox), the per-project Docker engines run as **privileged** containers. That isolates test environments from the host's Docker, but it isn't a strong security boundary. To harden:
@@ -535,9 +572,15 @@ The orchestrating sessions never read code or logs. They receive at most 15-line
 
 ## 15. Extending ADLC with stack packs
 
-The core is technology-agnostic. Technology know-how lives in **stack packs**: plugins that add skills, specialised agents, sidecars, setup questions, e2e tooling and network domains. A project enables them in `adlc.yaml → stacks`.
+The core is technology-agnostic. Technology know-how lives in **stack packs**: plugins with skills (conventions, templates), runner image layers, egress domain lists and, later, setup questions and specialised agents. A project enables them in `adlc.yaml → stacks`. The runner installs the matching `stack-<name>` plugins and image layers on `adlc up`, and agents load the skills that apply to their task.
 
-Planned packs: `stack-react-native`, `stack-node-api` (Phase 4), then others such as ESP32. A pack-authoring guide will follow. 🚧
+| Pack | Skills | Runner layer |
+|---|---|---|
+| `stack-react-native` | `expo-app` (app conventions) · `e2e-patterns` (Playwright, Maestro, shared emulator) · `rn-test-env` (adlc.build.yaml, compose test env, emulator, e2e workflow templates) | JDK 17, Android SDK, Maestro, Playwright deps |
+| `stack-node-api` | `node-api` (Fastify, zod, OpenAPI, auth, health) · `postgres-redis` (migrations, expand/contract, Redis rules) · `node-containers` (Dockerfile, compose, Swarm stack, predeploy migrations) | (none needed) |
+| core | `ci-workflows` (CI from adlc.build.yaml, publish, nightly) | |
+
+To add a technology (e.g. ESP32): create `plugins/stack-<name>/` with `.claude-plugin/plugin.json` and `skills/`, add it to `.claude-plugin/marketplace.json`, optionally add `sandbox/runner/stacks/<name>.Dockerfile` and `sandbox/egress/domains/<name>.txt`. A pack-authoring guide will follow. 🚧
 
 ---
 
@@ -564,6 +607,8 @@ Planned packs: `stack-react-native`, `stack-node-api` (Phase 4), then others suc
 ```
 adlc/
 ├── .claude-plugin/marketplace.json     this repo is a Claude Code plugin marketplace
+├── plugins/stack-react-native/         Expo app, e2e, test-environment skills + templates
+├── plugins/stack-node-api/             Node API, Postgres/Redis, containers + Swarm templates
 ├── plugins/adlc-core/
 │   ├── commands/   init, discover, architect, plan-backlog, deliver
 │   ├── agents/     the 15 subagents
@@ -578,7 +623,8 @@ adlc/
 │   ├── compose.project.yml             runner + Docker sidecar + egress proxy (per project)
 │   ├── runner/                         image, entrypoint, Remote Control loop, poller, dev deployer, stack layers
 │   ├── egress/                         Squid proxy + domain allowlists (core, per stack)
-│   └── edge/                           host-level Traefik for preview URLs
+│   ├── edge/                           host-level Traefik for preview URLs
+│   └── swarm/adlc-swarm-deploy         human-run production deploys on the Swarm manager
 ├── bin/adlc                            host CLI: doctor, secrets, up, login, attach, status, pause, logs, audit, down
 └── docs/architecture.md                design of ADLC itself
 ```

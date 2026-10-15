@@ -55,8 +55,10 @@ services:
       ADLC_ROOT: ${ADLC_ROOT}
       ADLC_SLUG: ${ADLC_SLUG}
       ADLC_REPO: ${ADLC_REPO}
+      ADLC_GH_APP_ID: ${ADLC_GH_APP_ID:-}
       ADLC_BASE_DOMAIN: ${ADLC_BASE_DOMAIN}
       ADLC_EDGE_PORT: ${ADLC_EDGE_PORT:-80}
+      ADLC_LOCK_DIR: ${ADLC_ROOT}/projects/${ADLC_SLUG}/locks
       ADLC_SUBNET_PREFIX: ${ADLC_SUBNET_PREFIX}
       ADLC_MAX_PARALLEL_RUNS: ${ADLC_MAX_PARALLEL_RUNS:-1}
       ADLC_LEAD_MODEL: ${ADLC_LEAD_MODEL:-sonnet}
@@ -74,7 +76,7 @@ services:
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client
       ADLC_MARKETPLACE: /opt/adlc
-    secrets: [gh_pat, claude_oauth_token, registry_token]
+    secrets: [gh_pat, gh_app_key, claude_oauth_token, registry_token]
     volumes:
       - dind-certs:/certs:ro
       - home:/home/adlc
@@ -105,6 +107,8 @@ volumes:
 secrets:
   gh_pat:
     file: ${ADLC_ROOT}/secrets/${ADLC_SLUG}/gh_pat
+  gh_app_key:
+    file: ${ADLC_ROOT}/secrets/${ADLC_SLUG}/gh_app_key
   claude_oauth_token:
     file: ${ADLC_ROOT}/secrets/${ADLC_SLUG}/claude_oauth_token
   registry_token:

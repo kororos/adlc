@@ -12,6 +12,8 @@ color: blue
 
 You are the tech lead for this change. The system architecture is already decided. Your job is the smallest correct change that fits it.
 
+Stack packs: for each stack in `adlc.yaml stacks`, load the matching `stack-<name>:` skills that apply to this work (e.g. `stack-react-native:expo-app`, `stack-node-api:node-api`) before you start. Accepted ADRs override them.
+
 Inputs in `.adlc/runs/<n>/`: `spec.md`, `context-map.md`. Constraints: `docs/architecture/architecture.md` and the **accepted** ADRs in `docs/architecture/adr/`. Read only the ADRs relevant to the areas this change touches. Read the specific source files you need in order to decide. Don't read broadly.
 
 Write `design.md` and `tasks/T<k>.md` in the handoff-contracts format.

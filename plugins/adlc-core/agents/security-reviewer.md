@@ -12,6 +12,8 @@ color: red
 
 You look for exploitable problems in this diff (`git diff <default-branch>...HEAD`, ignoring `.adlc/`), not theoretical ones.
 
+Stack packs: for each stack in `adlc.yaml stacks`, load the matching `stack-<name>:` skills that apply to this work (e.g. `stack-react-native:expo-app`, `stack-node-api:node-api`) before you start. Accepted ADRs override them.
+
 Checklist:
 - Injection: SQL/NoSQL (raw queries, string-built SQL), command, path traversal, SSRF, and prototype pollution in Node.
 - AuthN/AuthZ: every new endpoint enforces auth and object-level ownership (IDOR). Check token/session handling and expiry.

@@ -1,0 +1,40 @@
+# ADLC build profile for an Expo app (apps/app) + Node API (apps/api) pnpm monorepo.
+# Every command runs from the run's worktree; ADLC_RUN, ADLC_PROJECT_DOMAIN, ADLC_LOCK_DIR are exported.
+version: 1
+
+commands:
+  install:    pnpm install --frozen-lockfile
+  lint:       pnpm -r lint
+  typecheck:  pnpm -r typecheck
+  arch_check: pnpm arch:check
+  build:      pnpm -r build
+  test:       pnpm -r test -- --ci
+  test_file:  pnpm --filter {package} test -- {file}
+  audit:      pnpm audit --prod --json
+
+env:
+  # ADLC_WORKTREE lets compose bind-mount the run's source at the same path in the Docker sidecar.
+  up: >-
+    export ADLC_WORKTREE=$PWD &&
+    docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d &&
+    docker compose -p adlc-${ADLC_RUN} -f deploy/compose.yml -f deploy/compose.test.yml up -d --wait postgres redis mocks
+  seed:  pnpm --filter api db:migrate && pnpm --filter api db:seed:test
+  start_watch: export ADLC_WORKTREE=$PWD ADLC_MODE_TARGET=dev && pnpm adlc:dev
+  start_build: export ADLC_WORKTREE=$PWD ADLC_MODE_TARGET=prod && pnpm adlc:prodlike
+  down: docker compose -p adlc-${ADLC_RUN} -f deploy/compose.yml -f deploy/compose.test.yml down -v --remove-orphans
+
+testing:
+  exploratory: true
+  e2e:
+    per_run: smoke+affected
+    nightly: full
+    targets:
+      web:     { runner: playwright, cmd: "E2E_BASE_URL=http://${ADLC_RUN}.app.${ADLC_PROJECT_DOMAIN} pnpm --filter app exec playwright test", parallel: true }
+      android: { runner: maestro, cmd: "pnpm --filter app e2e:android", requires: [android-emulator], exclusive: true }
+      ios:     { runner: maestro, where: ci, workflow: .github/workflows/e2e-ios.yml }
+
+deploy_files:
+  base: deploy/compose.yml
+  dev:  deploy/compose.dev.yml
+  test: deploy/compose.test.yml
+  prod: deploy/stack.prod.yml

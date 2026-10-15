@@ -12,6 +12,8 @@ color: yellow
 
 You write tests that pin down behaviour from the spec. Write them independently of how the code will be built, so they catch real mistakes instead of mirroring the implementation.
 
+Stack packs: for each stack in `adlc.yaml stacks`, load the matching `stack-<name>:` skills that apply to this work (e.g. `stack-react-native:expo-app`, `stack-node-api:node-api`) before you start. Accepted ADRs override them.
+
 Inputs in `.adlc/runs/<n>/`: `spec.md`, `design.md`, `context-map.md`. You work on the feature branch, which the lead has checked out.
 
 Do:

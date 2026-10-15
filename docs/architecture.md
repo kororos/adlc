@@ -1,6 +1,6 @@
 # ADLC — Architecture
 
-Status: draft v0.7 · 2026-10-15
+Status: draft v0.8 · 2026-10-15
 Verified against Claude Code 2.1.299 docs (code.claude.com) on 2026-10-14. Items marked **[verify]** still need a hands-on test.
 
 ## 1. Decisions
@@ -19,6 +19,9 @@ Verified against Claude Code 2.1.299 docs (code.claude.com) on 2026-10-14. Items
 | Discovery | A single interactive product-lead with subagents (no agent team), to save tokens. A product-advisor subagent gives a second opinion each round (`--suggest off|light|bold`). Suggestions enter the PRD only on explicit accept and are logged in `docs/product/suggestions.md`. |
 | Architecture review | Independent `architecture-reviewer` subagent by default. `--debate` uses an agent team (interactive only, experimental). |
 | Network | Egress proxy, starting in **audit** mode. Credential scoping is the primary control. |
+| Agent identity | **ADLC GitHub App** (one per account, installed per repo): installation tokens (1 h, single repo) minted in the runner by `adlc-gh-token`. A `gh` wrapper and git credential helper fetch a fresh token per use. Commits are made as `<app>[bot]`. The bot isn't an admin, so it can't bypass branch protection, and the owner can approve its PRs. `gh_pat` is a fallback only. |
+| Prod deploys | Human-run `adlc-swarm-deploy` on the Swarm manager: only refs on the default branch, image check, `deploy/predeploy.sh`, then `docker stack deploy`. No CI runner on the manager. `/deploy/` and `/.github/` are in CODEOWNERS. Works on GitHub Pro (no Enterprise-only environment reviewers or rulesets needed). |
+| Stack packs | `stack-react-native`, `stack-node-api` (skills plus templates), installed by the runner from `adlc.yaml stacks`. Core `ci-workflows` skill: CI runs the same `adlc.build.yaml` commands as the agents. |
 | Project setup | One-time `/adlc-core:init` captures repo, CI, registry (default GHCR), environments, mobile distribution, secrets, release and compliance. Persisted in `adlc.yaml` (policy, read-only for unattended runs), `docs/project/setup.md` (decisions + reasons) and a generated `CLAUDE.md` block (auto-loaded by every agent). Privileged GitHub setup runs through a reviewed `.adlc/provision.sh` with the user's admin credentials. |
 
 ## 2. Lifecycle
@@ -251,5 +254,7 @@ Controls, strongest first:
 | 1 | Smoke test: toy RN + Node repo, discover → architect → backlog → deliver 3 issues | |
 | 2 | Hardening: rate-limit handling, resume, telemetry (tokens/cost per agent), optional Agent SDK poller | |
 | 3 | Nightly regression workflow template, flaky management, docs agent, notifications/digest | |
-| 4 | Stack packs: react-native, node-api; pack-authoring guide; then ESP32 etc. | |
+| 4 | Stack packs: react-native, node-api | **done (draft).** Skills, templates (compose, Swarm stack and workflows validated with compose config, stack config and actionlint). Not yet exercised by a real walking skeleton. |
+| 4b | Agent identity (GitHub App), human-run Swarm deploys | **done (draft).** JWT signing and the error paths tested; deploy script tested in a throwaway swarm. Real app install pending. |
+| 4c | Pack-authoring guide; more packs (ESP32 …) | |
 | 5 | Evals per agent (golden issues), routing tuned from telemetry | |

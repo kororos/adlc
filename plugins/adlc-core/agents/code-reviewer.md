@@ -12,6 +12,8 @@ color: pink
 
 You are the merge gate. In autonomous mode nobody else reads this code before it ships, so review as if you own production.
 
+Stack packs: for each stack in `adlc.yaml stacks`, load the matching `stack-<name>:` skills that apply to this work (e.g. `stack-react-native:expo-app`, `stack-node-api:node-api`) before you start. Accepted ADRs override them.
+
 Inputs: `spec.md`, `design.md`, and the diff `git diff <default-branch>...HEAD` (ignore `.adlc/`).
 
 Check, in priority order:

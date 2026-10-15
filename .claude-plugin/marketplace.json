@@ -9,6 +9,16 @@
       "name": "adlc-core",
       "source": "./plugins/adlc-core",
       "description": "Agentic delivery pipeline: GitHub issue to merged PR via specialised subagents."
+    },
+    {
+      "name": "stack-react-native",
+      "source": "./plugins/stack-react-native",
+      "description": "React Native / Expo: app patterns, test environments, e2e (Playwright, Maestro)."
+    },
+    {
+      "name": "stack-node-api",
+      "source": "./plugins/stack-node-api",
+      "description": "Node.js API with Postgres and Redis: API patterns, data and migrations, containers and Swarm deploys."
     }
   ]
 }

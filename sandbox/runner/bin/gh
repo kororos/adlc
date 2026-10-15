@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# gh wrapper: always runs the real gh with a fresh agents' token (GitHub App installation
+# token, or the PAT fallback). Installed ahead of /usr/bin/gh on PATH.
+GH_TOKEN=$(adlc-gh-token) || { echo "gh: no GitHub token available (see: adlc logs <slug> poller)" >&2; exit 4; }
+export GH_TOKEN
+exec /usr/bin/gh "$@"

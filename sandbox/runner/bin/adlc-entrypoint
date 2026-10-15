@@ -15,12 +15,21 @@ ensure_dirs
 rm -f "$STATE_DIR"/running/*.pid
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
-GH_TOKEN=$(secret gh_pat)
-[ -n "$GH_TOKEN" ] || die "secret gh_pat is missing (run: adlc secrets $ADLC_SLUG)"
-export GH_TOKEN
-gh auth setup-git >/dev/null
-git config --global user.name "${ADLC_GIT_NAME:-ADLC Bot}"
-git config --global user.email "${ADLC_GIT_EMAIL:-adlc-bot@users.noreply.github.com}"
+# Agents act as the ADLC GitHub App (short-lived installation tokens) or, as a fallback, via gh_pat.
+# No static GH_TOKEN: the gh wrapper and the git credential helper fetch a fresh token per use.
+gh_mode=$(adlc-gh-token --mode)
+if [ "$gh_mode" = pat ] && [ -z "$(secret gh_pat)" ]; then
+  die "no GitHub credentials: set up the ADLC GitHub App (adlc app $ADLC_SLUG …) or gh_pat (adlc secrets $ADLC_SLUG)"
+fi
+adlc-gh-token >/dev/null || die "cannot obtain a GitHub token ($gh_mode mode)"
+git config --global --unset-all credential.https://github.com.helper 2>/dev/null || true
+git config --global --add credential.https://github.com.helper ''
+git config --global --add credential.https://github.com.helper '!adlc-git-credential'
+IFS=$'\t' read -r git_name git_email < <(adlc-gh-token --identity) || die "cannot determine the git identity"
+git config --global user.name "$git_name"
+git config --global user.email "$git_email"
+log "GitHub identity: $git_name ($gh_mode mode)"
+[ "$gh_mode" = app ] || log "WARN: agents act as the gh_pat owner. Prefer the ADLC GitHub App (see README: Agent identity)"
 git config --global init.defaultBranch main
 git config --global pull.ff only
 
@@ -86,8 +95,13 @@ if claude plugin marketplace list 2>/dev/null | grep -q '\badlc\b'; then
 else
   claude plugin marketplace add "${ADLC_MARKETPLACE:-/opt/adlc}" >/dev/null || die "cannot add ADLC marketplace"
 fi
-claude plugin install adlc-core@adlc >/dev/null 2>&1 || claude plugin update adlc-core@adlc >/dev/null 2>&1 || true
+install_plugin() { claude plugin install "$1@adlc" >/dev/null 2>&1 || claude plugin update "$1@adlc" >/dev/null 2>&1 || true; }
+install_plugin adlc-core
 claude plugin list 2>/dev/null | grep -q 'adlc-core' || die "adlc-core plugin is not installed"
+for s in $(cfg '.stacks[]'); do
+  if [ -d "${ADLC_MARKETPLACE:-/opt/adlc}/plugins/stack-$s" ]; then install_plugin "stack-$s"; log "stack pack stack-$s installed"
+  else log "no stack pack for '$s' (agents rely on general knowledge for it)"; fi
+done
 log "plugins ready"
 
 # ── Long-running processes ────────────────────────────────────────────────────

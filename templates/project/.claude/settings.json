@@ -5,6 +5,8 @@
     }
   },
   "enabledPlugins": {
-    "adlc-core@adlc": true
+    "adlc-core@adlc": true,
+    "stack-react-native@adlc": true,
+    "stack-node-api@adlc": true
   }
 }
