@@ -1,0 +1,23 @@
+# Dev-server edge proxy (one per host). Routes *.<slug>.<base-domain> to each project's inner
+# Traefik (running inside that project's DinD sidecar). Routes are files written by `adlc up`.
+name: adlc-edge
+
+services:
+  traefik:
+    image: ${ADLC_TRAEFIK_IMAGE:-traefik:v3.6}
+    command:
+      - --providers.file.directory=/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --log.level=INFO
+    ports:
+      - "${ADLC_EDGE_PORT:-80}:80"
+    volumes:
+      - ${ADLC_ROOT}/edge/dynamic:/dynamic:ro
+    networks: [edge, default]
+    restart: unless-stopped
+
+networks:
+  edge:
+    name: adlc-edge
+    internal: true

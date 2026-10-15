@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# adlc: manage ADLC project runners on the dev server.
+#
+#   adlc doctor                      check the host
+#   adlc secrets <slug>              store the project's credentials (prompted, never echoed)
+#   adlc up <slug> [options]         build images and start/update the project's runner
+#       --repo <owner/name>          GitHub repository (required the first time)
+#       --domain <base>              base domain for preview URLs (default: <host-ip>.nip.io)
+#       --stacks <a,b>               runner image stack layers (default: from adlc.yaml, else none)
+#       --dind privileged|sysbox     Docker-in-Docker mode (default: sysbox if installed)
+#   adlc login <slug>                one-time Claude login inside the runner
+#   adlc session <slug> [name]       interactive Claude session in its own worktree (also reachable
+#                                    from claude.ai/app); re-running re-attaches
+#   adlc session <slug> --run <n> [--takeover]
+#                                    session in delivery run #n's worktree (--takeover stops the unattended run)
+#   adlc shell <slug>                bash inside the runner (gh authenticated)
+#   adlc attach <slug>               attach to the runner's tmux (rc / poller / deployer / shell / sessions)
+#   adlc status [slug]               runners, active runs, pause/backoff state
+#   adlc pause|resume <slug>         stop/start launching new delivery runs
+#   adlc logs <slug> [poller|deployer|rc|egress|run <issue>]
+#   adlc audit <slug>                egress domains seen (to build the allowlist)
+#   adlc down <slug>                 stop the runner (workspace and volumes are kept)
+set -euo pipefail
+
+ADLC_HOME=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+ADLC_ROOT=${ADLC_ROOT:-/srv/adlc}
+SANDBOX="$ADLC_HOME/sandbox"
+
+say()  { printf '%s\n' "$*"; }
+ok()   { printf '  \033[32m✔\033[0m %s\n' "$*"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
+bad()  { printf '  \033[31m✘\033[0m %s\n' "$*"; }
+die()  { printf 'adlc: %s\n' "$*" >&2; exit 1; }
+
+cfg_file() { echo "$ADLC_ROOT/config/$1.env"; }
+need_slug() { [ -n "${1:-}" ] || die "missing <slug>"; [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || die "invalid slug '$1'"; }
+load_cfg() {
+  local f; f=$(cfg_file "$1"); [ -f "$f" ] || die "unknown project '$1' (run: adlc up $1 --repo owner/name)"
+  set -a; # shellcheck disable=SC1090
+  source "$f"; set +a
+}
+set_cfg() { # set_cfg <file> <KEY> <value>
+  local f=$1 k=$2 v=$3
+  touch "$f"
+  if grep -q "^$k=" "$f"; then
+    awk -v k="$k" -v v="$v" -F= '$1 == k { print k "=" v; next } { print }' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  else
+    echo "$k=$v" >>"$f"
+  fi
+}
+has_sysbox() { docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q sysbox-runc; }
+
+compose() { # compose <slug> <args...>
+  local slug=$1; shift
+  local f; f=$(cfg_file "$slug")
+  local files=(-f "$SANDBOX/compose.project.yml" -f "$SANDBOX/compose.dind-${ADLC_DIND_MODE:-privileged}.yml")
+  [ -e /dev/kvm ] && files+=(-f "$SANDBOX/compose.kvm.yml")
+  docker compose --env-file "$f" "${files[@]}" "$@"
+}
+runner_exec() { local slug=$1; shift; compose "$slug" exec runner "$@"; }
+
+default_domain() {
+  local ip
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  if [ -n "$ip" ]; then echo "${ip//./-}.nip.io"; else echo "lan"; fi
+}
+
+next_subnet() {
+  local k
+  for k in $(seq 10 250); do
+    grep -qs "^ADLC_SUBNET_PREFIX=172.31.$k$" "$ADLC_ROOT"/config/*.env || { echo "172.31.$k"; return; }
+  done
+  die "no free subnet"
+}
+
+# ── commands ──────────────────────────────────────────────────────────────────
+cmd_doctor() {
+  say "ADLC doctor (ADLC_ROOT=$ADLC_ROOT)"
+  command -v docker >/dev/null && docker info >/dev/null 2>&1 && ok "docker reachable" || bad "docker not reachable"
+  docker compose version >/dev/null 2>&1 && ok "docker compose v2" || bad "docker compose plugin missing"
+  [ "$(uname -m)" = x86_64 ] && ok "x86_64 host" || warn "$(uname -m) host: the react-native stack layer (Android tools) needs x86_64"
+  [ -e /dev/kvm ] && ok "/dev/kvm present (Android emulator)" || warn "/dev/kvm missing: no Android emulator; Android e2e only in CI"
+  has_sysbox && ok "sysbox runtime available (hardened DinD)" || warn "sysbox not installed: DinD runs privileged (see docs)"
+  if [ -d "$ADLC_ROOT" ] && [ -w "$ADLC_ROOT" ]; then ok "$ADLC_ROOT writable by $(id -un)"; else bad "$ADLC_ROOT missing or not writable (sudo mkdir -p $ADLC_ROOT && sudo chown $(id -un): $ADLC_ROOT)"; fi
+  [ "$(id -u)" != 0 ] && ok "not running as root" || bad "run adlc as the non-root owner of $ADLC_ROOT"
+  local free; free=$(df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2{print int($4/1048576)}')
+  [ "${free:-0}" -ge 50 ] && ok "${free}GB free" || warn "${free:-?}GB free (50GB+ recommended)"
+  local f slug
+  for f in "$ADLC_ROOT"/config/*.env; do
+    [ -e "$f" ] || continue
+    slug=$(basename "$f" .env)
+    for s in gh_pat claude_oauth_token; do
+      [ -s "$ADLC_ROOT/secrets/$slug/$s" ] && ok "$slug: secret $s" || bad "$slug: secret $s missing (adlc secrets $slug)"
+    done
+  done
+}
+
+cmd_secrets() {
+  local slug=$1 dir="$ADLC_ROOT/secrets/$1" v
+  need_slug "$slug"; mkdir -p "$dir"; chmod 700 "$dir"
+  say "Secrets for '$slug' are stored in $dir (mode 600). Press Enter to keep an existing value."
+  say "  gh_pat:             fine-grained PAT for this repo only: Contents, Issues, Pull requests (read/write), Metadata (read). No admin."
+  say "  claude_oauth_token: output of 'claude setup-token' (used for unattended runs)"
+  say "  registry_token:     classic PAT with read:packages (GHCR pulls for the dev deployer); optional"
+  for s in gh_pat claude_oauth_token registry_token; do
+    read -r -s -p "$s: " v; echo
+    if [ -n "$v" ]; then (umask 077; printf '%s' "$v" >"$dir/$s"); ok "$s saved"
+    elif [ ! -e "$dir/$s" ]; then (umask 077; : >"$dir/$s"); warn "$s left empty"; fi
+  done
+}
+
+cmd_up() {
+  local slug=$1; shift; need_slug "$slug"
+  local repo="" domain="" stacks="" dind=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --repo) repo=$2; shift 2 ;;
+      --domain) domain=$2; shift 2 ;;
+      --stacks) stacks=$2; shift 2 ;;
+      --dind) dind=$2; shift 2 ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  [ "$(id -u)" != 0 ] || die "run as the non-root owner of $ADLC_ROOT"
+  mkdir -p "$ADLC_ROOT"/{config,cache,edge/dynamic} "$ADLC_ROOT/projects/$slug"/{repo,runs,state,sessions,logs/egress}
+  local f; f=$(cfg_file "$slug")
+  if [ ! -f "$f" ]; then
+    [ -n "$repo" ] || die "first start needs --repo owner/name"
+    set_cfg "$f" ADLC_SLUG "$slug"
+    set_cfg "$f" ADLC_SUBNET_PREFIX "$(next_subnet)"
+  fi
+  [ -n "$repo" ] && set_cfg "$f" ADLC_REPO "$repo"
+  grep -q '^ADLC_BASE_DOMAIN=' "$f" || set_cfg "$f" ADLC_BASE_DOMAIN "${domain:-$(default_domain)}"
+  [ -n "$domain" ] && set_cfg "$f" ADLC_BASE_DOMAIN "$domain"
+  if [ -n "$dind" ]; then set_cfg "$f" ADLC_DIND_MODE "$dind"
+  elif ! grep -q '^ADLC_DIND_MODE=' "$f"; then has_sysbox && set_cfg "$f" ADLC_DIND_MODE sysbox || set_cfg "$f" ADLC_DIND_MODE privileged; fi
+  set_cfg "$f" ADLC_ROOT "$ADLC_ROOT"
+  set_cfg "$f" ADLC_HOME "$ADLC_HOME"
+  set_cfg "$f" ADLC_RUNNER_IMAGE "adlc/runner-$slug:local"
+  load_cfg "$slug"
+  for s in gh_pat claude_oauth_token registry_token; do
+    [ -e "$ADLC_ROOT/secrets/$slug/$s" ] || die "secret $s missing: run 'adlc secrets $slug' first"
+  done
+
+  # Runner image: base + stack layers.
+  say "Building runner image…"
+  docker build -q -t adlc/runner-base:local \
+    --build-arg ADLC_UID="$(id -u)" --build-arg ADLC_GID="$(id -g)" "$SANDBOX/runner" >/dev/null
+  if [ -z "$stacks" ] && [ -f "$ADLC_ROOT/projects/$slug/repo/adlc.yaml" ]; then
+    stacks=$(docker run --rm --entrypoint yq -v "$ADLC_ROOT/projects/$slug/repo/adlc.yaml:/a.yaml:ro" \
+               adlc/runner-base:local -r '.stacks // [] | join(",")' /a.yaml 2>/dev/null || true)
+  fi
+  local img=adlc/runner-base:local s
+  for s in ${stacks//,/ }; do
+    [ -f "$SANDBOX/runner/stacks/$s.Dockerfile" ] || continue
+    say "  + stack layer $s"
+    docker build -q -t "adlc/runner-$slug-$s:local" --build-arg BASE="$img" \
+      -f "$SANDBOX/runner/stacks/$s.Dockerfile" "$SANDBOX/runner" >/dev/null
+    img="adlc/runner-$slug-$s:local"
+  done
+  docker tag "$img" "$ADLC_RUNNER_IMAGE"
+
+  # Edge proxy (shared) and this project's route.
+  ADLC_ROOT=$ADLC_ROOT docker compose -f "$SANDBOX/edge/compose.yml" up -d >/dev/null
+  local esc; esc=$(sed 's/\./\\./g' <<<"$slug.$ADLC_BASE_DOMAIN")
+  cat >"$ADLC_ROOT/edge/dynamic/$slug.yml" <<EOF
+http:
+  routers:
+    $slug:
+      rule: 'HostRegexp(\`^.+\.$esc$\`)'
+      entryPoints: [web]
+      service: $slug
+  services:
+    $slug:
+      loadBalancer:
+        servers:
+          - url: "http://adlc-$slug-docker:80"
+EOF
+
+  compose "$slug" up -d --build --remove-orphans
+  say ""
+  say "Runner for '$slug' is starting. Next:"
+  [ -e "$ADLC_ROOT/projects/$slug/state/logged_in" ] \
+    || say "  adlc login $slug        (one-time Claude login for Remote Control)"
+  say "  adlc status $slug       ·  previews: http://<run>.app.$slug.$ADLC_BASE_DOMAIN"
+}
+
+cmd_down()   { need_slug "$1"; load_cfg "$1"; compose "$1" down; }
+cmd_login()  { need_slug "$1"; load_cfg "$1"; runner_exec "$1" adlc-login; }
+cmd_attach() { need_slug "$1"; load_cfg "$1"; runner_exec "$1" tmux attach -t adlc; }
+cmd_session() { local slug=${1:-}; need_slug "$slug"; shift; load_cfg "$slug"; runner_exec "$slug" adlc-session "$@"; }
+cmd_shell() {
+  need_slug "${1:-}"; load_cfg "$1"
+  # shellcheck disable=SC2016  # expanded inside the container
+  runner_exec "$1" bash -c 'export GH_TOKEN=$(tr -d "\r\n" </run/secrets/gh_pat); cd "$ADLC_ROOT/projects/$ADLC_SLUG"; exec bash -l'
+}
+cmd_pause()  { need_slug "$1"; touch "$ADLC_ROOT/projects/$1/state/paused"; say "paused: no new runs will start (running ones continue)"; }
+cmd_resume() { need_slug "$1"; rm -f "$ADLC_ROOT/projects/$1/state/paused"; say "resumed"; }
+
+cmd_status() {
+  local f slug st n
+  for f in "$ADLC_ROOT"/config/*.env; do
+    [ -e "$f" ] || { say "no projects"; return; }
+    slug=$(basename "$f" .env)
+    [ -n "${1:-}" ] && [ "$1" != "$slug" ] && continue
+    load_cfg "$slug"
+    st="$ADLC_ROOT/projects/$slug/state"
+    say "■ $slug  ($ADLC_REPO)"
+    compose "$slug" ps --format '    {{.Service}}: {{.State}} {{.Status}}' 2>/dev/null || true
+    [ -e "$st/paused" ] && say "    paused"
+    [ -s "$st/backoff_until" ] && [ "$(date +%s)" -lt "$(cat "$st/backoff_until")" ] && say "    usage-limit backoff until $(date -d "@$(cat "$st/backoff_until")" 2>/dev/null || cat "$st/backoff_until")"
+    n=$(find "$st/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
+    say "    active runs: ${n:-none}"
+    [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
+    [ -e "$st/logged_in" ] || say "    not logged in (adlc login $slug)"
+  done
+}
+
+cmd_logs() {
+  local slug=$1 what=${2:-poller}; need_slug "$slug"
+  local d="$ADLC_ROOT/projects/$slug/logs"
+  case $what in
+    poller|deployer|rc) tail -n 100 -f "$d/$what.log" ;;
+    egress) tail -n 100 -f "$d/egress/access.log" ;;
+    run)
+      [ -n "${3:-}" ] || die "usage: adlc logs <slug> run <issue>"
+      local latest; latest=$(ls -t "$d/runs/$3"-*.jsonl 2>/dev/null | head -1)
+      [ -n "$latest" ] || die "no run logs for #$3"
+      say "── $latest (following; Ctrl-C to stop)"
+      tail -n +1 -F "$latest" | jq --unbuffered -r 'if .type == "assistant" then (.message.content[]? | select(.type == "text") | "• " + .text)
+             elif .type == "result" then "══ result: " + (.subtype // "") + " · cost $" + ((.total_cost_usd // 0) | tostring)
+             else empty end' ;;
+    *) die "unknown log '$what'" ;;
+  esac
+}
+
+cmd_audit() {
+  local slug=$1; need_slug "$slug"; load_cfg "$slug"
+  local log="$ADLC_ROOT/projects/$slug/logs/egress/access.log" allowed
+  [ -s "$log" ] || die "no egress log yet"
+  allowed=$(compose "$slug" exec -T egress cat /etc/squid/adlc-allowed.txt 2>/dev/null || true)
+  say "Domains reached through the egress proxy (count · domain · in allowlist?):"
+  awk '{u=$4; sub(/^[a-z]+:\/\//,"",u); sub(/[:\/].*$/,"",u); print u}' "$log" | sort | uniq -c | sort -rn \
+  | while read -r c d; do
+      m=no
+      while read -r a; do
+        [ -n "$a" ] || continue
+        if [ "${a:0:1}" = . ]; then [[ "$d" == *"$a" || "$d" == "${a:1}" ]] && m=yes; else [ "$d" = "$a" ] && m=yes; fi
+      done <<<"$allowed"
+      printf '%7s  %-50s %s\n' "$c" "$d" "$m"
+    done
+  say "Add missing ones to adlc.yaml → network.extra_domains (or the stack pack's list) before switching to allowlist."
+}
+
+main() {
+  local c=${1:-help}; shift || true
+  case $c in
+    doctor) cmd_doctor ;;
+    secrets) cmd_secrets "${1:-}" ;;
+    up) cmd_up "$@" ;;
+    down) cmd_down "${1:-}" ;;
+    login) cmd_login "${1:-}" ;;
+    attach) cmd_attach "${1:-}" ;;
+    session) cmd_session "$@" ;;
+    shell) cmd_shell "${1:-}" ;;
+    status) cmd_status "${1:-}" ;;
+    pause) cmd_pause "${1:-}" ;;
+    resume) cmd_resume "${1:-}" ;;
+    logs) cmd_logs "$@" ;;
+    audit) cmd_audit "${1:-}" ;;
+    help|-h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    *) die "unknown command '$c' (adlc help)" ;;
+  esac
+}
+main "$@"

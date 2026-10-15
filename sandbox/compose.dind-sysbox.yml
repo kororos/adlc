@@ -1,0 +1,5 @@
+# Hardened DinD mode: Sysbox runtime (https://github.com/nestybox/sysbox), no privileged flag.
+# Requires sysbox-runc installed on the host (`adlc doctor` checks).
+services:
+  docker:
+    runtime: sysbox-runc

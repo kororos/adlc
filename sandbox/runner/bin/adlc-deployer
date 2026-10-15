@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Pull-based deployer for the dev environment: when CI has published images for the
+# current head of the default branch, run `docker compose pull && up -d` with that tag.
+# Active only when adlc.yaml says environments.dev.deploy.mechanism == pull-deployer.
+set -uo pipefail
+ADLC_COMPONENT=deployer
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+
+INTERVAL=${ADLC_DEPLOY_INTERVAL:-120}
+ensure_dirs
+
+while :; do
+  sleep "$INTERVAL"
+  repo_ready || continue
+  [ "$(cfg '.environments.dev.deploy.mechanism')" = pull-deployer ] || continue
+  base=$(build_cfg '.deploy_files.base'); dev=$(build_cfg '.deploy_files.dev')
+  [ -n "$base" ] && [ -f "$REPO_DIR/$base" ] || continue   # before the walking skeleton lands
+
+  sha=$(git -C "$REPO_DIR" rev-parse --short=7 "origin/$(default_branch)" 2>/dev/null) || continue
+  tag="sha-$sha"
+  [ "$(cat "$STATE_DIR/dev_deployed" 2>/dev/null)" = "$tag" ] && continue
+
+  ns=$(cfg '.registry.namespace')
+  [ -n "$ns" ] && [ "$ns" != tbd ] || { log "registry.namespace is not set; skipping"; continue; }
+  missing=""
+  for img in $(cfg '.registry.images[]'); do
+    docker manifest inspect "$ns/$img:$tag" >/dev/null 2>&1 || missing="$missing $img"
+  done
+  if [ -n "$missing" ]; then log "waiting for CI to publish $tag:$missing"; continue; fi
+
+  files=(-f "$REPO_DIR/$base"); [ -n "$dev" ] && [ -f "$REPO_DIR/$dev" ] && files+=(-f "$REPO_DIR/$dev")
+  log "deploying $tag to dev"
+  if IMAGE_TAG=$tag ADLC_PROJECT_DOMAIN="$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}" \
+       docker compose -p "$ADLC_SLUG-dev" --project-directory "$REPO_DIR" "${files[@]}" pull --quiet \
+     && IMAGE_TAG=$tag ADLC_PROJECT_DOMAIN="$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}" \
+       docker compose -p "$ADLC_SLUG-dev" --project-directory "$REPO_DIR" "${files[@]}" up -d --remove-orphans --wait; then
+    echo "$tag" >"$STATE_DIR/dev_deployed"
+    log "dev is now at $tag"
+  else
+    log "ERROR: dev deployment of $tag failed; will retry"
+  fi
+done

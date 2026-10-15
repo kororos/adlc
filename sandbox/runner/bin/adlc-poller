@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# ADLC poller: promotes unblocked issues, launches unattended delivery runs (claude -p)
+# in per-run git worktrees, handles rate limits, and cleans up after merges.
+set -uo pipefail
+ADLC_COMPONENT=poller
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+
+POLL_INTERVAL=${ADLC_POLL_INTERVAL:-60}
+RUN_TIMEOUT=${ADLC_RUN_TIMEOUT:-4h}
+LEAD_MODEL=${ADLC_LEAD_MODEL:-sonnet}
+LOG_RETENTION_DAYS=${ADLC_LOG_RETENTION_DAYS:-7}
+R="$ADLC_REPO"
+
+label() { # label <issue> <remove> <add>
+  gh issue edit "$1" -R "$R" ${2:+--remove-label "$2"} ${3:+--add-label "$3"} >/dev/null 2>&1 \
+    || log "WARN: could not relabel #$1 (-$2 +$3)"
+}
+comment() { gh issue comment "$1" -R "$R" --body "$2" >/dev/null 2>&1 || log "WARN: could not comment on #$1"; }
+has_label() { gh issue view "$1" -R "$R" --json labels --jq "[.labels[].name] | index(\"$2\") != null" 2>/dev/null | grep -q true; }
+is_running() { local f="$STATE_DIR/running/$1.pid"; [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; }
+running_count() { local n=0 f; for f in "$STATE_DIR"/running/*.pid; do [ -e "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null && n=$((n + 1)); done; echo "$n"; }
+max_runs() { local m; m=$(cfg '.autonomy.max_parallel_runs'); echo "${m:-${ADLC_MAX_PARALLEL_RUNS:-1}}"; }
+is_collaborator() { gh api "repos/$R/collaborators/$1" --silent >/dev/null 2>&1; }
+
+# ── Backoff (shared Max quota) ────────────────────────────────────────────────
+in_backoff() { local u; u=$(cat "$STATE_DIR/backoff_until" 2>/dev/null || echo 0); [ "$(date +%s)" -lt "$u" ]; }
+set_backoff() { # set_backoff [reset_epoch]
+  local now step until
+  now=$(date +%s)
+  step=$(cat "$STATE_DIR/backoff_step" 2>/dev/null || echo 300)
+  if [ -n "${1:-}" ] && [ "$1" -gt "$now" ]; then until=$(( $1 + 60 )); else until=$(( now + step )); fi
+  echo "$until" >"$STATE_DIR/backoff_until"
+  echo $(( step * 2 > 3600 ? 3600 : step * 2 )) >"$STATE_DIR/backoff_step"
+  log "usage limit: pausing launches until $(date -u -d "@$until" +%FT%TZ 2>/dev/null || echo "$until")"
+}
+clear_backoff() { rm -f "$STATE_DIR/backoff_until" "$STATE_DIR/backoff_step"; }
+
+# ── Startup recovery: runs interrupted by a restart resume from state.json ────
+recover_interrupted() {
+  local n
+  for n in $(gh issue list -R "$R" --label adlc:in-progress --state open --json number --jq '.[].number' 2>/dev/null); do
+    is_running "$n" && continue
+    log "#$n was in progress when the runner stopped; re-queueing (it resumes from state.json)"
+    label "$n" adlc:in-progress adlc:ready
+  done
+}
+
+# ── queued → ready when every "blocked by" issue is closed ───────────────────
+promote_queued() {
+  local n open
+  for n in $(gh issue list -R "$R" --label adlc:queued --state open --limit 200 --json number --jq '.[].number' 2>/dev/null); do
+    open=$(gh api "repos/$R/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null) || continue
+    if [ "$open" = 0 ]; then label "$n" adlc:queued adlc:ready; log "promoted #$n to ready"; fi
+  done
+}
+
+# ── Launch ────────────────────────────────────────────────────────────────────
+prepare_worktree() { # prepare_worktree <n> <title>  → prints worktree path
+  local n=$1 title=$2 wt="$RUNS_DIR/$1" existing b
+  if [ -d "$wt/.git" ] || [ -f "$wt/.git" ]; then
+    git -C "$wt" fetch --quiet origin 2>/dev/null || true
+    echo "$wt"; return 0
+  fi
+  b=$(default_branch)
+  existing=$(git -C "$REPO_DIR" for-each-ref --format='%(refname:lstrip=3)' "refs/remotes/origin/adlc/$n-*" \
+               | grep -Ev -- "^adlc/$n-t[0-9]+$" | head -1)
+  if [ -n "$existing" ]; then
+    git -C "$REPO_DIR" worktree add --quiet -B "$existing" "$wt" "origin/$existing" >/dev/null 2>&1 || return 1
+  else
+    git -C "$REPO_DIR" worktree add --quiet -b "adlc/$n-$(slugify <<<"$title")" "$wt" "origin/$b" >/dev/null 2>&1 || return 1
+  fi
+  echo "$wt"
+}
+
+post_run() { # post_run <n> <exit-code> <jsonl> <stderr>
+  local n=$1 rc=$2 out=$3 err=$4 init_errors result reset
+  if [ -f "$STATE_DIR/takeover/$n" ]; then
+    rm -f "$STATE_DIR/takeover/$n"
+    log "#$n: taken over by an interactive session; leaving labels as they are"
+    return
+  fi
+  init_errors=$(jq -c 'select(.type == "system" and .subtype == "init") | .plugin_errors // [] | length' "$out" 2>/dev/null | head -1)
+  if [ "${init_errors:-0}" != 0 ]; then
+    log "#$n: plugins failed to load. Pausing the poller. See $out"
+    touch "$STATE_DIR/paused"
+    label "$n" adlc:in-progress adlc:ready
+    return
+  fi
+  result=$(jq -r 'select(.type == "result") | (.result // "") + " " + (.subtype // "")' "$out" 2>/dev/null | tail -1)
+  if grep -qiE 'usage limit|rate.?limit|429|overloaded' <<<"$result $(tail -c 2000 "$err" 2>/dev/null)"; then
+    reset=$(grep -oE 'limit reached\|[0-9]{10}' <<<"$result" | grep -oE '[0-9]{10}' | head -1)
+    set_backoff "$reset"
+    label "$n" adlc:in-progress adlc:ready
+    return
+  fi
+  if has_label "$n" adlc:in-progress; then
+    # deliver didn't reach a terminal label: crash, timeout or tool failure
+    log "#$n: run ended without a terminal state (exit $rc)"
+    comment "$n" "ADLC runner: the delivery run ended unexpectedly (exit $rc). Last result: \`${result:0:300}\`. Log: \`$out\` on the runner. Relabel \`adlc:ready\` to retry; it resumes from the last pushed phase."
+    label "$n" adlc:in-progress adlc:blocked
+  else
+    clear_backoff
+    log "#$n: run finished (exit $rc)"
+  fi
+}
+
+launch() { # launch <n> <title>
+  local n=$1 title=$2 wt ts out err protected
+  wt=$(prepare_worktree "$n" "$title") || { log "#$n: could not create worktree"; return 1; }
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+  out="$LOG_DIR/runs/$n-$ts.jsonl"; err="$LOG_DIR/runs/$n-$ts.stderr"
+  protected=$(cfg '.repo.protected_branches | join("|")')
+  label "$n" adlc:ready adlc:in-progress
+  log "#$n: starting delivery in $wt"
+  (
+    cd "$wt" || exit 1
+    ADLC_MODE=unattended ADLC_RUN=$n \
+    ADLC_PROJECT_DOMAIN="$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}" \
+    ADLC_PROTECTED_BRANCHES="${protected:-main|master}" \
+    CLAUDE_CODE_OAUTH_TOKEN="$(secret claude_oauth_token)" \
+    CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1 \
+      timeout --kill-after=60 "$RUN_TIMEOUT" \
+      claude -p "/adlc-core:deliver $n" \
+        --permission-mode bypassPermissions \
+        --model "$LEAD_MODEL" \
+        --output-format stream-json --verbose \
+        >"$out" 2>"$err"
+    rc=$?
+    post_run "$n" "$rc" "$out" "$err"
+    rm -f "$STATE_DIR/running/$n.pid"
+  ) &
+  echo $! >"$STATE_DIR/running/$n.pid"
+}
+
+launch_ready() {
+  local slots n author title
+  in_backoff && return 0
+  [ -n "$(secret claude_oauth_token)" ] || { log "secret claude_oauth_token missing; not launching"; return 0; }
+  slots=$(( $(max_runs) - $(running_count) ))
+  [ "$slots" -gt 0 ] || return 0
+  while IFS=$'\t' read -r n author title; do
+    [ -n "$n" ] || continue
+    [ "$slots" -gt 0 ] || break
+    is_running "$n" && continue
+    if ! is_collaborator "$author"; then
+      log "#$n: author @$author is not a collaborator; needs human review"
+      label "$n" adlc:ready adlc:needs-human-review
+      comment "$n" "ADLC: issues from non-collaborators aren't processed automatically. A maintainer can review it and relabel \`adlc:ready\`, or copy it into a new issue."
+      continue
+    fi
+    launch "$n" "$title" && slots=$((slots - 1))
+  done < <(gh issue list -R "$R" --label adlc:ready --state open --limit 100 \
+             --json number,title,author,milestone,createdAt \
+             --jq 'sort_by((.milestone.dueOn // "9999"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv' 2>/dev/null)
+}
+
+# ── Cleanup after merge/close ─────────────────────────────────────────────────
+cleanup() {
+  local wt n state
+  for wt in "$RUNS_DIR"/*/; do
+    [ -d "$wt" ] || continue
+    n=$(basename "$wt")
+    is_running "$n" && continue
+    state=$(gh issue view "$n" -R "$R" --json state --jq .state 2>/dev/null) || continue
+    [ "$state" = CLOSED ] || continue
+    docker compose -p "adlc-$n" down -v >/dev/null 2>&1 || true
+    git -C "$REPO_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
+    git -C "$REPO_DIR" for-each-ref --format='%(refname:short)' "refs/heads/adlc/$n-*" \
+      | xargs -r git -C "$REPO_DIR" branch -D >/dev/null 2>&1
+    log "#$n closed: removed worktree and local branches"
+  done
+  git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
+  find "$LOG_DIR/runs" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
+}
+
+# ── Main loop ─────────────────────────────────────────────────────────────────
+ensure_dirs
+recovered=0
+i=0
+while :; do
+  if ! repo_ready; then
+    git clone --quiet "https://github.com/$R.git" "$REPO_DIR" 2>/dev/null && log "cloned $R" \
+      || { log "waiting for $R to exist"; sleep "$POLL_INTERVAL"; continue; }
+  fi
+  if [ $((i % 10)) = 0 ] && ! gh api user --silent >/dev/null 2>&1 && ! gh api "repos/$R" --silent >/dev/null 2>&1; then
+    log "ERROR: GitHub rejects the gh_pat token (expired or wrong scope). Fix with 'adlc secrets $ADLC_SLUG' + 'adlc up $ADLC_SLUG'"
+  fi
+  if ! sync_repo; then log "WARN: fetch/sync failed"; sleep "$POLL_INTERVAL"; continue; fi
+  [ "$recovered" = 1 ] || { recover_interrupted; recovered=1; }
+  if [ -f "$STATE_DIR/paused" ]; then
+    [ $((i % 10)) = 0 ] && log "paused (adlc resume $ADLC_SLUG)"
+  else
+    promote_queued
+    launch_ready
+  fi
+  [ $((i % 10)) = 0 ] && cleanup
+  i=$((i + 1))
+  sleep "$POLL_INTERVAL"
+done

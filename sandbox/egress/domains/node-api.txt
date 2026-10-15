@@ -1,0 +1,6 @@
+# node-api stack pack egress domains
+.npmjs.org
+.npmjs.com
+.yarnpkg.com
+nodejs.org
+.prisma.sh

@@ -1,0 +1,5 @@
+# Added by `adlc up` when /dev/kvm exists on the host (Android emulator acceleration).
+services:
+  docker:
+    devices:
+      - /dev/kvm:/dev/kvm

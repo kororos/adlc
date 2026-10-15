@@ -1,0 +1,16 @@
+# ADLC core egress allowlist (used when network.mode = allowlist).
+# A leading dot matches the domain and all subdomains.
+# Claude / Anthropic
+.anthropic.com
+.claude.ai
+.claude.com
+# GitHub (API, git, releases, raw content, container registry)
+.github.com
+.githubusercontent.com
+ghcr.io
+# Docs for agents
+.context7.com
+# Docker Hub (images for test environments)
+.docker.io
+.docker.com
+production.cloudflare.docker.com

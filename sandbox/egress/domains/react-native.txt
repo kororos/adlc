@@ -1,0 +1,17 @@
+# react-native stack pack egress domains
+.npmjs.org
+.npmjs.com
+.expo.dev
+.expo.io
+exp.host
+dl.google.com
+maven.google.com
+.gradle.org
+repo.maven.apache.org
+repo1.maven.org
+.jitpack.io
+.mobile.dev
+playwright.azureedge.net
+playwright-akamai.azureedge.net
+playwright-verizon.azureedge.net
+cdn.playwright.dev

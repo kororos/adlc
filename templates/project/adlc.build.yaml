@@ -1,0 +1,37 @@
+# ADLC project BUILD profile — commands, test environment and e2e targets, run verbatim by agents.
+# Drafted by /adlc-core:architect, made real by the walking-skeleton issue. Delivery runs may edit it;
+# such changes count as CI/infra changes (risk = high → human merge).
+version: 1
+
+commands:
+  install:    pnpm install --frozen-lockfile
+  lint:       pnpm -r lint
+  typecheck:  pnpm -r typecheck
+  arch_check: pnpm arch:check            # dependency-cruiser rules, contract tests, bundle budget
+  build:      pnpm -r build
+  test:       pnpm -r test -- --ci       # unit + integration + component
+  test_file:  pnpm --filter {package} test -- {file}
+  audit:      pnpm audit --prod --json
+
+env:                                     # lifecycle per testing-contract; ADLC_RUN is exported
+  up:          docker compose -p adlc-${ADLC_RUN} -f deploy/compose.yml -f deploy/compose.test.yml up -d --wait
+  seed:        pnpm --filter api db:seed:test
+  start_watch: pnpm adlc:dev             # source-mounted: API tsx watch + Metro/Expo web (Fast Refresh)
+  start_build: pnpm adlc:prodlike        # compiled API + exported web + release APK; no watchers (gating e2e)
+  down:        docker compose -p adlc-${ADLC_RUN} -f deploy/compose.yml -f deploy/compose.test.yml down -v
+
+deploy_files:                            # one compose base, per-environment overrides (same images everywhere)
+  base:    deploy/compose.yml            # services, images, healthchecks
+  dev:     deploy/compose.dev.yml        # dev-server: compose up -d (pull-deployer)
+  test:    deploy/compose.test.yml       # per-run: source mounts, watch tooling, mocks
+  prod:    deploy/stack.prod.yml         # swarm: deploy.replicas/update_config/secrets/placement
+
+testing:
+  exploratory: true                      # agent-driven exploratory QA on UI changes
+  e2e:
+    per_run: smoke+affected
+    nightly: full
+    targets:
+      web:     { runner: playwright, cmd: pnpm --filter app e2e:web, parallel: true }
+      android: { runner: maestro, cmd: maestro test apps/app/e2e/flows, requires: [android-emulator], exclusive: true }
+      ios:     { runner: maestro, where: ci, workflow: .github/workflows/e2e-ios.yml }

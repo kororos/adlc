@@ -1,0 +1,114 @@
+# ADLC project POLICY — source of truth for setup facts and ADLC behaviour.
+# Written by /adlc-core:init (setup) and /adlc-core:architect (stacks/platforms); change via
+# `/adlc-core:init --update <section>`. READ-ONLY for unattended runs (guard hook), so agents
+# can never raise their own autonomy or widen network access.
+# Build/test commands live in adlc.build.yaml.
+# `tbd` means undecided: agents must not assume a value; they block and name the key.
+version: 1
+
+# ── Setup (/adlc-core:init) ───────────────────────────────────────────────────
+project:
+  name: tbd
+  slug: tbd
+  description: tbd
+  owner: tbd                         # GitHub handle or team
+  license: proprietary
+
+repo:
+  url: tbd                           # github.com/<owner>/<slug>
+  visibility: private
+  layout: pnpm-monorepo              # apps/app, apps/api, packages/*
+  default_branch: main
+  merge: squash
+  protected_branches: [main]
+  codeowners: []
+  commit_convention: conventional
+  board: true
+
+ci:
+  provider: github-actions
+  runners: { default: ubuntu-latest, ios: macos-latest, android_e2e: ubuntu-latest }
+  required_checks: [lint, typecheck, arch-check, test, e2e-web, e2e-android, e2e-ios]
+  budget: tbd
+
+registry:
+  provider: ghcr
+  namespace: tbd                     # ghcr.io/<owner>/<slug>
+  images: [api, web]
+  tags: [sha, semver]                # never deploy `latest`
+  retention: { untagged_days: 14, keep_sha_tags: 20 }
+  scan: trivy-fail-on-critical
+
+environments:
+  test:                              # per delivery run — managed by ADLC, informational
+    runtime: docker-compose
+    where: adlc-<slug>-docker        # project's Docker-in-Docker sidecar on dev-server
+    modes: [watch, build]            # watch = source-mounted hot reload; build = prod-like, used for gating e2e
+    urls: "<run>.app.dev-server.lan, <run>.api.dev-server.lan"
+  dev:
+    runtime: docker-compose
+    hosts: [dev-server]
+    url: tbd                         # e.g. app.dev-server.lan
+    deploy: { trigger: on-merge, approval: false, mechanism: pull-deployer }
+    ingress: { proxy: traefik, tls: internal }
+    replicas: { api: 1, web: 1 }
+    update: recreate
+    secrets: docker-secrets
+    data: { postgres: container, redis: container, backups: none }
+    migrations: on-start
+  staging:
+    enabled: false
+  prod:
+    runtime: docker-swarm
+    hosts: { managers: tbd, workers: tbd }
+    url: tbd
+    deploy: { trigger: release-tag, approval: true, mechanism: gha-self-hosted-swarm-manager, command: "docker stack deploy --with-registry-auth" }
+    ingress: { proxy: traefik, tls: letsencrypt }
+    replicas: { api: 2, web: 2 }
+    update: { order: start-first, parallelism: 1, failure_action: rollback, healthcheck: required }
+    secrets: swarm-secrets-versioned
+    data: { postgres: tbd, redis: swarm-pinned, backups: { schedule: nightly, retention_days: 14, target: tbd, restore_test: monthly } }
+    migrations: pre-deploy-job
+    resources: set-by-architect
+  agent_deploy: [dev]                # environments ADLC may deploy to without a human (never prod)
+  parity: build-once-promote-by-tag
+
+mobile:
+  ios_bundle_id: tbd
+  android_package: tbd
+  build: eas
+  accounts: { apple_team: tbd, google_play: tbd }
+  signing: eas-managed
+  ota: { tool: eas-update, channels: [dev, staging, prod], prod_requires_approval: true }
+
+secrets:                             # names and locations only — never values
+  ci: github-environments
+  runtime: { dev: docker-secrets, staging: tbd, prod: tbd }
+  local: env-example-only
+  runner: [claude_oauth_token, gh_pat]
+
+release:
+  versioning: semver
+  tool: release-please
+  cadence: per-milestone
+
+deps:
+  updates: { tool: renovate, schedule: weekly, automerge: [devDependencies-patch, devDependencies-minor] }
+  licenses_allowed: [MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC]
+
+observability: { errors: sentry, logs: tbd, metrics: tbd, uptime: tbd }
+notifications: { channel: github, push_on: [blocked, needs-info, high-risk-pr, nightly-failure], digest: status-issue }
+compliance: { regimes: [], data_residency: tbd }
+
+# ── ADLC behaviour ────────────────────────────────────────────────────────────
+stacks: [react-native, node-api]   # enabled stack packs
+platforms: [web, android, ios]     # ios e2e runs in CI (macOS runner), not in the Linux runner
+
+autonomy:
+  auto_merge: [low, medium]              # risk tiers allowed to auto-merge on green CI
+  max_parallel_implementers: 3
+  retries: { build: 3, qa: 2, review: 2 }
+
+network:
+  mode: audit                            # open | audit | allowlist (unattended runs)
+  extra_domains: []                      # project-specific additions to core + stack-pack lists

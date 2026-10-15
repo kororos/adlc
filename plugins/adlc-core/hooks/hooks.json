@@ -1,0 +1,13 @@
+{
+  "description": "ADLC guardrails: block force-push, pushes to protected branches, secret-file access and destructive commands.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\"" }
+        ]
+      }
+    ]
+  }
+}

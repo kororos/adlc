@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Keeps a Claude Code Remote Control server running in the shared clone.
+# Interactive sessions get their own worktrees (--spawn worktree), so they never
+# switch branches under the poller or each other.
+set -uo pipefail
+ADLC_COMPONENT=rc
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+
+# Remote Control needs the /login session, not the setup-token used for headless runs.
+unset CLAUDE_CODE_OAUTH_TOKEN
+
+until [ -f "$STATE_DIR/logged_in" ] && repo_ready; do
+  log "waiting: run 'adlc login $ADLC_SLUG' on the host (and make sure the repo exists)"
+  sleep 30
+done
+
+cd "$REPO_DIR" || die "no shared clone"
+while :; do
+  log "starting remote-control (first start asks 'Enable Remote Control?' here; answer y)"
+  claude remote-control \
+    --name "adlc-$ADLC_SLUG" \
+    --spawn worktree \
+    --permission-mode "${ADLC_RC_PERMISSION_MODE:-acceptEdits}" || true
+  log "remote-control exited; restarting in 15s"
+  sleep 15
+done

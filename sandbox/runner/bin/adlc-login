@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# One-time interactive login inside the runner (run via: adlc login <slug>).
+set -euo pipefail
+ADLC_COMPONENT=login
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY
+
+repo_ready || die "the shared clone doesn't exist yet. Create the repo first (.adlc/provision.sh), then restart the runner"
+cd "$REPO_DIR"
+cat <<'EOF'
+── ADLC runner login ──────────────────────────────────────────────
+Claude Code opens now. In it:
+  1. Accept the folder trust prompt.
+  2. Run /login and sign in with your Claude (Max) account.
+  3. Run /exit.
+EOF
+claude
+touch "$STATE_DIR/logged_in"
+cat <<EOF
+── Done ───────────────────────────────────────────────────────────
+Remote Control starts within 30s. On its first start it asks
+'Enable Remote Control? (y/n)'. Answer it once:
+  adlc attach $ADLC_SLUG     (window 'rc'; detach with Ctrl-b d)
+Then connect from claude.ai/code or the Claude app: session 'adlc-$ADLC_SLUG'.
+EOF

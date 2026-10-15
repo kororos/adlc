@@ -1,0 +1,5 @@
+# Default DinD mode: privileged container. Isolates test environments from the host's Docker,
+# but a privileged container is not a hard security boundary. Prefer Sysbox where available.
+services:
+  docker:
+    privileged: true

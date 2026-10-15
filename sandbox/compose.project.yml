@@ -1,0 +1,110 @@
+# One ADLC project on the dev server: runner + Docker-in-Docker sidecar + egress proxy.
+# Started by `bin/adlc up <slug>` with --env-file $ADLC_ROOT/config/<slug>.env. Not meant to be run by hand.
+#
+# Networks:
+#   internal  no internet route. Runner, DinD and egress only. All outbound traffic goes via egress.
+#   outbound  egress proxy's route to the internet.
+#   edge      shared, internal. The dev-server's edge Traefik reaches this project's inner Traefik.
+name: adlc-${ADLC_SLUG}
+
+services:
+  egress:
+    build: ./egress
+    image: adlc/egress:local
+    environment:
+      ADLC_NETWORK_MODE: ${ADLC_NETWORK_MODE:-audit}
+    volumes:
+      # The shared clone (kept at origin/<default> by the poller); the proxy reads adlc.yaml from it.
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/repo:/project:ro
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/logs/egress:/var/log/squid
+    networks:
+      internal:
+        ipv4_address: ${ADLC_SUBNET_PREFIX}.2
+      outbound: {}
+    restart: unless-stopped
+
+  docker:
+    image: ${ADLC_DIND_IMAGE:-docker:29-dind}
+    hostname: docker
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      HTTP_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
+      HTTPS_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
+      NO_PROXY: localhost,127.0.0.1,docker,${ADLC_SUBNET_PREFIX}.0/24
+    volumes:
+      - dind-certs:/certs
+      - dind-data:/var/lib/docker
+      # Same path as on the host, so compose bind mounts resolve identically in runner and DinD.
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}:${ADLC_ROOT}/projects/${ADLC_SLUG}
+      - ${ADLC_ROOT}/cache:${ADLC_ROOT}/cache
+    networks:
+      internal:
+        ipv4_address: ${ADLC_SUBNET_PREFIX}.3
+      edge:
+        aliases:
+          - adlc-${ADLC_SLUG}-docker
+    restart: unless-stopped
+    # privileged (default) or sysbox runtime: see compose.dind-*.yml
+
+  runner:
+    image: ${ADLC_RUNNER_IMAGE}
+    hostname: adlc-${ADLC_SLUG}
+    init: true
+    depends_on: [egress, docker]
+    environment:
+      ADLC_ROOT: ${ADLC_ROOT}
+      ADLC_SLUG: ${ADLC_SLUG}
+      ADLC_REPO: ${ADLC_REPO}
+      ADLC_BASE_DOMAIN: ${ADLC_BASE_DOMAIN}
+      ADLC_SUBNET_PREFIX: ${ADLC_SUBNET_PREFIX}
+      ADLC_MAX_PARALLEL_RUNS: ${ADLC_MAX_PARALLEL_RUNS:-1}
+      ADLC_LEAD_MODEL: ${ADLC_LEAD_MODEL:-sonnet}
+      ADLC_RC_PERMISSION_MODE: ${ADLC_RC_PERMISSION_MODE:-acceptEdits}
+      ADLC_REGISTRY_HOST: ${ADLC_REGISTRY_HOST:-ghcr.io}
+      ADLC_REGISTRY_USER: ${ADLC_REGISTRY_USER:-}
+      ADLC_INNER_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
+      HTTP_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
+      HTTPS_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
+      http_proxy: http://${ADLC_SUBNET_PREFIX}.2:3128
+      https_proxy: http://${ADLC_SUBNET_PREFIX}.2:3128
+      NO_PROXY: localhost,127.0.0.1,docker,${ADLC_SUBNET_PREFIX}.0/24
+      no_proxy: localhost,127.0.0.1,docker,${ADLC_SUBNET_PREFIX}.0/24
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      ADLC_MARKETPLACE: /opt/adlc
+    secrets: [gh_pat, claude_oauth_token, registry_token]
+    volumes:
+      - dind-certs:/certs:ro
+      - home:/home/adlc
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}:${ADLC_ROOT}/projects/${ADLC_SLUG}
+      - ${ADLC_ROOT}/cache:${ADLC_ROOT}/cache
+      - ${ADLC_HOME}:/opt/adlc:ro
+    networks:
+      internal:
+        ipv4_address: ${ADLC_SUBNET_PREFIX}.4
+    restart: unless-stopped
+
+networks:
+  internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${ADLC_SUBNET_PREFIX}.0/24
+  outbound: {}
+  edge:
+    external: true
+    name: adlc-edge
+
+volumes:
+  dind-certs: {}
+  dind-data: {}
+  home: {}
+
+secrets:
+  gh_pat:
+    file: ${ADLC_ROOT}/secrets/${ADLC_SLUG}/gh_pat
+  claude_oauth_token:
+    file: ${ADLC_ROOT}/secrets/${ADLC_SLUG}/claude_oauth_token
+  registry_token:
+    file: ${ADLC_ROOT}/secrets/${ADLC_SLUG}/registry_token

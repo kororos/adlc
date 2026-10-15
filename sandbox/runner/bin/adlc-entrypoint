@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ADLC runner entrypoint: prepares credentials, Docker, the shared clone and the plugins,
+# then starts the tmux session that hosts Remote Control, the poller and the dev deployer.
+set -euo pipefail
+ADLC_COMPONENT=entrypoint
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+
+[ "$(id -u)" != 0 ] || die "the runner must not run as root (bypassPermissions refuses root)"
+
+# Subscription billing only: an API key would silently take precedence in -p mode.
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+
+ensure_dirs
+rm -f "$STATE_DIR"/running/*.pid
+
+# ── GitHub ────────────────────────────────────────────────────────────────────
+GH_TOKEN=$(secret gh_pat)
+[ -n "$GH_TOKEN" ] || die "secret gh_pat is missing (run: adlc secrets $ADLC_SLUG)"
+export GH_TOKEN
+gh auth setup-git >/dev/null
+git config --global user.name "${ADLC_GIT_NAME:-ADLC Bot}"
+git config --global user.email "${ADLC_GIT_EMAIL:-adlc-bot@users.noreply.github.com}"
+git config --global init.defaultBranch main
+git config --global pull.ff only
+
+# ── Proxy settings for tools that ignore HTTP(S)_PROXY ────────────────────────
+if [ -n "${HTTPS_PROXY:-}" ]; then
+  proxy_host=$(sed -E 's#^[a-z]+://##; s#:[0-9]+/?$##' <<<"$HTTPS_PROXY")
+  proxy_port=$(sed -E 's#.*:([0-9]+)/?$#\1#' <<<"$HTTPS_PROXY")
+  mkdir -p ~/.gradle
+  cat >~/.gradle/gradle.properties <<EOF
+systemProp.http.proxyHost=$proxy_host
+systemProp.http.proxyPort=$proxy_port
+systemProp.https.proxyHost=$proxy_host
+systemProp.https.proxyPort=$proxy_port
+systemProp.http.nonProxyHosts=localhost|127.0.0.1|docker|*.lan
+EOF
+fi
+
+# ── Docker (project's Docker-in-Docker sidecar) ───────────────────────────────
+# Containers started through this client get the proxy injected, so test environments
+# reach the internet only through the egress proxy.
+mkdir -p ~/.docker
+cat >~/.docker/config.json <<EOF
+{ "proxies": { "default": {
+    "httpProxy": "${ADLC_INNER_PROXY:-}", "httpsProxy": "${ADLC_INNER_PROXY:-}",
+    "noProxy": "localhost,127.0.0.1,.lan,${ADLC_SUBNET_PREFIX:-172.31.0}.0/24" } } }
+EOF
+for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done
+docker info >/dev/null 2>&1 || die "cannot reach the Docker sidecar at ${DOCKER_HOST:-?}"
+
+registry_token=$(secret registry_token)
+if [ -n "$registry_token" ] && [ -n "${ADLC_REGISTRY_HOST:-}" ]; then
+  docker login "$ADLC_REGISTRY_HOST" -u "${ADLC_REGISTRY_USER:-adlc}" --password-stdin <<<"$registry_token" >/dev/null \
+    && log "logged in to $ADLC_REGISTRY_HOST" || log "WARN: registry login failed"
+fi
+
+# Inner reverse proxy: routes <run>.app.<slug>.<base> etc. to containers labelled for Traefik.
+# Traefik >= 3.6 is required for Docker Engine 29 (older releases use a too-old API version).
+# NO_PROXY=* stops the injected egress proxy from capturing Traefik's backend requests.
+docker network inspect adlc-web >/dev/null 2>&1 || docker network create adlc-web >/dev/null
+traefik_image=${ADLC_TRAEFIK_IMAGE:-traefik:v3.6}
+if [ "$(docker inspect -f '{{.Config.Image}}' adlc-inner-traefik 2>/dev/null)" != "$traefik_image" ]; then
+  docker rm -f adlc-inner-traefik >/dev/null 2>&1 || true
+  docker run -d --name adlc-inner-traefik --restart unless-stopped --network adlc-web -p 80:80 \
+    -e 'NO_PROXY=*' -e 'no_proxy=*' \
+    -v /var/run/docker.sock:/var/run/docker.sock:ro "$traefik_image" \
+    --providers.docker=true --providers.docker.exposedbydefault=false \
+    --providers.docker.network=adlc-web --entrypoints.web.address=:80 >/dev/null \
+    && log "inner traefik started" || log "WARN: could not start inner traefik"
+fi
+
+# ── Shared clone ──────────────────────────────────────────────────────────────
+if ! repo_ready; then
+  if git clone --quiet "https://github.com/$ADLC_REPO.git" "$REPO_DIR"; then
+    log "cloned $ADLC_REPO"
+  else
+    log "WARN: $ADLC_REPO not cloneable yet (run .adlc/provision.sh); the poller will retry"
+  fi
+fi
+
+# ── Plugins (from the ADLC checkout mounted at /opt/adlc) ─────────────────────
+if claude plugin marketplace list 2>/dev/null | grep -q '\badlc\b'; then
+  claude plugin marketplace update adlc >/dev/null 2>&1 || log "WARN: marketplace update failed"
+else
+  claude plugin marketplace add "${ADLC_MARKETPLACE:-/opt/adlc}" >/dev/null || die "cannot add ADLC marketplace"
+fi
+claude plugin install adlc-core@adlc >/dev/null 2>&1 || claude plugin update adlc-core@adlc >/dev/null 2>&1 || true
+claude plugin list 2>/dev/null | grep -q 'adlc-core' || die "adlc-core plugin is not installed"
+log "plugins ready"
+
+# ── Long-running processes ────────────────────────────────────────────────────
+tmux kill-session -t adlc 2>/dev/null || true
+tmux new-session -d -s adlc -n rc "adlc-rc"
+tmux pipe-pane -t adlc:rc -o "cat >>'$LOG_DIR/rc.log'"
+tmux new-window -t adlc -n poller "adlc-poller 2>&1 | tee -a '$LOG_DIR/poller.log'"
+tmux new-window -t adlc -n deployer "adlc-deployer 2>&1 | tee -a '$LOG_DIR/deployer.log'"
+tmux new-window -t adlc -n shell "bash -l"
+tmux select-window -t adlc:rc
+log "runner up: attach with 'adlc attach $ADLC_SLUG'"
+
+while tmux has-session -t adlc 2>/dev/null; do sleep 30; done
+die "tmux session ended"

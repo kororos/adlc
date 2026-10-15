@@ -1,0 +1,14 @@
+{
+  "name": "adlc",
+  "description": "ADLC: agentic SDLC delivery pipeline and technology stack packs for Claude Code.",
+  "owner": {
+    "name": "Lefteris Kororos"
+  },
+  "plugins": [
+    {
+      "name": "adlc-core",
+      "source": "./plugins/adlc-core",
+      "description": "Agentic delivery pipeline: GitHub issue to merged PR via specialised subagents."
+    }
+  ]
+}
