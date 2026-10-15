@@ -176,6 +176,20 @@ Why: one line
 <!-- adlc:setup:end -->
 ```
 
+## GitHub plan limits (check before proposing gates)
+Detect with `gh api user --jq .plan.name` (personal) or `gh api orgs/<org> --jq .plan.name` plus the repo's visibility. For **private** repos:
+
+| Feature | Free | Pro / Team | Enterprise | Public repo (any plan) |
+|---|---|---|---|---|
+| Branch protection / rulesets (required checks, CODEOWNERS review, no direct push) | ❌ | ✅ | ✅ | ✅ |
+| Environment secrets + deployment branch/tag policies | ❌ | ✅ | ✅ | ✅ |
+| Environment **required reviewers** / wait timers | ❌ | ❌ | ✅ | ✅ |
+
+Consequences:
+- **Free + private:** don't run unattended. Repo-level secrets are readable by any workflow, including agent-written PR workflows, and `main` can't be protected. Recommend Pro/Team (or a public repo if the code may be public) and record it as a blocking open item.
+- **Pro/Team + private (common):** gate prod with **`workflow_dispatch` only** (the agents' token has Actions: read, so only humans can trigger it) plus a deployment branch/tag policy (`main`, `v*`) on `prod`/`release`. Don't propose required reviewers. `provision.sh` must not try to create them.
+- **Enterprise or public:** required reviewers on `prod`/`release` (default).
+
 ## Provisioning rules
 - Init never runs privileged actions with the runner's credentials. The runner's PAT intentionally has no admin rights. Init writes `.adlc/provision.sh`, the user reviews it and runs it **on the dev-server host (or their own machine), not inside the runner**, with their own admin `gh` login: `cd <this worktree's host path> && bash .adlc/provision.sh`. Never suggest `! bash …` in a runner or Remote Control session: that runs inside the runner with the agents' token. The host path of the current worktree is the same as `pwd` (the workspace is bind-mounted at an identical path).
 - **CI hardening (always):** `CODEOWNERS` with `/.github/ @<owner>` plus branch protection "Require review from Code Owners", so GitHub itself makes workflow changes wait for a human, even with auto-merge. A GitHub Environment **`publish`** with deployment branches limited to the default branch, holding the registry push credentials, so workflows on PR branches can't read them. The Environment **`prod`** has required reviewers.
