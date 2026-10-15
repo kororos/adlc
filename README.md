@@ -171,6 +171,11 @@ Without [Sysbox](https://github.com/nestybox/sysbox), the per-project Docker eng
 1. Stop running containers (the installer restarts Docker), install the `sysbox-ce` package for your distro from the Sysbox releases page, and check that `docker info | grep -i sysbox` shows `sysbox-runc`. Check the release notes for supported Docker Engine versions first.
 2. New projects use it automatically. For existing ones: `adlc up <slug> --dind sysbox`. This also applies to the CI engine.
 
+### Sessions from the Claude app
+All sessions you start from the app on **adlc-<slug>** work in the same folder, `sessions/rc`, on whatever branch is checked out there. So a phase such as discovery simply continues in the next session, even after `adlc up`: send `/adlc-core:<phase> --resume`. Don't run two app sessions at the same time; they'd share the folder. For parallel work use `adlc session <slug> <name>`, which gets its own worktree. (Set `ADLC_RC_SPAWN=worktree` in `/srv/adlc/config/<slug>.env` if you'd rather have a fresh worktree per app session.)
+
+On every runner restart, worktrees of ended sessions are removed if they hold no uncommitted work (their branches and commits stay), and `sessions/rc` returns to `main` only when it's idle. A phase branch checked out there is kept.
+
 ### Working in a terminal over SSH
 ```bash
 ssh dev-server

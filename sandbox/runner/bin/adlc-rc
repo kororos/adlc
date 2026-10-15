@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Keeps a Claude Code Remote Control server running for the project.
 #
-# The server runs in its own worktree (sessions/rc, branch adlc/session-rc), never in the
-# shared clone: the poller resets repo/ to origin/<default> every minute. The session the
-# server pre-creates (the one the Claude app connects to) therefore works in that worktree,
-# and every further session gets its own isolated worktree (--spawn worktree).
+# The server runs in its own worktree (sessions/rc), never in the shared clone: the poller
+# resets repo/ to origin/<default> every minute.
+#
+# Spawn mode (ADLC_RC_SPAWN):
+#   same-dir (default)  every session from the Claude app works in sessions/rc, on whatever
+#                       branch is checked out there. Continuing a phase after a restart just
+#                       works. Sessions open at the same time share the folder; for parallel
+#                       work use `adlc session <slug> <name>` (own worktree).
+#   worktree            every new app session gets a fresh worktree under repo/.claude/worktrees.
 set -uo pipefail
 ADLC_COMPONENT=rc
 # shellcheck source=adlc-lib.sh
@@ -15,15 +20,34 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 
 RC_DIR="$ADLC_WS/sessions/rc"
 RC_BRANCH=adlc/session-rc
+SPAWN=${ADLC_RC_SPAWN:-same-dir}
 
 until [ -f "$STATE_DIR/logged_in" ] && repo_ready; do
   log "waiting: run 'adlc login $ADLC_SLUG' on the host (and make sure the repo exists)"
   sleep 30
 done
 
-# Create the worktree, or move it to the latest default branch when it holds no work.
+clean() { [ -z "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
+
+# Sessions from before this (re)start are gone. Remove their worktrees when they hold no
+# uncommitted work, so their branches (which keep all commits) can be checked out again.
+release_stale_session_worktrees() {
+  local wt
+  for wt in "$REPO_DIR"/.claude/worktrees/*/; do
+    [ -e "$wt/.git" ] || continue
+    if clean "$wt"; then
+      git -C "$REPO_DIR" worktree remove "$wt" >/dev/null 2>&1 && log "removed idle session worktree $(basename "$wt")"
+    else
+      log "session worktree $(basename "$wt") has uncommitted work; kept (its branch stays checked out there)"
+    fi
+  done
+  git -C "$REPO_DIR" worktree prune 2>/dev/null || true
+}
+
+# Create sessions/rc, or move it to the latest default branch when it's idle. A phase branch
+# (e.g. adlc/discovery) that's checked out there is left as is, so work continues after restarts.
 prepare_rc_worktree() {
-  local b; b=$(default_branch)
+  local b current; b=$(default_branch)
   git -C "$REPO_DIR" fetch --quiet origin 2>/dev/null || true
   if [ ! -e "$RC_DIR/.git" ]; then
     git -C "$REPO_DIR" worktree prune 2>/dev/null || true
@@ -33,22 +57,26 @@ prepare_rc_worktree() {
       git -C "$REPO_DIR" worktree add --quiet -b "$RC_BRANCH" "$RC_DIR" "origin/$b"
     fi
     log "created worktree $RC_DIR ($RC_BRANCH)"
-  elif [ -z "$(git -C "$RC_DIR" status --porcelain)" ] \
-       && [ -z "$(git -C "$RC_DIR" rev-list HEAD --not --remotes 2>/dev/null)" ]; then
-    # Clean and everything pushed (possibly already squash-merged): start from the latest default branch.
-    git -C "$RC_DIR" checkout --quiet -B "$RC_BRANCH" "origin/$b"
+    return
+  fi
+  current=$(git -C "$RC_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
+  if [ -n "$current" ] && [ "$current" != "$RC_BRANCH" ]; then
+    log "sessions/rc stays on $current"
+  elif clean "$RC_DIR" && [ -z "$(git -C "$RC_DIR" rev-list HEAD --not --remotes 2>/dev/null)" ]; then
+    git -C "$RC_DIR" checkout --quiet -B "$RC_BRANCH" "origin/$b" && log "sessions/rc reset to $b"
   else
-    log "worktree $RC_DIR has uncommitted or unpushed work; leaving it as is"
+    log "sessions/rc has uncommitted or unpushed work; leaving it as is"
   fi
 }
 
 while :; do
+  release_stale_session_worktrees
   prepare_rc_worktree || { log "could not prepare $RC_DIR; retrying in 30s"; sleep 30; continue; }
   cd "$RC_DIR" || { sleep 30; continue; }
-  log "starting remote-control in $RC_DIR (first start asks 'Enable Remote Control?' here; answer y)"
+  log "starting remote-control in $RC_DIR, spawn mode $SPAWN (first start asks 'Enable Remote Control?' here; answer y)"
   claude remote-control \
     --name "adlc-$ADLC_SLUG" \
-    --spawn worktree \
+    --spawn "$SPAWN" \
     --permission-mode "${ADLC_RC_PERMISSION_MODE:-acceptEdits}" || true
   log "remote-control exited; restarting in 15s"
   sleep 15
