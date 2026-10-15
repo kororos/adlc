@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Keeps a Claude Code Remote Control server running in the shared clone.
 # Interactive sessions get their own worktrees (--spawn worktree), so they never
-# switch branches under the poller or each other.
+# switch branches under the poller or each other. No session is pre-created in the
+# shared clone itself: the poller resets it to origin/<default> every minute.
 set -uo pipefail
 ADLC_COMPONENT=rc
 # shellcheck source=adlc-lib.sh
@@ -21,6 +22,7 @@ while :; do
   claude remote-control \
     --name "adlc-$ADLC_SLUG" \
     --spawn worktree \
+    --no-create-session-in-dir \
     --permission-mode "${ADLC_RC_PERMISSION_MODE:-acceptEdits}" || true
   log "remote-control exited; restarting in 15s"
   sleep 15
