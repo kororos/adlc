@@ -11,6 +11,7 @@
 #       --registry <host>            container registry host (default ghcr.io), e.g. harbor.example.com
 #       --registry-user <user>       registry pull user (Harbor: robot$<project>+<name>)
 #       --registry-ca <file>         CA certificate for a registry with a private CA
+#       --edge-port <port>           host port for preview URLs (default 80; stored for all projects)
 #   adlc login <slug>                one-time Claude login inside the runner
 #   adlc session <slug> [name]       interactive Claude session in its own worktree (also reachable
 #                                    from claude.ai/app); re-running re-attaches
@@ -51,6 +52,8 @@ set_cfg() { # set_cfg <file> <KEY> <value>
     echo "$k=$v" >>"$f"
   fi
 }
+edge_cfg() { echo "$ADLC_ROOT/edge/edge.env"; }
+edge_port() { local p=""; [ -f "$(edge_cfg)" ] && p=$(grep '^ADLC_EDGE_PORT=' "$(edge_cfg)" | cut -d= -f2); echo "${p:-${ADLC_EDGE_PORT:-80}}"; }
 has_sysbox() { docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q sysbox-runc; }
 
 compose() { # compose <slug> <args...>
@@ -93,6 +96,11 @@ cmd_doctor() {
   has_sysbox && ok "sysbox runtime available (hardened DinD)" || warn "sysbox not installed: DinD runs privileged (see docs)"
   if [ -d "$ADLC_ROOT" ] && [ -w "$ADLC_ROOT" ]; then ok "$ADLC_ROOT writable by $(id -un)"; else bad "$ADLC_ROOT missing or not writable (sudo mkdir -p $ADLC_ROOT && sudo chown $(id -un): $ADLC_ROOT)"; fi
   [ "$(id -u)" != 0 ] && ok "not running as root" || bad "run adlc as the non-root owner of $ADLC_ROOT"
+  local eport; eport=$(edge_port)
+  if docker ps --format '{{.Names}}' | grep -qx adlc-edge-traefik-1; then ok "edge proxy running on port $eport"
+  elif command -v ss >/dev/null && [ "$(ss -Hltn "sport = :$eport" 2>/dev/null | wc -l)" -gt 0 ]; then
+    bad "port $eport is in use by something else: use 'adlc up <slug> --edge-port 8088' (see: sudo ss -ltnp 'sport = :$eport')"
+  else ok "port $eport free for the edge proxy"; fi
   local free; free=$(df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2{print int($4/1048576)}')
   [ "${free:-0}" -ge 50 ] && ok "${free}GB free" || warn "${free:-?}GB free (50GB+ recommended)"
   local f slug
@@ -131,7 +139,7 @@ cmd_secrets() {
 
 cmd_up() {
   local slug=$1; shift; need_slug "$slug"
-  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca=""
+  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca="" edge_port=""
   while [ $# -gt 0 ]; do
     case $1 in
       --repo) repo=$2; shift 2 ;;
@@ -141,6 +149,7 @@ cmd_up() {
       --registry) reg=$2; shift 2 ;;
       --registry-user) reg_user=$2; shift 2 ;;
       --registry-ca) reg_ca=$2; shift 2 ;;
+      --edge-port) edge_port=$2; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -155,7 +164,10 @@ cmd_up() {
   grep -q '^ADLC_CI_SUBNET_PREFIX=' "$f" \
     || set_cfg "$f" ADLC_CI_SUBNET_PREFIX "$(grep '^ADLC_SUBNET_PREFIX=' "$f" | cut -d= -f2 | sed 's/^172\.31\./172.30./')"
   [ -n "$reg" ] && set_cfg "$f" ADLC_REGISTRY_HOST "$reg"
-  [ -n "$reg_user" ] && set_cfg "$f" ADLC_REGISTRY_USER "'$reg_user'"
+  if [ -n "$reg_user" ]; then
+    [[ "$reg_user" == robot-* ]] && warn "registry user '$reg_user' looks like 'robot\$…' lost its '\$' to shell expansion. Quote it: --registry-user 'robot\$name'"
+    set_cfg "$f" ADLC_REGISTRY_USER "'$reg_user'"
+  fi
   if [ -n "$reg_ca" ]; then
     [ -f "$reg_ca" ] || die "CA file '$reg_ca' not found"
     cp "$reg_ca" "$ADLC_ROOT/config/$slug-registry-ca.crt"
@@ -192,8 +204,13 @@ cmd_up() {
   done
   docker tag "$img" "$ADLC_RUNNER_IMAGE"
 
-  # Edge proxy (shared) and this project's route.
-  ADLC_ROOT=$ADLC_ROOT docker compose -f "$SANDBOX/edge/compose.yml" up -d >/dev/null
+  # Edge proxy (shared) and this project's route. A busy port must not block the project itself.
+  [ -n "$edge_port" ] && set_cfg "$(edge_cfg)" ADLC_EDGE_PORT "$edge_port"
+  local eport; eport=$(edge_port)
+  if ! ADLC_ROOT=$ADLC_ROOT ADLC_EDGE_PORT=$eport docker compose -f "$SANDBOX/edge/compose.yml" up -d --quiet-pull >/dev/null 2>"$ADLC_ROOT/edge/up.err"; then
+    warn "edge proxy could not start on port $eport ($(grep -oE 'address already in use|port is already allocated' "$ADLC_ROOT/edge/up.err" | head -1 || echo "see $ADLC_ROOT/edge/up.err")). Preview URLs are unavailable."
+    warn "fix: adlc up $slug --edge-port 8088   (or free port $eport)"
+  fi
   local esc; esc=$(sed 's/\./\\./g' <<<"$slug.$ADLC_BASE_DOMAIN")
   cat >"$ADLC_ROOT/edge/dynamic/$slug.yml" <<EOF
 http:
@@ -214,7 +231,8 @@ EOF
   say "Runner for '$slug' is starting. Next:"
   [ -e "$ADLC_ROOT/projects/$slug/state/logged_in" ] \
     || say "  adlc login $slug        (one-time Claude login for Remote Control)"
-  say "  adlc status $slug       ·  previews: http://<run>.app.$slug.$ADLC_BASE_DOMAIN"
+  local suffix=""; [ "$eport" = 80 ] || suffix=":$eport"
+  say "  adlc status $slug       ·  previews: http://<run>.app.$slug.$ADLC_BASE_DOMAIN$suffix"
 }
 
 cmd_down()   { need_slug "$1"; load_cfg "$1"; compose "$1" down; }
