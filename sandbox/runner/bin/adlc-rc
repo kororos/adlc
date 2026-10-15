@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Keeps a Claude Code Remote Control server running in the shared clone.
-# Interactive sessions get their own worktrees (--spawn worktree), so they never
-# switch branches under the poller or each other. No session is pre-created in the
-# shared clone itself: the poller resets it to origin/<default> every minute.
+# Keeps a Claude Code Remote Control server running for the project.
+#
+# The server runs in its own worktree (sessions/rc, branch adlc/session-rc), never in the
+# shared clone: the poller resets repo/ to origin/<default> every minute. The session the
+# server pre-creates (the one the Claude app connects to) therefore works in that worktree,
+# and every further session gets its own isolated worktree (--spawn worktree).
 set -uo pipefail
 ADLC_COMPONENT=rc
 # shellcheck source=adlc-lib.sh
@@ -11,18 +13,41 @@ source /usr/local/bin/adlc-lib.sh
 # Remote Control needs the /login session, not the setup-token used for headless runs.
 unset CLAUDE_CODE_OAUTH_TOKEN
 
+RC_DIR="$ADLC_WS/sessions/rc"
+RC_BRANCH=adlc/session-rc
+
 until [ -f "$STATE_DIR/logged_in" ] && repo_ready; do
   log "waiting: run 'adlc login $ADLC_SLUG' on the host (and make sure the repo exists)"
   sleep 30
 done
 
-cd "$REPO_DIR" || die "no shared clone"
+# Create the worktree, or move it to the latest default branch when it holds no work.
+prepare_rc_worktree() {
+  local b; b=$(default_branch)
+  git -C "$REPO_DIR" fetch --quiet origin 2>/dev/null || true
+  if [ ! -e "$RC_DIR/.git" ]; then
+    git -C "$REPO_DIR" worktree prune 2>/dev/null || true
+    if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$RC_BRANCH"; then
+      git -C "$REPO_DIR" worktree add --quiet "$RC_DIR" "$RC_BRANCH"
+    else
+      git -C "$REPO_DIR" worktree add --quiet -b "$RC_BRANCH" "$RC_DIR" "origin/$b"
+    fi
+    log "created worktree $RC_DIR ($RC_BRANCH)"
+  elif [ -z "$(git -C "$RC_DIR" status --porcelain)" ] \
+       && [ -z "$(git -C "$RC_DIR" rev-list "origin/$b..HEAD" 2>/dev/null)" ]; then
+    git -C "$RC_DIR" reset --quiet --hard "origin/$b"
+  else
+    log "worktree $RC_DIR has uncommitted or unpushed work; leaving it as is"
+  fi
+}
+
 while :; do
-  log "starting remote-control (first start asks 'Enable Remote Control?' here; answer y)"
+  prepare_rc_worktree || { log "could not prepare $RC_DIR; retrying in 30s"; sleep 30; continue; }
+  cd "$RC_DIR" || { sleep 30; continue; }
+  log "starting remote-control in $RC_DIR (first start asks 'Enable Remote Control?' here; answer y)"
   claude remote-control \
     --name "adlc-$ADLC_SLUG" \
     --spawn worktree \
-    --no-create-session-in-dir \
     --permission-mode "${ADLC_RC_PERMISSION_MODE:-acceptEdits}" || true
   log "remote-control exited; restarting in 15s"
   sleep 15

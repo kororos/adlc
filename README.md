@@ -554,6 +554,7 @@ Planned packs: `stack-react-native`, `stack-node-api` (Phase 4), then others suc
 | A build in a run fails to download something | The domain is blocked in allowlist mode: `adlc audit <slug>`, add it to `adlc.yaml → network.extra_domains`. |
 | Services in a test environment can't reach each other (HTTP 403) | The service lacks `NO_PROXY: "*"`. See the networking rules in the testing contract. |
 | `adlc up` warns "edge proxy could not start on port 80" | Another service uses port 80: `adlc up <slug> --edge-port 8088` (stored for all projects). Preview URLs then end in `:8088`. |
+| Claude app: session stuck on "Connecting" / "Can't reach adlc-<slug>" after `adlc up` | Each runner restart creates a **new** Remote Control environment; old sessions don't reconnect. Start a new session on the online **adlc-<slug>** environment (or open the link shown in `adlc attach <slug>` → window rc). Right after a restart, rc may report "folder already served" for ~3 minutes until the old registration expires; it recovers by itself. |
 | Preview URL returns 404 | The service isn't on the `adlc-web` network or lacks Traefik labels; check with `adlc attach` → shell → `docker ps`. |
 
 ---
