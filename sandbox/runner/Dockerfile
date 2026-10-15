@@ -46,6 +46,12 @@ RUN (userdel -r node 2>/dev/null || true) && (groupdel node 2>/dev/null || true)
 COPY bin/ /usr/local/bin/
 RUN chmod 0755 /usr/local/bin/adlc-*
 
+# Login shells (bash -l, tmux shells, agents' shells) reset PATH from /etc/profile;
+# re-add what the image puts on PATH via ENV.
+RUN printf '%s\n' 'export PNPM_HOME=/home/adlc/.local/share/pnpm' \
+      'case ":$PATH:" in *":$PNPM_HOME:"*) ;; *) export PATH="$PNPM_HOME:$PATH" ;; esac' \
+      > /etc/profile.d/adlc.sh
+
 USER adlc
 WORKDIR /home/adlc
 ENV DISABLE_AUTOUPDATER=1 \

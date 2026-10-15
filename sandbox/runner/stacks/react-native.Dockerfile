@@ -34,4 +34,14 @@ RUN curl -fsSL https://github.com/mobile-dev-inc/maestro/releases/latest/downloa
 RUN npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
  && rm -rf /var/lib/apt/lists/* /root/.npm
 
+# Same for login shells (see base image): Android SDK, Maestro, JAVA_HOME.
+RUN printf '%s\n' \
+      'export ANDROID_HOME=/opt/android-sdk' \
+      'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' \
+      'export MAESTRO_CLI_NO_ANALYTICS=1' \
+      'for d in /opt/maestro/bin "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/cmdline-tools/latest/bin"; do' \
+      '  case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac' \
+      'done; export PATH' \
+      > /etc/profile.d/adlc-react-native.sh
+
 USER adlc
