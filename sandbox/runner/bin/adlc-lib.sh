@@ -54,7 +54,8 @@ sync_repo() {
   git -C "$REPO_DIR" checkout --quiet --force "$b" 2>/dev/null \
     || git -C "$REPO_DIR" checkout --quiet --force -B "$b" "origin/$b" || return 1
   git -C "$REPO_DIR" reset --quiet --hard "origin/$b"
-  git -C "$REPO_DIR" clean --quiet -fd
+  # Remote Control puts on-demand session worktrees under .claude/worktrees: never touch them.
+  git -C "$REPO_DIR" clean --quiet -fd --exclude=.claude/worktrees/
 }
 
 ensure_dirs() {
