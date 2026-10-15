@@ -10,7 +10,8 @@ ARG PLAYWRIGHT_VERSION=1.48.2
 
 USER root
 ENV ANDROID_HOME=/opt/android-sdk \
-    MAESTRO_CLI_NO_ANALYTICS=1
+    MAESTRO_CLI_NO_ANALYTICS=1 \
+    MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
 ENV PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:/opt/maestro/bin:$PATH
 
 RUN apt-get update \
@@ -38,7 +39,7 @@ RUN npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
 RUN printf '%s\n' \
       'export ANDROID_HOME=/opt/android-sdk' \
       'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' \
-      'export MAESTRO_CLI_NO_ANALYTICS=1' \
+      'export MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true' \
       'for d in /opt/maestro/bin "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/cmdline-tools/latest/bin"; do' \
       '  case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac' \
       'done; export PATH' \
