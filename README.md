@@ -113,26 +113,39 @@ cd /srv/adlc/projects/<slug>/sessions/main && bash .adlc/provision.sh   # on the
 ```
 
 ### Agent identity: the ADLC GitHub App (recommended)
-With `gh_pat`, agents act as **your** account: you can't approve their PRs, and anything your admin role allows (pushing to `main`, creating release tags) is technically open to them. A GitHub App gives them their own identity, `<app>[bot]`, with short-lived (1 h) tokens minted on demand.
+With `gh_pat`, agents act as **your** account: you can't approve their PRs (GitHub forbids approving your own), and your admin bypass of branch protection applies to them too. A GitHub App gives the agents their own identity, `<app>[bot]`, with **1-hour tokens** limited to one repo and minted on demand in the runner. You create it **once per GitHub account** and reuse it for every project. It's needed before the poller starts unattended delivery runs.
 
-**Create it once per GitHub account** (reuse it for every project): github.com → Settings → Developer settings → **GitHub Apps → New GitHub App**
+**1. Create it:** github.com → avatar → Settings → Developer settings → **GitHub Apps → New GitHub App**
 | Field | Value |
 |---|---|
-| Name | e.g. `adlc-kororos` (globally unique) · Homepage URL: `https://github.com/kororos/adlc` |
-| Webhook | **uncheck "Active"** |
-| Repository permissions | **Contents, Issues, Pull requests, Workflows: Read and write** · **Actions, Commit statuses: Read** · Metadata: Read (automatic) · everything else: No access |
-| Account permissions | none |
+| GitHub App name | e.g. `adlc-kororos` (must be unique on GitHub) |
+| Homepage URL | `https://github.com/kororos/adlc` (any valid URL) |
+| Callback/Setup URL, user authorization, device flow | empty / off |
+| **Webhook → Active** | **unchecked** |
+| Repository permissions | **Contents, Issues, Pull requests, Workflows: Read and write** · **Actions, Commit statuses: Read-only** · Metadata: Read-only (automatic) · everything else **No access** |
+| Organization / Account permissions | all **No access** |
 | Where can it be installed | **Only on this account** |
 
-Then **Create** → note the **App ID** → **Generate a private key** (a `.pem` downloads) → **Install App** → *Only select repositories* → `kororos/<slug>` (add more projects to the same installation later).
+Then **Create GitHub App** → note the **App ID** (not the Client ID) → **Private keys → Generate a private key** (a `.pem` downloads) → **Install App** → *Only select repositories* → `kororos/<slug>`. For later projects, add their repos to the same installation.
 
-On the dev server:
+**2. Configure the runner.** `adlc up` restarts the runner, so commit and push open session work first:
 ```bash
-scp ~/Downloads/adlc-kororos.*.private-key.pem dev-server:/tmp/app.pem     # from your Mac
-adlc app <slug> --id <APP_ID> --key /tmp/app.pem && shred -u /tmp/app.pem
-adlc up <slug>                     # runner log: "GitHub identity: adlc-kororos[bot] (app mode)"
+scp ~/Downloads/adlc-kororos.*.private-key.pem dev-server:/tmp/app.pem      # from your Mac
+adlc app <slug> --id <APP_ID> --key /tmp/app.pem && shred -u /tmp/app.pem   # on the dev server
+cd ~/adlc && git pull && adlc up <slug>
+docker logs adlc-<slug>-runner-1 2>&1 | grep identity          # GitHub identity: adlc-kororos[bot] (app mode)
+docker exec adlc-<slug>-runner-1 gh api repos/kororos/<slug> --jq .full_name   # kororos/<slug>
 ```
-Then empty `gh_pat` (`: > /srv/adlc/secrets/<slug>/gh_pat`) and revoke that token on GitHub. Result: the bot can't push to `main` (not an admin), its PRs auto-merge only through branch protection, and `/.github/` or `/deploy/` PRs wait for **your** approval. Limitation: GitHub Apps can't edit Project boards owned by a personal account.
+Delete the downloaded `.pem` on your Mac (a new key can always be generated on the app page).
+
+**3. Retire the personal token:** `: > /srv/adlc/secrets/<slug>/gh_pat`, then revoke that token under Settings → Developer settings → Fine-grained tokens. Keep `ci_admin_pat` (the CI registrar still uses it).
+
+**What changes:**
+- Agent PRs are authored by `adlc-kororos[bot]`.
+- The bot can't push to `main` (it isn't an admin).
+- Low/medium-risk PRs auto-merge through branch protection; `/.github/` and `/deploy/` PRs wait for **your** approval.
+
+Limitation: apps can't edit Project boards owned by a personal account.
 
 ### CI runner (self-hosted, sandboxed)
 Tests run on GitHub-hosted runners. Jobs that need your network, such as **publishing images to an internal registry**, run on the **ADLC CI runner**: `runs-on: [self-hosted, adlc-publish]`. It's enabled per project by setting `ci_admin_pat`:
