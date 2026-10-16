@@ -43,8 +43,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
-      - id: gate
-        run: bash .github/scripts/adlc-gate.sh
+      - id: gate                     # globs from adlc.yaml ci.e2e_android_paths (`*` also matches `/`)
+        run: bash .github/scripts/adlc-gate.sh 'apps/app/*' 'apps/api/*' 'packages/*'
       - if: steps.gate.outputs.run == 'true'
         uses: pnpm/action-setup@v4
       - if: steps.gate.outputs.run == 'true'
