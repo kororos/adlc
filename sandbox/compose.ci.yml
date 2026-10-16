@@ -39,7 +39,7 @@ services:
       ADLC_SLUG: ${ADLC_SLUG}
       ADLC_REPO: ${ADLC_REPO}
       ADLC_REGISTRY_HOST: ${ADLC_REGISTRY_HOST:-}
-      ADLC_CI_LABELS: ${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish}
+      ADLC_CI_LABELS: ${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish,adlc-test}
       ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
       ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
       HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128

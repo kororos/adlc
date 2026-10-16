@@ -14,7 +14,7 @@ source /usr/local/bin/adlc-lib.sh
 
 R="$ADLC_REPO"
 IMAGE=${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
-LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish}
+LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish,adlc-test}
 INTERVAL=${ADLC_CI_INTERVAL:-15}
 
 mkdir -p ~/.docker
@@ -28,6 +28,27 @@ for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done
 docker info >/dev/null 2>&1 || die "cannot reach the CI Docker engine at ${DOCKER_HOST:-?}"
 
 runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
+
+# A waiting runner lives in ci-docker and survives restarts of this container. One registered
+# with other labels (ADLC_CI_LABELS changed) would wait forever for jobs nobody sends it: remove
+# it and its GitHub registration. A runner that has started a job is left to finish.
+replace_stale_runners() {
+  local c labels token id
+  for c in $(docker ps --filter label=adlc.ci=runner --format '{{.Names}}'); do
+    labels=$(docker inspect -f '{{index .Config.Labels "adlc.ci.labels"}}' "$c" 2>/dev/null)
+    [ "$labels" = "$LABELS" ] && continue
+    token=$(secret ci_admin_pat)
+    id=$(GH_TOKEN=$token gh api "repos/$R/actions/runners?per_page=100" \
+          --jq ".runners[] | select(.name == \"$c\") | select(.busy | not) | .id" 2>/dev/null)
+    if [ -z "$id" ]; then
+      log "runner $c has old labels (${labels:-unknown}) but is busy or unknown to GitHub; leaving it"
+      continue
+    fi
+    docker rm -f "$c" >/dev/null 2>&1
+    GH_TOKEN=$token gh api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
+    log "replaced idle runner $c: labels ${labels:-unknown} → $LABELS"
+  done
+}
 
 # Remove everything except running runner containers; keep image layers (build cache).
 reset_engine() {
@@ -61,11 +82,13 @@ start_runner() {
     return 1
   }
   gid=$(docker run --rm --entrypoint stat -v /var/run/docker.sock:/s "$IMAGE" -c %g /s 2>/dev/null || echo 0)
-  docker run -d --rm --name "$name" --label adlc.ci=runner \
+  docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" \
     -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" \
     "$IMAGE" ./run.sh --jitconfig "$jit" >/dev/null \
     && log "runner $name waiting for a job (labels: $LABELS)"
 }
+
+[ -n "$(secret ci_admin_pat)" ] && replace_stale_runners
 
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
