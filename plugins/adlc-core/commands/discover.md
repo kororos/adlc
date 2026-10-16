@@ -44,6 +44,7 @@ You may also make suggestions inline in the dialogue when something obvious come
 ## Helpers
 - `adlc-core:researcher` for facts: competitor features, platform policies, API capabilities. Pass a precise question and an output path under `.adlc/discovery/research/`. Bring back the conclusion in one line plus the source.
 - Never invent requirements the user didn't confirm. Suggestions enter the PRD **only** after an explicit accept.
+- Change files with the Edit/Write tools, not shell scripts (`python3 -`, `sed -i`, heredocs). Edits are pre-approved in Remote Control sessions (acceptEdits); every shell script interrupts the user for approval.
 
 ## Finish
 When the user confirms the MVP scope:

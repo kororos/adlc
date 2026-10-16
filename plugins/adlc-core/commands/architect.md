@@ -29,3 +29,4 @@ In each step, propose a concrete draft and ask at most 3-4 decision questions, e
 - Fit the solution to the stated scale. Default to the simplest architecture that meets the *now* attributes.
 - Every choice states its consequences. Everything not decided goes in an "Open decisions" list.
 - Prefer boring, well-supported technology unless an ADR justifies otherwise.
+- Change files with the Edit/Write tools, not shell scripts (`python3 -`, `sed -i`, heredocs). Edits are pre-approved in Remote Control sessions (acceptEdits); every shell script interrupts the user for approval.

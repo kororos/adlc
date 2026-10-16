@@ -17,7 +17,7 @@ Show:
 - the Mermaid dependency graph and the critical path,
 - unmapped PRD items and the "Later" list.
 
-Iterate in conversation: split/merge, reorder, change scope, move items between milestones. Make small edits yourself in `.adlc/backlog.md`. For structural changes, re-run the backlog-planner with the user's instructions. Don't create anything until the user explicitly approves.
+Iterate in conversation: split/merge, reorder, change scope, move items between milestones. Make small edits yourself in `.adlc/backlog.md` (Edit/Write tools, not shell scripts: edits are pre-approved, scripts interrupt the user). For structural changes, re-run the backlog-planner with the user's instructions. Don't create anything until the user explicitly approves.
 
 ## 3. Create on GitHub (after approval)
 Requires `gh` ≥ 2.94 (check with `gh --version`. If it's older, use the REST endpoints `issues/{n}/sub_issues` and `issues/{n}/dependencies/blocked_by`, which take issue **ids**, not numbers).

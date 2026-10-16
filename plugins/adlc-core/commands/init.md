@@ -30,3 +30,4 @@ Arguments: $ARGUMENTS
 - Never ask for, display or write secret values. Only names and locations.
 - Don't run `provision.sh` yourself unless the user explicitly asks in this session and confirms it is authenticated as an admin.
 - Keep the CLAUDE.md block ≤ 30 lines. It is loaded into every agent's context.
+- Change files with the Edit/Write tools, not shell scripts (`python3 -`, `sed -i`, heredocs). Edits are pre-approved in Remote Control sessions (acceptEdits); every shell script interrupts the user for approval.
