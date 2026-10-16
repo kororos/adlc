@@ -217,8 +217,9 @@ cd ~/adlc
 | `adlc shell <slug>` | bash inside the runner, with `gh` authenticated |
 | `adlc attach <slug>` | tmux with windows **rc** (Remote Control), **poller**, **deployer**, **shell** and your sessions (detach: Ctrl-b d) |
 | `adlc pause` / `resume <slug>` | stop/start launching new runs (running ones finish) |
-| `adlc logs <slug> [poller\|deployer\|rc\|egress\|ci\|run <n>]` | follow logs. `run <n>` shows the agent's narrative and cost for the latest run of issue n |
+| `adlc logs <slug> [poller\|deployer\|rc\|egress\|ci\|run <n>]` | follow logs (Ctrl-C to stop; don't pipe into `tail`, they never end). `run <n>` shows the agent's narrative and cost for the latest run of issue n |
 | `adlc audit <slug>` | domains reached through the egress proxy and whether each is allowlisted |
+| `adlc restart <slug> [--force]` | restart the runner to load ADLC plugin updates after `git pull` (`adlc up` only recreates it when the image or settings change). Refuses while delivery runs are active unless `--force` |
 | `adlc down <slug>` | stop the project (workspace, volumes and login are kept) |
 | `adlc doctor` | host checks |
 
