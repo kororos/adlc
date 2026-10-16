@@ -16,6 +16,9 @@ R="$ADLC_REPO"
 IMAGE=${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
 LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish,adlc-test}
 INTERVAL=${ADLC_CI_INTERVAL:-15}
+# The real gh, not the wrapper on PATH: the wrapper always swaps in the agents' token, and this
+# container must use ci_admin_pat (the only credential that can register runners).
+GH=/usr/bin/gh
 
 mkdir -p ~/.docker
 cat >~/.docker/config.json <<EOF
@@ -38,14 +41,14 @@ replace_stale_runners() {
     labels=$(docker inspect -f '{{index .Config.Labels "adlc.ci.labels"}}' "$c" 2>/dev/null)
     [ "$labels" = "$LABELS" ] && continue
     token=$(secret ci_admin_pat)
-    id=$(GH_TOKEN=$token gh api "repos/$R/actions/runners?per_page=100" \
+    id=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
           --jq ".runners[] | select(.name == \"$c\") | select(.busy | not) | .id" 2>/dev/null)
     if [ -z "$id" ]; then
       log "runner $c has old labels (${labels:-unknown}) but is busy or unknown to GitHub; leaving it"
       continue
     fi
     docker rm -f "$c" >/dev/null 2>&1
-    GH_TOKEN=$token gh api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
+    GH_TOKEN=$token $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
     log "replaced idle runner $c: labels ${labels:-unknown} → $LABELS"
   done
 }
@@ -75,7 +78,7 @@ start_runner() {
   token=$(secret ci_admin_pat)
   name="adlc-$ADLC_SLUG-$(date +%s)"
   for l in ${LABELS//,/ }; do label_args+=(-f "labels[]=$l"); done
-  jit=$(GH_TOKEN=$token gh api -X POST "repos/$R/actions/runners/generate-jitconfig" \
+  jit=$(GH_TOKEN=$token $GH api -X POST "repos/$R/actions/runners/generate-jitconfig" \
           -f name="$name" -F runner_group_id=1 -f work_folder=_work "${label_args[@]}" \
           --jq .encoded_jit_config 2>&1) || {
     log "ERROR: cannot create a JIT runner config ($jit). ci_admin_pat needs Administration: read and write on $R"
