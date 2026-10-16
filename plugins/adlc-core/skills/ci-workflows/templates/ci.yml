@@ -8,44 +8,76 @@ concurrency: { group: "ci-${{ github.ref }}", cancel-in-progress: true }
 env:
   ADLC_RUN: ci-${{ github.run_id }}
 
+# Every job starts with the gate (.github/scripts/adlc-gate.sh). Until the walking skeleton sets
+# adlc.build.yaml `status: active`, and on docs-only PRs, the jobs report success without running.
 jobs:
   lint:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
-      - run: eval "$(yq '.commands.lint' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.lint' adlc.build.yaml)"
   typecheck:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
-      - run: eval "$(yq '.commands.typecheck' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.typecheck' adlc.build.yaml)"
   arch-check:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
-      - run: eval "$(yq '.commands.arch_check' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.arch_check' adlc.build.yaml)"
   test:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
-      - run: docker network create adlc-web || true
-      - run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)"
-      - run: eval "$(yq '.commands.test' adlc.build.yaml)"
-      - if: always()
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: docker network create adlc-web || true
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.test' adlc.build.yaml)"
+      - if: always() && steps.gate.outputs.run == 'true'
         run: eval "$(yq '.env.down' adlc.build.yaml)"

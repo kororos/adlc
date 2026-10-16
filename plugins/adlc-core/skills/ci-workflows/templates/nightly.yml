@@ -10,17 +10,26 @@ jobs:
     env: { ADLC_RUN: "nightly-${{ github.run_id }}" }
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: eval "$(yq '.commands.install' adlc.build.yaml)"
-      - run: docker network create adlc-web || true
-      - run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)"
-      - run: eval "$(yq '.commands.test' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.install' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: docker network create adlc-web || true
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.commands.test' adlc.build.yaml)"
       # full e2e: add the stack pack's e2e steps here (selection: full)
-      - if: always()
+      - if: always() && steps.gate.outputs.run == 'true'
         run: eval "$(yq '.env.down' adlc.build.yaml)"
-      - if: failure()
+      - if: failure() && steps.gate.outputs.run == 'true'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           title="Nightly regression on main ($(date -u +%F))"

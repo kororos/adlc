@@ -13,34 +13,54 @@ jobs:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile && pnpm --filter app exec playwright install --with-deps chromium
-      - run: docker network create adlc-web || true
-      - run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)" && eval "$(yq '.env.start_build' adlc.build.yaml)"
+      - if: steps.gate.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile && pnpm --filter app exec playwright install --with-deps chromium
+      - if: steps.gate.outputs.run == 'true'
+        run: docker network create adlc-web || true
+      - if: steps.gate.outputs.run == 'true'
+        run: eval "$(yq '.env.up' adlc.build.yaml)" && eval "$(yq '.env.seed' adlc.build.yaml)" && eval "$(yq '.env.start_build' adlc.build.yaml)"
       # Reach the web service from the job: connect this container (self-hosted) or use published ports (hosted).
-      - run: docker network connect adlc-web "$(hostname)" 2>/dev/null || true
-      - run: E2E_BASE_URL=http://web pnpm --filter app exec playwright test --grep @smoke
-      - if: failure()
+      - if: steps.gate.outputs.run == 'true'
+        run: docker network connect adlc-web "$(hostname)" 2>/dev/null || true
+      - if: steps.gate.outputs.run == 'true'
+        run: E2E_BASE_URL=http://web pnpm --filter app exec playwright test --grep @smoke
+      - if: failure() && steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with: { name: playwright-report, path: apps/app/playwright-report, retention-days: 7 }
-      - if: always()
+      - if: always() && steps.gate.outputs.run == 'true'
         run: eval "$(yq '.env.down' adlc.build.yaml)"
 
   e2e-android:
     runs-on: ubuntu-latest           # hosted Linux runners have KVM; uses the community emulator action
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - uses: actions/setup-java@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
-      - run: pnpm --filter app exec expo prebuild --platform android --no-install && (cd apps/app/android && ./gradlew assembleRelease)
-      - run: sudo udevadm control --reload-rules || true
-      - uses: reactivecircus/android-emulator-runner@v2
+      - if: steps.gate.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
+      - if: steps.gate.outputs.run == 'true'
+        run: pnpm --filter app exec expo prebuild --platform android --no-install && (cd apps/app/android && ./gradlew assembleRelease)
+      - if: steps.gate.outputs.run == 'true'
+        run: sudo udevadm control --reload-rules || true
+      - if: steps.gate.outputs.run == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
           arch: x86_64
@@ -51,9 +71,17 @@ jobs:
     if: github.event_name == 'push'   # macOS minutes are ~10× Linux: main only by default
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
-      - run: pnpm --filter app exec expo prebuild --platform ios && pnpm --filter app exec expo run:ios --configuration Release --no-install
-      - run: $HOME/.maestro/bin/maestro test apps/app/e2e/flows --include-tags smoke
+      - if: steps.gate.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
+      - if: steps.gate.outputs.run == 'true'
+        run: pnpm --filter app exec expo prebuild --platform ios && pnpm --filter app exec expo run:ios --configuration Release --no-install
+      - if: steps.gate.outputs.run == 'true'
+        run: ~/.maestro/bin/maestro test apps/app/e2e/flows --include-tags smoke

@@ -29,6 +29,6 @@ Templates live in `templates/` next to this file. Copy and adapt them; don't rei
 
 ## Walking-skeleton checklist (environments)
 1. `deploy/compose.yml` (base), `compose.test.yml`, `compose.dev.yml`, `compose.emulator.yml`, `stack.prod.yml` (with `stack-node-api:node-containers`).
-2. `adlc.build.yaml` from the template, with every command proven to run in the runner.
+2. `adlc.build.yaml` from the template, with every command proven to run in the runner, then `status: active` (CI only runs its jobs from then on).
 3. Root scripts: `adlc:dev` (watch), `adlc:prodlike` (build), `arch:check`.
-4. CI workflows from `adlc-core:ci-workflows`.
+4. CI workflows from `adlc-core:ci-workflows`: setup already installed the bootstrap versions; adapt them so every job passes for real with `status: active`.

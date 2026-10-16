@@ -1,6 +1,7 @@
 # ADLC build profile for an Expo app (apps/app) + Node API (apps/api) pnpm monorepo.
 # Every command runs from the run's worktree; ADLC_RUN, ADLC_PROJECT_DOMAIN, ADLC_LOCK_DIR are exported.
 version: 1
+status: draft     # set to active once every command below is proven; CI runs its jobs from then on
 
 commands:
   install:    pnpm install --frozen-lockfile

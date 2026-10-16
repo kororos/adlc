@@ -2,6 +2,7 @@
 # Drafted by /adlc-core:architect, made real by the walking-skeleton issue. Delivery runs may edit it;
 # such changes count as CI/infra changes (risk = high → human merge).
 version: 1
+status: draft                            # CI skips its jobs (reporting success) until the walking skeleton proves every command and sets `active`
 
 commands:
   install:    pnpm install --frozen-lockfile

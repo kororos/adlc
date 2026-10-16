@@ -11,10 +11,15 @@ jobs:
     environment: publish                     # push credentials exist only here (main only)
     steps:
       - uses: actions/checkout@v4
-      - name: Registry login
+        with: { fetch-depth: 2 }
+      - id: gate
+        run: bash .github/scripts/adlc-gate.sh
+      - if: steps.gate.outputs.run == 'true'
+        name: Registry login
         env: { USER: "${{ secrets.HARBOR_PUSH_USER }}", TOKEN: "${{ secrets.HARBOR_PUSH_TOKEN }}" }
         run: printf '%s' "$TOKEN" | docker login "$(yq '.registry.namespace | split("/") | .[0]' adlc.yaml)" -u "$USER" --password-stdin
-      - name: Build and push
+      - if: steps.gate.outputs.run == 'true'
+        name: Build and push
         run: |
           ns=$(yq '.registry.namespace' adlc.yaml)
           tag="sha-${GITHUB_SHA::7}"
@@ -23,5 +28,5 @@ jobs:
             docker build --pull -f "apps/$img/Dockerfile" --target prod -t "$ns/$img:$tag" ${extra:+-t "$ns/$img:$extra"} .
             docker push --all-tags "$ns/$img"
           done
-      - if: always()
+      - if: always() && steps.gate.outputs.run == 'true'
         run: docker logout "$(yq '.registry.namespace | split("/") | .[0]' adlc.yaml)" || true
