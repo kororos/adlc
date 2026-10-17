@@ -27,7 +27,11 @@ repo:
 
 ci:
   provider: github-actions
-  runners: { default: ubuntu-latest, ios: macos-latest, android_e2e: ubuntu-latest, publish: "[self-hosted, adlc-publish]" }
+  runners:
+    default: ubuntu-latest                     # or "[self-hosted, adlc-test]" (ADLC CI runner)
+    ios: macos-latest
+    android_e2e: ubuntu-latest                 # or "[self-hosted, adlc-kvm]" (adlc up <slug> --ci-kvm on)
+    publish: "[self-hosted, adlc-publish]"
   publish: { on: push-default-branch, environment: publish, pull_base_images: true }
   required_checks: [lint, typecheck, arch-check, test, e2e-web, e2e-android, e2e-ios]
   budget: tbd

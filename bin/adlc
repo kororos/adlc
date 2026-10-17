@@ -12,6 +12,7 @@
 #       --registry-user <user>       registry pull user (Harbor: robot$<project>+<name>)
 #       --registry-ca <file>         CA certificate for a registry with a private CA
 #       --edge-port <port>           host port for preview URLs (default 80; stored for all projects)
+#       --ci-kvm on|off              give the CI runner /dev/kvm and the adlc-kvm label (Android e2e on this host)
 #   adlc app <slug> --id <app-id> --key <private-key.pem>
 #                                    agents act as the ADLC GitHub App (recommended over gh_pat)
 #   adlc login <slug>                one-time Claude login inside the runner
@@ -70,6 +71,7 @@ compose() { # compose <slug> <args...>
     files+=(-f "$SANDBOX/compose.ci.yml")
     [ "${ADLC_DIND_MODE:-}" = sysbox ] && files+=(-f "$SANDBOX/compose.ci-sysbox.yml")
     [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.ci-registry-ca.yml")
+    [ "${ADLC_CI_KVM:-0}" = 1 ] && [ -e /dev/kvm ] && files+=(-f "$SANDBOX/compose.ci-kvm.yml")
   fi
   docker compose --env-file "$f" "${files[@]}" "$@"
 }
@@ -144,7 +146,7 @@ cmd_secrets() {
 
 cmd_up() {
   local slug=$1; shift; need_slug "$slug"
-  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca="" edge_port=""
+  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca="" edge_port="" ci_kvm=""
   while [ $# -gt 0 ]; do
     case $1 in
       --repo) repo=$2; shift 2 ;;
@@ -155,6 +157,7 @@ cmd_up() {
       --registry-user) reg_user=$2; shift 2 ;;
       --registry-ca) reg_ca=$2; shift 2 ;;
       --edge-port) edge_port=$2; shift 2 ;;
+      --ci-kvm) ci_kvm=$2; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -183,6 +186,13 @@ cmd_up() {
   [ -n "$domain" ] && set_cfg "$f" ADLC_BASE_DOMAIN "$domain"
   if [ -n "$dind" ]; then set_cfg "$f" ADLC_DIND_MODE "$dind"
   elif ! grep -q '^ADLC_DIND_MODE=' "$f"; then has_sysbox && set_cfg "$f" ADLC_DIND_MODE sysbox || set_cfg "$f" ADLC_DIND_MODE privileged; fi
+  case $ci_kvm in
+    "") ;;
+    on) [ -e /dev/kvm ] || die "--ci-kvm on: /dev/kvm doesn't exist on this host"
+        set_cfg "$f" ADLC_CI_KVM 1 ;;
+    off) set_cfg "$f" ADLC_CI_KVM 0 ;;
+    *) die "--ci-kvm takes on or off" ;;
+  esac
   set_cfg "$f" ADLC_ROOT "$ADLC_ROOT"
   set_cfg "$f" ADLC_HOME "$ADLC_HOME"
   set_cfg "$f" ADLC_RUNNER_IMAGE "adlc/runner-$slug:local"

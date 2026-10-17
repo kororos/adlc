@@ -39,12 +39,21 @@ jobs:
         run: eval "$(yq '.env.down' adlc.build.yaml)"
 
   e2e-android:
-    runs-on: ubuntu-latest           # hosted Linux runners have KVM; uses the community emulator action
+    # GitHub-hosted (default) or your host with `adlc up <slug> --ci-kvm on` and the repository
+    # variable ADLC_ANDROID_RUNS_ON='["self-hosted","adlc-kvm"]'. Same check name either way.
+    runs-on: ${{ fromJSON(vars.ADLC_ANDROID_RUNS_ON || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
       - id: gate                     # globs from adlc.yaml ci.e2e_android_paths (`*` also matches `/`)
         run: bash .github/scripts/adlc-gate.sh 'apps/app/*' 'apps/api/*' 'packages/*'
+      # Self-hosted: boot the emulator container in ci-docker (it has /dev/kvm) while the APK builds.
+      # ci-docker is wiped before every job, so each job gets a fresh emulator.
+      - if: steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
+        run: |
+          docker network create adlc-web 2>/dev/null || true
+          docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d
+          docker network connect adlc-web "$(hostname)"
       - if: steps.gate.outputs.run == 'true'
         uses: pnpm/action-setup@v4
       - if: steps.gate.outputs.run == 'true'
@@ -53,13 +62,25 @@ jobs:
       - if: steps.gate.outputs.run == 'true'
         uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
+      - if: steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
+        uses: android-actions/setup-android@v3          # hosted images already have the SDK
       - if: steps.gate.outputs.run == 'true'
         run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
       - if: steps.gate.outputs.run == 'true'
         run: pnpm --filter app exec expo prebuild --platform android --no-install && (cd apps/app/android && ./gradlew assembleRelease)
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
+        run: |
+          for i in $(seq 1 60); do
+            adb connect emulator:5555 >/dev/null
+            [ "$(adb -s emulator:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
+            [ "$i" = 60 ] && { echo "::error::the emulator didn't boot within 5 minutes"; exit 1; }
+            sleep 5
+          done
+          adb -s emulator:5555 install -r apps/app/android/app/build/outputs/apk/release/app-release.apk
+          ~/.maestro/bin/maestro --device emulator:5555 test apps/app/e2e/flows --include-tags smoke
+      - if: steps.gate.outputs.run == 'true' && runner.environment != 'self-hosted'
         run: sudo udevadm control --reload-rules || true
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.gate.outputs.run == 'true' && runner.environment != 'self-hosted'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34

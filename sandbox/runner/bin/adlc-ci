@@ -16,6 +16,8 @@ R="$ADLC_REPO"
 IMAGE=${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
 LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish,adlc-test}
 INTERVAL=${ADLC_CI_INTERVAL:-15}
+# With /dev/kvm in ci-docker (adlc up --ci-kvm on), jobs can run the Android emulator here.
+[ "${ADLC_CI_KVM:-0}" = 1 ] && [[ ",$LABELS," != *",adlc-kvm,"* ]] && LABELS="$LABELS,adlc-kvm"
 # The real gh, not the wrapper on PATH: the wrapper always swaps in the agents' token, and this
 # container must use ci_admin_pat (the only credential that can register runners).
 GH=/usr/bin/gh

@@ -148,12 +148,21 @@ Delete the downloaded `.pem` on your Mac (a new key can always be generated on t
 Limitation: apps can't edit Project boards owned by a personal account.
 
 ### CI runner (self-hosted, sandboxed)
-Tests run on GitHub-hosted runners. Jobs that need your network, such as **publishing images to an internal registry**, run on the **ADLC CI runner**: `runs-on: [self-hosted, adlc-publish]`. It's enabled per project by setting `ci_admin_pat`:
+Jobs run on GitHub-hosted runners unless a repository variable sends them to the **ADLC CI runner** on your dev server. Jobs that need your network, such as **publishing images to an internal registry**, always run there (`[self-hosted, adlc-publish]`). It's enabled per project by setting `ci_admin_pat`. Its labels are `self-hosted,linux,adlc-publish,adlc-test` (`ADLC_CI_LABELS`), plus `adlc-kvm` with `--ci-kvm on`:
 - A **registrar** container holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time**. It never runs workflow code.
 - Jobs run in a **separate Docker engine** (`ci-docker`) that agents can't reach, behind the same egress proxy. Before each new job, everything the previous job left behind is removed.
 - Because agents can edit workflows, two GitHub-side rules (set by `provision.sh`) complete the picture: `.github/` changes need **your review** (CODEOWNERS + "Require review from Code Owners"), and registry **push credentials live in the `publish` environment, limited to `main`**, so PR-branch workflows can't read them.
 
 `adlc logs <slug> ci` shows the registrar. Runners appear under the repo's Settings → Actions → Runners while waiting for a job.
+
+Where jobs run (repository variables, JSON; `provision.sh` sets them from `adlc.yaml ci.runners`):
+| Variable | Jobs | Default | On your host |
+|---|---|---|---|
+| `ADLC_TEST_RUNS_ON` | lint, typecheck, arch-check, test, e2e-web | `"ubuntu-latest"` | `["self-hosted","adlc-test"]` |
+| `ADLC_ANDROID_RUNS_ON` | e2e-android | `"ubuntu-latest"` (has KVM) | `["self-hosted","adlc-kvm"]` after `adlc up <slug> --ci-kvm on` (host needs `/dev/kvm`) |
+| `ADLC_PUBLISH_RUNS_ON` | publish | `["self-hosted","adlc-publish"]` | |
+
+On your host, `e2e-android` starts the stack's emulator container (`deploy/compose.emulator.yml`) in `ci-docker`, which gets `/dev/kvm`. The runner takes one job at a time, so checks queue behind each other; an Android build plus emulator wants 8+ cores and 16 GB+ RAM. Switching back is one command: `gh variable delete ADLC_ANDROID_RUNS_ON -R <owner/repo>`.
 
 ### Using Harbor (or another private registry)
 ```bash
