@@ -6,14 +6,17 @@
 # default branch, i.e. code that went through branch protection, CI and (for /deploy/ and
 # /.github/) CODEOWNERS review.
 #
-#   adlc-swarm-deploy <owner/repo> <ref> [--stack <name>] [--dry-run]
+#   adlc-swarm-deploy <owner/repo> <ref> [--file deploy/<stack>.yml] [--stack <name>]
+#                     [--resolve-image always|changed|never] [--dry-run]
 #   adlc-swarm-deploy <owner/repo> --history
 #
 #   <ref>  a release tag (v1.4.0), a commit sha, or the default branch name (main)
 #
 # Uses from the repo at that commit:
-#   deploy/stack.prod.yml   swarm stack file; images reference ${IMAGE_TAG} (= sha-<7-char sha>)
-#   deploy/predeploy.sh     optional, executable; runs before the stack update (e.g. migrations)
+#   deploy/stack.prod.yml   default stack file (the app); images reference ${IMAGE_TAG} (= sha-<7-char sha>)
+#   deploy/predeploy.sh     optional, executable; runs before the app stack update (e.g. migrations)
+# Projects with several stacks (e.g. data + app) deploy each one separately:
+#   --file deploy/stack.data.yml --stack <slug>-data   runs deploy/predeploy.data.sh if present
 #
 # Needs on the manager: git, docker (manager node), `docker login <registry>` with a pull-only
 # robot, and read access to the repo (a read-only deploy key: ADLC_SWARM_GIT_URL=git@github.com:…).
@@ -30,8 +33,8 @@ mkdir -p "$state"
 
 if [ "$1" = --history ]; then
   if [ -s "$state/deployments.log" ]; then
-    printf '%-21s %-12s %-8s %-12s %s\n' DATE REF COMMIT IMAGE_TAG BY
-    awk '{ printf "%-21s %-12s %-8s %-12s %s\n", $1, $2, $3, $4, $5 }' "$state/deployments.log"
+    printf '%-21s %-12s %-8s %-12s %-10s %s\n' DATE REF COMMIT IMAGE_TAG BY STACK
+    awk '{ printf "%-21s %-12s %-8s %-12s %-10s %s\n", $1, $2, $3, $4, $5, $6 }' "$state/deployments.log"
   else
     echo "no deployments recorded"
   fi
@@ -39,14 +42,23 @@ if [ "$1" = --history ]; then
 fi
 
 ref=$1; shift
-stack=${repo#*/} dry=0
+stack=${repo#*/} dry=0 file=deploy/stack.prod.yml resolve=""
 while [ $# -gt 0 ]; do
   case $1 in
     --stack) stack=$2; shift 2 ;;
+    --file) file=$2; shift 2 ;;
+    --resolve-image) resolve=$2; shift 2 ;;
     --dry-run) dry=1; shift ;;
     *) die "unknown option $1" ;;
   esac
 done
+
+[[ "$file" =~ ^deploy/[A-Za-z0-9._-]+\.ya?ml$ ]] || die "--file must be a stack file directly under deploy/ (got '$file')"
+[[ "$stack" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "invalid stack name '$stack'"
+case $resolve in ""|always|changed|never) ;; *) die "--resolve-image takes always, changed or never" ;; esac
+# deploy/stack.prod.yml → deploy/predeploy.sh; deploy/stack.data.yml → deploy/predeploy.data.sh
+name=$(basename "$file"); name=${name%.y*ml}; name=${name#stack.}
+if [ "$file" = deploy/stack.prod.yml ]; then predeploy=deploy/predeploy.sh; else predeploy="deploy/predeploy.$name.sh"; fi
 
 docker info --format '{{.Swarm.ControlAvailable}}' 2>/dev/null | grep -qx true || die "this node is not a swarm manager"
 
@@ -67,13 +79,13 @@ short=$(git -C "$src" rev-parse --short=7 "$commit")
 export IMAGE_TAG="sha-$short" ADLC_RELEASE="$ref" STACK="$stack"
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 git -C "$src" archive "$commit" deploy 2>/dev/null | tar -x -C "$work" || die "$ref has no deploy/ directory"
-stackfile="$work/deploy/stack.prod.yml"
-[ -f "$stackfile" ] || die "$ref has no deploy/stack.prod.yml"
+stackfile="$work/$file"
+[ -f "$stackfile" ] || die "$ref has no $file"
 
-say "release $ref → commit $short (on $default), stack '$stack', images :$IMAGE_TAG"
+say "release $ref → commit $short (on $default), $file → stack '$stack', IMAGE_TAG=$IMAGE_TAG"
 images=$(docker stack config -c "$stackfile" 2>/dev/null | awk '$1 == "image:" { print $2 }' | sort -u) \
-  || die "deploy/stack.prod.yml is invalid (docker stack config failed)"
-[ -n "$images" ] || die "no images found in deploy/stack.prod.yml"
+  || die "$file is invalid (docker stack config failed)"
+[ -n "$images" ] || die "no images found in $file"
 for img in $images; do
   docker manifest inspect "$img" >/dev/null 2>&1 \
     || die "image $img is not in the registry (did CI publish $IMAGE_TAG? is this node logged in?)"
@@ -82,13 +94,16 @@ done
 
 if [ "$dry" = 1 ]; then say "dry run: nothing deployed"; exit 0; fi
 
-if [ -x "$work/deploy/predeploy.sh" ]; then
-  say "pre-deploy step (deploy/predeploy.sh)"
-  (cd "$work" && ./deploy/predeploy.sh) || die "pre-deploy step failed; the running stack was not changed"
+if [ -x "$work/$predeploy" ]; then
+  say "pre-deploy step ($predeploy)"
+  (cd "$work" && "./$predeploy") || die "pre-deploy step failed; the running stack was not changed"
 fi
 
 say "deploying"
 detach=(); docker stack deploy --help 2>/dev/null | grep -q -- '--detach' && detach=(--detach=false)
-docker stack deploy --with-registry-auth --prune "${detach[@]}" -c "$stackfile" "$stack"
-printf '%s %s %s %s %s\n' "$(date -u +%FT%TZ)" "$ref" "$short" "$IMAGE_TAG" "$(id -un)" >>"$state/deployments.log"
-say "done. Roll back with: adlc-swarm-deploy $repo <previous ref>   (history: --history)"
+opts=(); [ -n "$resolve" ] && opts=(--resolve-image "$resolve")
+docker stack deploy --with-registry-auth --prune "${detach[@]}" "${opts[@]}" -c "$stackfile" "$stack"
+printf '%s %s %s %s %s %s\n' "$(date -u +%FT%TZ)" "$ref" "$short" "$IMAGE_TAG" "$(id -un)" "$stack" >>"$state/deployments.log"
+again=""; [ "$file" = deploy/stack.prod.yml ] || again=" --file $file"
+[ "$stack" = "${repo#*/}" ] || again="$again --stack $stack"
+say "done. Roll back with: adlc-swarm-deploy $repo <previous ref>$again   (history: --history)"

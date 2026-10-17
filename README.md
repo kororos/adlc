@@ -185,6 +185,8 @@ docker login harbor.kororos.eu                         # prod pull-only robot
 adlc-swarm-deploy kororos/<slug> v1.4.0 --dry-run      # check: commit on main, all images exist
 adlc-swarm-deploy kororos/<slug> v1.4.0                # predeploy (migrations), then rolling update
 adlc-swarm-deploy kororos/<slug> --history             # what ran when; roll back = deploy the previous ref
+# several stacks (e.g. data + app): deploy each one; runs deploy/predeploy.data.sh if present
+adlc-swarm-deploy kororos/<slug> v1.4.0 --file deploy/stack.data.yml --stack <slug>-data
 ```
 It refuses any ref that isn't on `main`, so only code that passed branch protection, CI and (for `/deploy/`) your review can reach prod.
 

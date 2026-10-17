@@ -23,7 +23,7 @@ Templates in `templates/`: `Dockerfile.api`, `compose.yml`, `compose.dev.yml`, `
 - Stateful services (Postgres, Redis) are **pinned**: `placement.constraints: [node.labels.<slug>.postgres == true]`, named volume, `replicas: 1`, `order: stop-first`.
 - Secrets are external Swarm secrets with versioned names (`<slug>_db_password_v1`), mounted as files, consumed via `X_FILE`. Rotate by creating `_v2` and updating the stack.
 - Ingress: Traefik on the overlay network with Let's Encrypt (labels under `deploy.labels` in Swarm mode).
-- **Deploys are human-run** on the manager with `adlc-swarm-deploy <owner/repo> <ref>`. It only accepts commits on `main`, checks that every image exists, runs `deploy/predeploy.sh` (migrations), then runs `docker stack deploy --with-registry-auth`. No CI runner on the manager. Agents never deploy prod.
+- **Deploys are human-run** on the manager with `adlc-swarm-deploy <owner/repo> <ref>` (several stacks: one call each with `--file deploy/stack.<name>.yml --stack <slug>-<name>`; stateful stacks pin images by digest). It only accepts commits on `main`, checks that every image exists, runs `deploy/predeploy.sh` (migrations), then runs `docker stack deploy --with-registry-auth`. No CI runner on the manager. Agents never deploy prod.
 
 ## Migrations before the update
 `deploy/predeploy.sh` runs the migration as a one-off container from the **new** image, then exits non-zero on failure, which aborts the deploy before any service changes. See the template.
