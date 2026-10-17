@@ -22,7 +22,27 @@ skip() {
   exit 0
 }
 
+# yq reads adlc.build.yaml here and in the job's later steps. Hosted runners have it; the plain
+# actions-runner image used by the ADLC CI runner doesn't, so install a pinned, verified copy
+# and put it on the job's PATH.
+ensure_yq() {
+  command -v yq >/dev/null && return
+  local v=v4.44.3 arch sum dir
+  case $(uname -m) in
+    x86_64) arch=amd64 sum=a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7 ;;
+    aarch64|arm64) arch=arm64 sum=0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156 ;;
+    *) echo "::error::no pinned yq for $(uname -m)"; exit 1 ;;
+  esac
+  dir="${RUNNER_TEMP:-/tmp}/adlc-bin"; mkdir -p "$dir"
+  curl -fsSL --retry 3 "https://github.com/mikefarah/yq/releases/download/$v/yq_linux_$arch" -o "$dir/yq"
+  echo "$sum  $dir/yq" | sha256sum -c --quiet -
+  chmod +x "$dir/yq"
+  export PATH="$dir:$PATH"
+  if [ -n "${GITHUB_PATH:-}" ]; then echo "$dir" >>"$GITHUB_PATH"; fi
+}
+
 [ -f adlc.build.yaml ] || skip "no adlc.build.yaml yet"
+ensure_yq
 status=$(yq '.status // "draft"' adlc.build.yaml)
 [ "$status" = active ] || skip "adlc.build.yaml status is '$status' (the walking skeleton sets it to active)"
 

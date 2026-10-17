@@ -21,7 +21,7 @@ Arguments: $ARGUMENTS
    - Update `adlc.yaml` (create it from the template if missing). Preserve the other sections.
    - Write `docs/project/setup.md`, including a "Constraints for architecture" section derived from the environment profiles.
    - Insert or replace the generated block in `CLAUDE.md` (create the file if missing; never touch content outside the markers).
-   - Copy `.claude/settings.json` from the ADLC template if missing.
+   - Write `.claude/settings.json` from the ADLC template (merge into an existing file): the `adlc` marketplace plus `enabledPlugins` for `adlc-core@adlc` and `stack-<name>@adlc` for every `adlc.yaml stacks` entry that has a pack. Re-check it in `--update` when stacks change.
    - Write `.adlc/provision.sh` (idempotent; see the skill), `chmod +x` it.
    - Add the bootstrap CI from `adlc-core:ci-workflows`: `.github/workflows/ci.yml`, `.github/scripts/adlc-gate.sh` and the stack pack's `e2e.yml` (only the enabled e2e targets), plus `adlc.build.yaml` from the template with `status: draft`. Its job names must equal the required checks in `provision.sh`.
 5. **Repository bootstrap:** if the repo doesn't exist yet, `provision.sh` creates it and pushes this initial commit. If it exists, `git fetch`, create branch `adlc/setup` from `origin/<default>` (switching branches inside this session's worktree is fine), commit, push and open a PR. Setup PRs are never auto-merged.
