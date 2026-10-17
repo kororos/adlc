@@ -1,0 +1,40 @@
+# apps/<app>/nginx/default.conf.template, rendered at container start (envsubst on ${WEB_*}).
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "${WEB_CSP}" always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Runtime config: the same image runs in every environment.
+    location = /config.json {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+        return 200 '{"apiBasePath":"${WEB_API_BASE_PATH}","environment":"${WEB_ENVIRONMENT}"}';
+    }
+
+    # Hashed build assets never change: cache them for a year.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options nosniff always;
+        try_files $uri =404;
+    }
+
+    # SPA routes fall back to index.html, which is never cached (it names the current assets).
+    location / {
+        add_header Cache-Control "no-cache" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy strict-origin-when-cross-origin always;
+        add_header Content-Security-Policy "${WEB_CSP}" always;
+        try_files $uri $uri/ /index.html;
+    }
+}

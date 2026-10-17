@@ -108,7 +108,7 @@ notifications: { channel: github, push_on: [blocked, needs-info, high-risk-pr, n
 compliance: { regimes: [], data_residency: tbd }
 
 # ── ADLC behaviour ────────────────────────────────────────────────────────────
-stacks: [react-native, node-api]   # enabled stack packs
+stacks: [react-native, node-api]   # enabled stack packs: react-native, react-web, node-api
 platforms: [web, android, ios]     # ios e2e runs in CI (macOS runner), not in the Linux runner
 
 autonomy:

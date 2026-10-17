@@ -19,6 +19,11 @@
       "name": "stack-node-api",
       "source": "./plugins/stack-node-api",
       "description": "Node.js API with Postgres and Redis: API patterns, data and migrations, containers and Swarm deploys."
+    },
+    {
+      "name": "stack-react-web",
+      "source": "./plugins/stack-react-web",
+      "description": "React + Vite SPA with shadcn/ui (Base UI) and Tailwind v4: app patterns, nginx image, test environments, Vitest and Playwright."
     }
   ]
 }

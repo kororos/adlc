@@ -1,0 +1,6 @@
+{
+  "name": "stack-react-web",
+  "version": "0.1.0",
+  "description": "ADLC stack pack: React + Vite + TypeScript single-page apps with shadcn/ui (Base UI) and Tailwind CSS v4: app patterns, nginx image and runtime config, test environments, Vitest and Playwright.",
+  "author": { "name": "Lefteris Kororos" }
+}

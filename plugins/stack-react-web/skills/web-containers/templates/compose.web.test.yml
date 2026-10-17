@@ -1,0 +1,31 @@
+# Merge into deploy/compose.test.yml (per run). One service for both modes:
+#   start_watch → ADLC_MODE_TARGET=dev  (vite dev server, worktree mounted, HMR through the edge)
+#   start_build → ADLC_MODE_TARGET=prod (the real nginx image; gating e2e runs against this)
+# Same origin: <run>.app.<domain>/api/* goes to the API, everything else to web. No CORS.
+services:
+  web:
+    build: { context: "${ADLC_WORKTREE}", dockerfile: apps/<app>/Dockerfile, target: "${ADLC_MODE_TARGET:-prod}" }
+    volumes: ["${ADLC_WORKTREE}:/repo"]         # used by the dev target only
+    environment:
+      NO_PROXY: "*"
+      no_proxy: "*"
+      ADLC_PROJECT_DOMAIN: ${ADLC_PROJECT_DOMAIN}
+      ADLC_EDGE_PORT: ${ADLC_EDGE_PORT:-80}
+      WEB_ENVIRONMENT: test
+    networks: [default, adlc-web]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.r${ADLC_RUN}-app.rule: Host(`${ADLC_RUN}.app.${ADLC_PROJECT_DOMAIN}`)
+      traefik.http.services.r${ADLC_RUN}-app.loadbalancer.server.port: "8080"
+
+  api:
+    labels:
+      # /api/* on the app host → the API, prefix stripped (adapt if the API mounts under /v1/...)
+      traefik.http.routers.r${ADLC_RUN}-app-api.rule: Host(`${ADLC_RUN}.app.${ADLC_PROJECT_DOMAIN}`) && PathPrefix(`/api`)
+      traefik.http.routers.r${ADLC_RUN}-app-api.service: r${ADLC_RUN}-api
+      traefik.http.routers.r${ADLC_RUN}-app-api.middlewares: r${ADLC_RUN}-api-strip
+      traefik.http.middlewares.r${ADLC_RUN}-api-strip.stripprefix.prefixes: /api
+
+networks:
+  adlc-web:
+    external: true

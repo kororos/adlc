@@ -605,6 +605,7 @@ The core is technology-agnostic. Technology know-how lives in **stack packs**: p
 | Pack | Skills | Runner layer |
 |---|---|---|
 | `stack-react-native` | `expo-app` (app conventions) · `e2e-patterns` (Playwright, Maestro, shared emulator) · `rn-test-env` (adlc.build.yaml, compose test env, emulator, e2e workflow templates) | JDK 17, Android SDK, Maestro, Playwright deps |
+| `stack-react-web` | `vite-spa` (React + Vite + TS, TanStack Router/Query, **shadcn/ui on Base UI + Tailwind v4**, runtime config, a11y, review checklist) · `web-containers` (Dockerfile with vite dev / unprivileged nginx targets, `/config.json`, CSP, same-origin `/api` via Traefik) · `web-testing` (Vitest + Testing Library, Playwright, axe) | Playwright deps (chromium) |
 | `stack-node-api` | `node-api` (Fastify, zod, OpenAPI, auth, health) · `postgres-redis` (migrations, expand/contract, Redis rules) · `node-containers` (Dockerfile, compose, Swarm stack, predeploy migrations) | (none needed) |
 | core | `ci-workflows` (CI from adlc.build.yaml, publish, nightly) | |
 
@@ -636,6 +637,7 @@ To add a technology (e.g. ESP32): create `plugins/stack-<name>/` with `.claude-p
 adlc/
 ├── .claude-plugin/marketplace.json     this repo is a Claude Code plugin marketplace
 ├── plugins/stack-react-native/         Expo app, e2e, test-environment skills + templates
+├── plugins/stack-react-web/            React + Vite SPA, shadcn/ui (Base UI), nginx image, Vitest/Playwright
 ├── plugins/stack-node-api/             Node API, Postgres/Redis, containers + Swarm templates
 ├── plugins/adlc-core/
 │   ├── commands/   init, discover, architect, plan-backlog, deliver

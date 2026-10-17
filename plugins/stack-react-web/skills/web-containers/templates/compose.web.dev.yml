@@ -1,0 +1,18 @@
+# Merge into deploy/compose.dev.yml (dev environment on the dev server, pull-deployer, prod image).
+services:
+  web:
+    environment:
+      NO_PROXY: "*"
+      no_proxy: "*"
+      WEB_ENVIRONMENT: development
+    networks: [default, adlc-web]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dev-app.rule: Host(`app.${ADLC_PROJECT_DOMAIN}`)
+      traefik.http.services.dev-app.loadbalancer.server.port: "8080"
+  api:
+    labels:
+      traefik.http.routers.dev-app-api.rule: Host(`app.${ADLC_PROJECT_DOMAIN}`) && PathPrefix(`/api`)
+      traefik.http.routers.dev-app-api.service: dev-api
+      traefik.http.routers.dev-app-api.middlewares: dev-api-strip
+      traefik.http.middlewares.dev-api-strip.stripprefix.prefixes: /api

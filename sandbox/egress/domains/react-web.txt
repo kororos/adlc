@@ -1,0 +1,10 @@
+# react-web stack pack egress domains
+.npmjs.org
+.npmjs.com
+# shadcn/ui registry (shadcn add / init)
+ui.shadcn.com
+# Playwright browsers
+playwright.azureedge.net
+playwright-akamai.azureedge.net
+playwright-verizon.azureedge.net
+cdn.playwright.dev
