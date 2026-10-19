@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --no-warnings
 // adlc-queue [--all] [--limit N]: the project's open work in order of precedence.
 // adlc-queue --snapshot <file>: the same plus open PRs and the issues waiting for a person, as
 //   JSON for the ADLC dashboard (written atomically; the poller refreshes it every minute).
