@@ -13,7 +13,11 @@ ADLC_COMPONENT=ci
 source /usr/local/bin/adlc-lib.sh
 
 R="$ADLC_REPO"
-IMAGE=${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
+# Jobs run in the ADLC CI runner image: the official runner (BASE) plus docker compose, yq and the
+# proxy settings jobs need (definition in /usr/local/share/adlc/ci-runner, from sandbox/runner/ci-runner).
+BASE=${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
+IMAGE=adlc/ci-runner:local
+CI_IMAGE_DIR=/usr/local/share/adlc/ci-runner
 LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish,adlc-test}
 INTERVAL=${ADLC_CI_INTERVAL:-15}
 # With /dev/kvm in ci-docker (adlc up --ci-kvm on), jobs can run the Android emulator here.
@@ -68,10 +72,25 @@ reset_engine() {
 }
 
 last_pull=0
+# Pull the official base daily; (re)build the ADLC image when the base or its definition changed.
+last_build_fail=0
 ensure_image() {
-  local now; now=$(date +%s)
-  if [ $((now - last_pull)) -gt 86400 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    docker pull -q "$IMAGE" >/dev/null && last_pull=$now && log "runner image $IMAGE up to date"
+  local now key have
+  now=$(date +%s)
+  if [ $((now - last_pull)) -gt 86400 ] || ! docker image inspect "$BASE" >/dev/null 2>&1; then
+    docker pull -q "$BASE" >/dev/null && last_pull=$now && log "base runner image $BASE up to date"
+  fi
+  key="$(docker image inspect -f '{{.Id}}' "$BASE" 2>/dev/null)-$(cat "$CI_IMAGE_DIR"/* | sha256sum | cut -c1-16)"
+  have=$(docker image inspect -f '{{index .Config.Labels "org.adlc.ci.key"}}' "$IMAGE" 2>/dev/null || true)
+  [ "$have" = "$key" ] && return 0
+  # After a failed build, retry hourly; jobs use the plain base image meanwhile.
+  [ $((now - last_build_fail)) -gt 3600 ] || return 0
+  if docker build -q -t "$IMAGE" --build-arg BASE="$BASE" --label "org.adlc.ci.key=$key" "$CI_IMAGE_DIR" >/dev/null 2>/tmp/ci-runner-build.err; then
+    log "CI runner image $IMAGE built (docker compose, yq, proxy for sudo and Node)"
+  else
+    last_build_fail=$now
+    log "ERROR: cannot build $IMAGE ($(tail -n 3 /tmp/ci-runner-build.err 2>/dev/null | tr '\n' ' ')); jobs use the plain base image, retrying in an hour"
+    docker image inspect "$IMAGE" >/dev/null 2>&1 || docker tag "$BASE" "$IMAGE" >/dev/null 2>&1 || true
   fi
 }
 

@@ -45,6 +45,8 @@ RUN (userdel -r node 2>/dev/null || true) && (groupdel node 2>/dev/null || true)
  && useradd -m -o -u "${ADLC_UID}" -g "${ADLC_GID}" -s /bin/bash adlc
 
 COPY bin/ /usr/local/bin/
+# The CI runner image definition; the CI registrar (adlc-ci) builds it in the CI Docker engine.
+COPY ci-runner/ /usr/local/share/adlc/ci-runner/
 RUN chmod 0755 /usr/local/bin/adlc-* /usr/local/bin/gh
 
 # Login shells (bash -l, tmux shells, agents' shells) reset PATH from /etc/profile;
