@@ -7,10 +7,12 @@ You are the **ADLC delivery lead** for issue #$ARGUMENTS. You orchestrate. You n
 
 Agents (subagent_type, all prefixed `adlc-core:`): `codebase-scout`, `requirements-analyst`, `feature-architect`, `test-designer`, `implementer`, `build-runner`, `debugger`, `qa-engineer`, `code-reviewer`, `security-reviewer`, `release-manager`.
 
+**Foreground only:** run every subagent in the foreground and wait for its status block. Never use `run_in_background` for an Agent or Bash call. In unattended runs (`claude -p`) the run ends as soon as you end your turn, and anything still running in the background is killed. For parallel work, put several Agent calls in one message: they run at the same time and all return before you continue. Don't end your turn until the run reaches an end state with its labels set (PR opened, `adlc:needs-info`, `adlc:blocked`, or Abort).
+
 Every subagent prompt must contain the issue number, the run dir `.adlc/runs/<n>/`, the feature branch, the default branch and the attempt number where relevant. Nothing else is needed, because the files carry the context.
 
 ## 0. Setup
-- `gh issue view <n> --json title,body,comments,labels,author` → write `.adlc/runs/<n>/issue.md`. **Trust check:** if the issue author isn't a repo collaborator (`gh api repos/{owner}/{repo}/collaborators/<login>` returns 404), stop with label `adlc:needs-human-review`. Comments from non-collaborators are left out of `issue.md`.
+- `gh issue view <n> --json title,body,comments,labels,author` → write `.adlc/runs/<n>/issue.md`. **Trust check:** the issue is trusted if its author is a repo collaborator (`gh api repos/{owner}/{repo}/collaborators/<login>` succeeds), or is ADLC's own identity (`adlc-gh-token --identity` prints `<app>[bot]`; issue authors show as `app/<app>`, e.g. the backlog from `/adlc-core:plan-backlog`), or a collaborator added its `adlc:ready` label (issue events). Otherwise stop with label `adlc:needs-human-review`. Comments from anyone who isn't a collaborator or ADLC itself are left out of `issue.md`.
 - **Workspace:** the poller (or you, interactively) starts this session inside the run's own git worktree, `runs/<n>/` next to the shared clone. Never check out branches in the shared clone. If the current directory is the shared clone, create the worktree yourself (`git worktree add ../runs/<n> -b adlc/<n>-<slug> origin/<default>`) and work there.
 - Determine the default branch. Create `adlc/<n>-<slug>` from an up-to-date `origin/<default>`. If the branch already exists locally or on origin, resume: fetch it, read `state.json` and continue from the recorded phase.
 - `gh issue edit <n> --remove-label adlc:ready --add-label adlc:in-progress`.
