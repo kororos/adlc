@@ -42,6 +42,11 @@ Gating e2e never runs in `watch` mode, because a reload mid-test produces false 
     traefik.http.services.r${ADLC_RUN}-app.loadbalancer.server.port: "8081"
   ```
   The URL is then `http://<run>.app.<slug>.<base-domain>` (likewise `<run>.api.…`). The dev environment uses `app.<slug>.<base-domain>`.
+- **Reaching preview URLs from tests:** in the runner sandbox they go **through** the egress proxy (it routes `.<slug>.<base-domain>` to the edge). In CI, `ADLC_PROJECT_DOMAIN` is `<slug>.ci.internal` and the edge is the job's own Traefik on `adlc-web`: those names resolve only inside Docker, so they must **bypass** the proxy. A script that sets its own `NO_PROXY` for tests appends the CI domain:
+  ```bash
+  case "${ADLC_PROJECT_DOMAIN:-}" in *.ci.internal) NO_PROXY="$NO_PROXY,.${ADLC_PROJECT_DOMAIN}"; no_proxy="$NO_PROXY" ;; esac
+  ```
+  (CI runners already start with `NO_PROXY` covering `.internal`; this matters only when a project script replaces it.)
 - Use only bind mounts under the project workspace (`$ADLC_ROOT/projects/<slug>/…`). That path is identical in the runner and the Docker sidecar.
 Third-party HTTP APIs are mocked in test environments (stack-pack mechanism, e.g. MSW/WireMock). Tests never call real external services.
 
