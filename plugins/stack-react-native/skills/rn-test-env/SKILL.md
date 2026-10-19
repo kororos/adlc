@@ -7,8 +7,8 @@ description: Templates and rules for the React Native + Node test and dev enviro
 
 Templates live in `templates/` next to this file. Copy and adapt them; don't reinvent them. They encode the runner's rules:
 - **Same paths:** bind mounts only under `$ADLC_ROOT/projects/<slug>/` (identical in the runner and the Docker sidecar).
-- **Egress:** runtime services set `NO_PROXY: "*"` / `no_proxy: "*"`. Builds keep the injected proxy.
-- **Preview URLs:** web-facing services join the external network `adlc-web` with Traefik labels for `${ADLC_RUN}.app.${ADLC_PROJECT_DOMAIN}` / `${ADLC_RUN}.api.…`.
+- **Egress:** runtime services set `NO_PROXY: "*"` / `no_proxy: "*"`. Builds keep the injected proxy; Node build steps (corepack, fetch) also need `NODE_USE_ENV_PROXY=1` to use it (set in the Dockerfile templates and the runner).
+- **Preview URLs:** web-facing services join the external network `adlc-web` with Traefik labels for `${ADLC_RUN}.app.${ADLC_PROJECT_DOMAIN}` / `${ADLC_RUN}.api.…`. Those names need DNS for the dev server's base domain (a wildcard record, or nip.io where the local DNS doesn't block private answers). Tests running inside the sandbox should prefer internal service names on `adlc-web` (e.g. `http://web:8080`) and use preview URLs only where the host name itself is under test.
 - **Isolation:** every per-run project name contains `${ADLC_RUN}`. Never publish host ports (`ports:`); use Traefik or the compose network.
 
 | Template | Becomes | Purpose |

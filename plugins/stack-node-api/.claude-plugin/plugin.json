@@ -1,6 +1,6 @@
 {
   "name": "stack-node-api",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ADLC stack pack: Node.js/TypeScript API with Postgres and Redis: API patterns, data access and migrations, containers and deployment.",
   "author": { "name": "Lefteris Kororos" }
 }

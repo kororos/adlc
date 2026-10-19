@@ -69,6 +69,7 @@ services:
       ADLC_INNER_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
       HTTP_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
       HTTPS_PROXY: http://${ADLC_SUBNET_PREFIX}.2:3128
+      NODE_USE_ENV_PROXY: "1"                     # Node's fetch and corepack ignore HTTP(S)_PROXY without it
       http_proxy: http://${ADLC_SUBNET_PREFIX}.2:3128
       https_proxy: http://${ADLC_SUBNET_PREFIX}.2:3128
       NO_PROXY: localhost,127.0.0.1,docker,${ADLC_SUBNET_PREFIX}.0/24
