@@ -53,6 +53,17 @@ acl localnet src 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
 acl SSL_ports port 443
 acl Safe_ports port 80 443
 acl CONNECT method CONNECT
+EOF
+  # Tests reach the project's own preview URLs (<run>.app.<slug>.<base>:<edge port>), which resolve
+  # to the dev server. Only those names, only on the edge port, only plain HTTP.
+  if [ -n "${ADLC_PREVIEW_DOMAIN:-}" ] && [[ "${ADLC_EDGE_PORT:-}" =~ ^[0-9]+$ ]]; then
+    cat >>"$CONF.new" <<EOF
+acl adlc_preview dstdomain .${ADLC_PREVIEW_DOMAIN}
+acl adlc_edge_port port ${ADLC_EDGE_PORT}
+http_access allow localnet adlc_preview adlc_edge_port !CONNECT
+EOF
+  fi
+  cat >>"$CONF.new" <<EOF
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
 acl adlc_allowed dstdomain "$ALLOW"
