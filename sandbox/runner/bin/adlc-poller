@@ -203,6 +203,29 @@ launch_ready() {
              --jq "map($NOT_AGENT_WORK) | sort_by((.milestone.dueOn // \"9999\"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv" 2>/dev/null)
 }
 
+# ── ADLC dashboard ────────────────────────────────────────────────────────────
+# The dashboard (adlc ui) has no GitHub credentials and can't write runner state: it reads a
+# snapshot written here, and asks for actions by dropping request files that are applied here.
+UI_REQUESTS="$ADLC_ROOT/ui/requests/$ADLC_SLUG"
+write_snapshot() {
+  adlc-queue --snapshot "$STATE_DIR/github.json" 2>>"$LOG_DIR/poller.snapshot.err" \
+    || log "WARN: dashboard snapshot failed (see logs/poller.snapshot.err)"
+}
+apply_ui_requests() {
+  local f action
+  [ -d "$UI_REQUESTS" ] || return 0
+  for f in "$UI_REQUESTS"/*.json; do
+    [ -e "$f" ] || continue
+    action=$(jq -r '.action // ""' "$f" 2>/dev/null)
+    case $action in
+      pause)  touch "$STATE_DIR/paused"; log "paused from the dashboard" ;;
+      resume) rm -f "$STATE_DIR/paused"; log "resumed from the dashboard" ;;
+      *)      log "WARN: ignored dashboard request '$action' ($(basename "$f"))" ;;
+    esac
+    rm -f "$f"
+  done
+}
+
 # ── Cleanup after merge/close ─────────────────────────────────────────────────
 cleanup() {
   local wt n state
@@ -236,6 +259,7 @@ while :; do
   fi
   if ! sync_repo; then log "WARN: fetch/sync failed"; sleep "$POLL_INTERVAL"; continue; fi
   [ "$recovered" = 1 ] || { recover_interrupted; recovered=1; }
+  apply_ui_requests
   if [ -f "$STATE_DIR/paused" ]; then
     [ $((i % 10)) = 0 ] && log "paused (adlc resume $ADLC_SLUG)"
   else
@@ -243,6 +267,7 @@ while :; do
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup
+  write_snapshot
   i=$((i + 1))
   sleep "$POLL_INTERVAL"
 done

@@ -29,6 +29,9 @@
 #   adlc restart <slug> [--force]    restart the runner: reloads the ADLC plugins and Remote Control
 #                                    (refuses while delivery runs are active unless --force)
 #   adlc down <slug>                 stop the runner (workspace and volumes are kept)
+#   adlc ui [up|down|token|status]   web dashboard for all projects (LAN; login token)
+#       up [--host <name>]…          start it; --host adds names a reverse proxy will use
+#       token [--rotate]             show the login token (--rotate signs everyone out)
 set -euo pipefail
 
 ADLC_HOME=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -162,7 +165,8 @@ cmd_up() {
     esac
   done
   [ "$(id -u)" != 0 ] || die "run as the non-root owner of $ADLC_ROOT"
-  mkdir -p "$ADLC_ROOT"/{config,cache,edge/dynamic} "$ADLC_ROOT/projects/$slug"/{repo,runs,state,sessions,logs/egress}
+  mkdir -p "$ADLC_ROOT"/{config,cache,edge/dynamic} "$ADLC_ROOT/projects/$slug"/{repo,runs,state,sessions,logs/egress} \
+           "$ADLC_ROOT/ui/requests/$slug"
   local f; f=$(cfg_file "$slug")
   if [ ! -f "$f" ]; then
     [ -n "$repo" ] || die "first start needs --repo owner/name"
@@ -281,6 +285,64 @@ cmd_restart() {
   ok "runner restarted: plugins update and Remote Control comes back within a minute (open sessions reconnect in the app)"
 }
 
+# ── Dashboard ────────────────────────────────────────────────────────────────
+edge_get() { [ -f "$(edge_cfg)" ] && grep "^$1=" "$(edge_cfg)" | cut -d= -f2- || true; }
+ui_compose() {
+  ADLC_ROOT=$ADLC_ROOT ADLC_UID=$(id -u) ADLC_GID=$(id -g) ADLC_UI_HOSTS=$(edge_get ADLC_UI_HOSTS) \
+    docker compose -f "$ADLC_HOME/ui/compose.yml" "$@"
+}
+ui_host() {
+  local h base="" f
+  h=$(edge_get ADLC_UI_HOST); [ -n "$h" ] && { echo "$h"; return; }
+  for f in "$ADLC_ROOT"/config/*.env; do
+    [ -e "$f" ] || continue
+    base=$(grep '^ADLC_BASE_DOMAIN=' "$f" | cut -d= -f2); [ -n "$base" ] && break
+  done
+  echo "adlc.${base:-$(default_domain)}"
+}
+new_token() { (umask 077; head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$1"); }
+cmd_ui() {
+  local sub=${1:-up}; shift || true
+  local tokf="$ADLC_ROOT/ui/token" route="$ADLC_ROOT/edge/dynamic/adlc-ui.yml"
+  case $sub in
+    up)
+      local hosts; hosts=$(edge_get ADLC_UI_HOSTS)
+      while [ $# -gt 0 ]; do
+        case $1 in
+          --host) [[ "${2:-}" =~ ^[A-Za-z0-9.-]+$ ]] || die "invalid host '${2:-}'"
+                  [[ ",$hosts," == *",$2,"* ]] || hosts=${hosts:+$hosts,}$2; shift 2 ;;
+          *) die "unknown option $1" ;;
+        esac
+      done
+      [ "$(id -u)" != 0 ] || die "run as the non-root owner of $ADLC_ROOT"
+      docker network inspect adlc-edge >/dev/null 2>&1 || die "the edge proxy isn't running yet: start a project first (adlc up <slug>)"
+      mkdir -p "$ADLC_ROOT/ui/requests" "$ADLC_ROOT/edge/dynamic"; chmod 700 "$ADLC_ROOT/ui"
+      [ -s "$tokf" ] || { new_token "$tokf"; ok "login token created"; }
+      set_cfg "$(edge_cfg)" ADLC_UI_HOSTS "$hosts"
+      local host rule h; host=$(ui_host); rule="Host(\`$host\`)"
+      for h in ${hosts//,/ }; do rule="$rule || Host(\`$h\`)"; done
+      printf '%s\n' "http:" "  routers:" "    adlc-ui:" "      rule: '$rule'" "      entryPoints: [web]" "      service: adlc-ui" \
+        "  services:" "    adlc-ui:" "      loadBalancer:" "        servers:" '          - url: "http://adlc-ui:8080"' >"$route"
+      say "Building and starting the dashboard…"
+      ui_compose up -d --build --quiet-pull >/dev/null
+      local suffix=""; [ "$(edge_port)" = 80 ] || suffix=":$(edge_port)"
+      ok "dashboard: http://$host$suffix"
+      [ -z "$hosts" ] || say "  also answers to: $hosts (through your reverse proxy; serve it over HTTPS there)"
+      say "  sign in with the token from: adlc ui token"
+      ;;
+    token)
+      if [ "${1:-}" = --rotate ]; then new_token "$tokf"; ok "token rotated: every browser has to sign in again"; fi
+      [ -s "$tokf" ] || die "no dashboard yet: adlc ui up"
+      cat "$tokf"; echo ;;
+    down) ui_compose down; rm -f "$route"; ok "dashboard stopped" ;;
+    status)
+      docker ps --filter name=adlc-ui --format '{{.Names}}  {{.Status}}'
+      local sfx=""; [ "$(edge_port)" = 80 ] || sfx=":$(edge_port)"
+      say "  url: http://$(ui_host)$sfx" ;;
+    *) die "usage: adlc ui [up [--host name]…|down|token [--rotate]|status]" ;;
+  esac
+}
+
 cmd_down()   { need_slug "$1"; load_cfg "$1"; compose "$1" down; }
 cmd_login()  { need_slug "$1"; load_cfg "$1"; runner_exec "$1" adlc-login; }
 cmd_attach() { need_slug "$1"; load_cfg "$1"; runner_exec "$1" tmux attach -t adlc; }
@@ -373,6 +435,7 @@ main() {
     up) cmd_up "$@" ;;
     down) cmd_down "${1:-}" ;;
     restart) cmd_restart "$@" ;;
+    ui) cmd_ui "$@" ;;
     login) cmd_login "${1:-}" ;;
     app) cmd_app "$@" ;;
     attach) cmd_attach "${1:-}" ;;
@@ -383,7 +446,7 @@ main() {
     resume) cmd_resume "${1:-}" ;;
     logs) cmd_logs "$@" ;;
     audit) cmd_audit "${1:-}" ;;
-    help|-h|--help) sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    help|-h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
     *) die "unknown command '$c' (adlc help)" ;;
   esac
 }

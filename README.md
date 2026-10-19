@@ -512,6 +512,18 @@ Which tiers auto-merge is set in `adlc.yaml → autonomy.auto_merge`.
 
 ## 10. Day-to-day operation
 
+### Dashboard (`adlc ui`)
+A web page for all projects on the dev server: what's running now with its **live log**, the queue in order of precedence, what **needs you** (PRs to review, blocked runs and questions, your next owner tasks), run history with duration and cost, component health and logs, and **pause/resume**. It works on a phone.
+
+```bash
+adlc ui up                      # build and start it → http://adlc.<base>[:port]
+adlc ui token                   # the login token (adlc ui token --rotate signs everyone out)
+adlc ui up --host adlc.example.com   # later: also answer to a name your reverse proxy forwards
+```
+- **LAN only by default.** To reach it from outside, publish it through your own reverse proxy over **HTTPS**, with that proxy's authentication in front, and add the name with `--host`. The token login and `SameSite=Strict` cookies stay on (the cookie is marked `Secure` when the proxy forwards HTTPS).
+- **Safe by construction:** the dashboard has no Docker socket and no GitHub or Claude credentials, and it reads project state and logs read-only. GitHub data comes from a snapshot the poller writes every minute. Pause and resume are requests the poller applies within a minute and logs.
+- Update it after `git -C ~/adlc pull` with `adlc ui up`.
+
 | Situation | What you do |
 |---|---|
 | **`adlc:needs-info`** | Answer the questions in an issue comment, then relabel `adlc:ready` (or `adlc:queued` if it still has open blockers). The run resumes from where it stopped. |

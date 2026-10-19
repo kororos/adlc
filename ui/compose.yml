@@ -1,0 +1,29 @@
+# ADLC dashboard (adlc ui up). One per dev server, for all projects.
+# It sits only on the edge proxy's internal network (no internet), reads config, project state and
+# logs read-only, and can write nothing but its own folder (login token, action requests that the
+# projects' pollers apply). No Docker socket, no GitHub or Claude credentials.
+name: adlc-ui
+
+services:
+  ui:
+    build: .
+    image: adlc/ui:local
+    container_name: adlc-ui
+    user: "${ADLC_UID}:${ADLC_GID}"
+    environment:
+      ADLC_UI_HOSTS: ${ADLC_UI_HOSTS:-}
+    volumes:
+      - ${ADLC_ROOT}/config:/data/config:ro
+      - ${ADLC_ROOT}/projects:/data/projects:ro
+      - ${ADLC_ROOT}/ui:/data/ui
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [edge]
+    restart: unless-stopped
+
+networks:
+  edge:
+    name: adlc-edge
+    external: true

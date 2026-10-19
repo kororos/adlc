@@ -1,0 +1,65 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { CirclePause, CirclePlay, LoaderCircle } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { api, queryKeys, type QueueState } from "@/lib/api"
+import { ago } from "@/lib/format"
+import { cn } from "@/lib/utils"
+
+const STATE_STYLE: Record<QueueState, string> = {
+  "in-progress": "bg-blue-600 text-white",
+  "pr-open": "bg-violet-600 text-white",
+  ready: "bg-emerald-600 text-white",
+  queued: "bg-muted text-muted-foreground",
+  owner: "bg-amber-500 text-black",
+  "needs-info": "bg-yellow-400 text-black",
+  blocked: "bg-red-600 text-white",
+  "needs-human-review": "bg-orange-500 text-black",
+}
+
+const STATE_LABEL: Partial<Record<QueueState, string>> = { owner: "your task", "needs-human-review": "needs review" }
+
+export function StateBadge({ state }: { state: QueueState }) {
+  return <Badge className={cn("border-transparent", STATE_STYLE[state])}>{STATE_LABEL[state] ?? state}</Badge>
+}
+
+export function PauseControl({ slug, paused, pending }: { slug: string; paused: boolean; pending: string[] }) {
+  const qc = useQueryClient()
+  const m = useMutation({
+    mutationFn: (action: "pause" | "resume") => api.action(slug, action),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.projects })
+      void qc.invalidateQueries({ queryKey: queryKeys.project(slug) })
+    },
+  })
+  const waiting = pending.length > 0 || m.isPending
+  const next = paused ? "resume" : "pause"
+  return (
+    <div className="flex items-center gap-2">
+      <Button variant={paused ? "default" : "outline"} size="sm" disabled={waiting} onClick={() => m.mutate(next)}
+        data-testid={`${next}-${slug}`}>
+        {waiting ? <LoaderCircle className="animate-spin" /> : paused ? <CirclePlay /> : <CirclePause />}
+        {waiting ? `${pending[0] ?? next} requested…` : paused ? "Resume" : "Pause"}
+      </Button>
+      {m.isError && <span className="text-sm text-destructive">{(m.error as Error).message}</span>}
+    </div>
+  )
+}
+
+export function PipelineBadge({ paused, backoffUntil }: { paused: boolean; backoffUntil: string | null }) {
+  if (paused) return <Badge variant="outline" className="border-amber-500 text-amber-600">paused</Badge>
+  if (backoffUntil) return <Badge variant="outline" className="border-orange-500 text-orange-600">usage limit · resumes {ago(backoffUntil)}</Badge>
+  return <Badge variant="outline" className="border-emerald-600 text-emerald-700 dark:text-emerald-400">running</Badge>
+}
+
+// A component is "stale" when its log hasn't moved for a while (the poller logs at least every
+// ten minutes while paused; idle deployers and Remote Control can be quiet much longer).
+export function Freshness({ iso, staleAfterMin }: { iso: string | null; staleAfterMin: number }) {
+  const stale = !iso || Date.now() - new Date(iso).getTime() > staleAfterMin * 60_000
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 text-sm", stale ? "text-amber-600" : "text-muted-foreground")}>
+      <span className={cn("size-2 rounded-full", stale ? "bg-amber-500" : "bg-emerald-500")} />
+      {ago(iso)}
+    </span>
+  )
+}

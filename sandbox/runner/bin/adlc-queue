@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // adlc-queue [--all] [--limit N]: the project's open work in order of precedence.
+// adlc-queue --snapshot <file>: the same plus open PRs and the issues waiting for a person, as
+//   JSON for the ADLC dashboard (written atomically; the poller refreshes it every minute).
 //
 // Mirrors the poller: an issue can start when all its "blocked by" issues are closed; among
 // those, the earliest milestone due date wins, then the oldest issue. Owner tasks (adlc:owner)
@@ -7,17 +9,22 @@
 // Epics and issues without ADLC labels aren't pipeline work and are left out.
 "use strict"
 const { execFileSync } = require("node:child_process")
+const fs = require("node:fs")
 
 const args = process.argv.slice(2)
 const all = args.includes("--all")
 const li = args.indexOf("--limit")
 const limit = all ? Infinity : Number(li >= 0 ? args[li + 1] : 15)
+const si = args.indexOf("--snapshot")
+const snapshot = si >= 0 ? args[si + 1] : ""
 const [owner, name] = (process.env.ADLC_REPO || "").split("/")
 if (!owner || !name) { console.error("adlc-queue: ADLC_REPO is not set"); process.exit(2) }
 
 const query = `query($o:String!,$r:String!,$endCursor:String){repository(owner:$o,name:$r){
   issues(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
-    nodes{number title createdAt milestone{title dueOn} labels(first:30){nodes{name}}
+    nodes{number title url createdAt milestone{title dueOn} labels(first:30){nodes{name}}
+          assignees(first:5){nodes{login}}
+          comments(last:1){nodes{author{login} createdAt body url}}
           blockedBy(first:100){nodes{number state}}}}}}`
 const raw = execFileSync("gh", ["api", "graphql", "--paginate", "--slurp",
   "-f", `query=${query}`, "-f", `o=${owner}`, "-f", `r=${name}`], { encoding: "utf8", maxBuffer: 64 << 20 })
@@ -32,7 +39,7 @@ for (const i of issues) {
   const state = isOwner ? "owner" : STATES.find((s) => labels.includes(`adlc:${s}`))
   if (!state) continue
   work.set(i.number, {
-    n: i.number, title: i.title, state, created: i.createdAt,
+    n: i.number, title: i.title, url: i.url, state, created: i.createdAt, raw: i,
     ms: i.milestone?.title ?? "", due: i.milestone?.dueOn ?? "9999",
     blockers: i.blockedBy.nodes.filter((b) => b.state === "OPEN").map((b) => b.number),
   })
@@ -61,6 +68,47 @@ while (avail.length) {
   }
 }
 const cyclic = [...work.values()].filter((w) => !order.includes(w)).sort(cmp)
+
+if (snapshot) {
+  const prQuery = `query($o:String!,$r:String!){repository(owner:$o,name:$r){
+    pullRequests(states:OPEN,first:50,orderBy:{field:CREATED_AT,direction:DESC}){nodes{
+      number title url isDraft createdAt author{login} reviewDecision mergeStateStatus
+      labels(first:20){nodes{name}} closingIssuesReferences(first:5){nodes{number}}
+      commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}}`
+  const pr = JSON.parse(execFileSync("gh", ["api", "graphql", "-f", `query=${prQuery}`, "-f", `o=${owner}`, "-f", `r=${name}`],
+    { encoding: "utf8", maxBuffer: 64 << 20 })).data.repository.pullRequests.nodes
+  const item = (w, i) => ({
+    rank: i + 1, number: w.n, title: w.title, url: w.url, state: w.state, milestone: w.ms,
+    blockers: w.blockers.map((b) => ({ number: b, owner: work.get(b)?.state === "owner" })),
+    unblocks: (blocks.get(w.n) ?? []).length,
+    assignees: w.raw.assignees.nodes.map((a) => a.login),
+  })
+  const lastComment = (w) => {
+    const c = w.raw.comments.nodes[0]
+    return c ? { author: c.author?.login ?? "", at: c.createdAt, url: c.url, body: c.body.slice(0, 1500) } : null
+  }
+  const counts = {}
+  for (const w of work.values()) counts[w.state] = (counts[w.state] ?? 0) + 1
+  const data = {
+    generatedAt: new Date().toISOString(),
+    repo: `${owner}/${name}`,
+    counts,
+    queue: [...order, ...cyclic].map(item),
+    cyclic: cyclic.map((w) => w.n),
+    attention: [...work.values()].filter((w) => ["blocked", "needs-info", "needs-human-review"].includes(w.state))
+      .sort((a, b) => a.n - b.n).map((w) => ({ ...item(w, order.indexOf(w)), lastComment: lastComment(w) })),
+    pullRequests: pr.map((p) => ({
+      number: p.number, title: p.title, url: p.url, draft: p.isDraft, createdAt: p.createdAt,
+      author: p.author?.login ?? "", reviewDecision: p.reviewDecision, mergeState: p.mergeStateStatus,
+      labels: p.labels.nodes.map((l) => l.name), closes: p.closingIssuesReferences.nodes.map((c) => c.number),
+      checks: p.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null,
+    })),
+  }
+  const tmp = `${snapshot}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(data))
+  fs.renameSync(tmp, snapshot)
+  process.exit(0)
+}
 
 const pad = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s.padEnd(n))
 const line = (w, i, note = "") => {

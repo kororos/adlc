@@ -83,6 +83,7 @@ services:
       - home:/home/adlc
       - ${ADLC_ROOT}/projects/${ADLC_SLUG}:${ADLC_ROOT}/projects/${ADLC_SLUG}
       - ${ADLC_ROOT}/cache:${ADLC_ROOT}/cache
+      - ${ADLC_ROOT}/ui/requests/${ADLC_SLUG}:${ADLC_ROOT}/ui/requests/${ADLC_SLUG}   # dashboard requests (adlc ui)
       - ${ADLC_HOME}:/opt/adlc:ro
     networks:
       internal:
