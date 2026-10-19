@@ -41,21 +41,27 @@ runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
 # A waiting runner lives in ci-docker and survives restarts of this container. One registered
 # with other labels (ADLC_CI_LABELS changed) would wait forever for jobs nobody sends it: remove
 # it and its GitHub registration. A runner that has started a job is left to finish.
+# A waiting runner started from an older CI image (the image was rebuilt) is replaced the same way,
+# so jobs always get the current image.
 replace_stale_runners() {
-  local c labels token id
+  local c labels image current token id why
+  current=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null)
   for c in $(docker ps --filter label=adlc.ci=runner --format '{{.Names}}'); do
     labels=$(docker inspect -f '{{index .Config.Labels "adlc.ci.labels"}}' "$c" 2>/dev/null)
-    [ "$labels" = "$LABELS" ] && continue
+    image=$(docker inspect -f '{{.Image}}' "$c" 2>/dev/null)
+    if [ "$labels" != "$LABELS" ]; then why="labels ${labels:-unknown} → $LABELS"
+    elif [ -n "$current" ] && [ "$image" != "$current" ]; then why="the CI image was updated"
+    else continue; fi
     token=$(secret ci_admin_pat)
     id=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
           --jq ".runners[] | select(.name == \"$c\") | select(.busy | not) | .id" 2>/dev/null)
     if [ -z "$id" ]; then
-      log "runner $c has old labels (${labels:-unknown}) but is busy or unknown to GitHub; leaving it"
+      log "runner $c is outdated ($why) but busy or unknown to GitHub; leaving it"
       continue
     fi
     docker rm -f "$c" >/dev/null 2>&1
     GH_TOKEN=$token $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
-    log "replaced idle runner $c: labels ${labels:-unknown} → $LABELS"
+    log "replaced idle runner $c: $why"
   done
 }
 
@@ -112,7 +118,6 @@ start_runner() {
     && log "runner $name waiting for a job (labels: $LABELS)"
 }
 
-[ -n "$(secret ci_admin_pat)" ] && replace_stale_runners
 
 # Once a day, between jobs: drop dangling images and cap the build cache. Images in use (the
 # runner image) and pulled base images stay, so jobs keep their speed.
@@ -134,14 +139,18 @@ prune_engine() {
   log "housekeeping: dangling images and build cache pruned"
 }
 
+log "registrar started: one runner at a time with labels $LABELS, image $IMAGE"
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
     log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue
   fi
+  # Image first (cheap when current), then retire idle runners that are outdated, then make sure
+  # one runner waits for the next job.
+  ensure_image
+  replace_stale_runners
   if ! runner_running; then
     reset_engine
     prune_engine
-    ensure_image
     start_runner || sleep 60
   fi
   sleep "$INTERVAL"
