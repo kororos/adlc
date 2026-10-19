@@ -18,6 +18,7 @@ Rules:
 - **Walking skeleton first** (new projects). Point its tasks at the templates in `stack-react-native:rn-test-env`, `stack-node-api:node-containers` and `adlc-core:ci-workflows`: one issue that sets up the repo structure, CI with required checks, the `deploy/` compose files, the test environment (`watch` and `build` modes), `adlc.build.yaml` commands (then `status: active`, which switches CI from skipping to running), architecture checks, a thin end-to-end path (app screen → API → DB) on web and Android, **automatic deployment to the dev environment** (a `publish` workflow: on push to the default branch only, `runs-on` the label in `adlc.yaml ci.runners.publish`, `environment: publish`, `docker build --pull`, images to the registry; then the pull-deployer), and the **nightly e2e workflow** (scheduled CI, opens `adlc:regression` issues on failure). Everything else depends on it. Split it into 2-3 issues if it is too big for one run.
 - **Production pipeline before the first release:** a dedicated issue (risk high) for the prod runtime from `adlc.yaml environments.prod` (e.g. Swarm stack file, secrets, rolling update and rollback, migration job, backups, deploy workflow gated by the `prod` GitHub Environment). It goes in the first release milestone and blocks that milestone's release issue.
 - **Vertical slices:** each issue delivers user-visible or contract-visible value through all needed layers. Split by journey or rule, not by layer, unless a backend contract must land first so mobile and web can proceed in parallel.
+- **Owner tasks:** work only the owner can do (external accounts, credentials, infrastructure outside the runner, legal documents, prod deploys, release and gate sign-offs) is its own issue marked `owner: yes` in the table, with acceptance criteria the owner can check. Agent issues that need it list it in `blocked_by`. Keep owner tasks few and early, so they don't stall the queue.
 - **Size:** one delivery run, roughly 1-6 tasks for the feature-architect. If an issue needs more than about 8 acceptance criteria, split it.
 - **Dependencies:** only real ones (needs the schema, needs the endpoint, needs auth). Maximise the number of issues that can run in parallel. No cycles.
 - **Ordering:** risky or uncertain items early (spikes allowed, labelled `adlc:spike`). Then features by PRD priority. Deferred "later" items go into a separate `Later` section with their evolution trigger, not into the backlog.
@@ -29,7 +30,7 @@ Write `.adlc/backlog.md`:
 ## Milestones          M1 <name> — goal (issues…)
 ## Epics               E1 <name> — PRD F1, F2
 ## Issues
-| key | title | epic | milestone | blocked_by | risk hint | ACs (count) |
+| key | title | epic | milestone | blocked_by | risk hint | owner | ACs (count) |
 ## Dependency graph    ```mermaid graph TD … ```
 ## Issue bodies        ### <key> — <title>  (body in the handoff-contracts backlog format)
 ## Later               item — trigger

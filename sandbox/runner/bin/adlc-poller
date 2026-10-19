@@ -46,10 +46,14 @@ recover_interrupted() {
   done
 }
 
+# Owner tasks and epics are never delivered by agents, even if one gets a pipeline label by mistake.
+NOT_AGENT_WORK='select([.labels[].name] | any(. == "adlc:owner" or . == "owner-task" or . == "type:epic") | not)'
+
 # ── queued → ready when every "blocked by" issue is closed ───────────────────
 promote_queued() {
   local n open
-  for n in $(gh issue list -R "$R" --label adlc:queued --state open --limit 200 --json number --jq '.[].number' 2>/dev/null); do
+  for n in $(gh issue list -R "$R" --label adlc:queued --state open --limit 1000 --json number,labels \
+               --jq ".[] | $NOT_AGENT_WORK | .number" 2>/dev/null); do
     open=$(gh api "repos/$R/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null) || continue
     if [ "$open" = 0 ]; then label "$n" adlc:queued adlc:ready; log "promoted #$n to ready"; fi
   done
@@ -151,8 +155,8 @@ launch_ready() {
     fi
     launch "$n" "$title" && slots=$((slots - 1))
   done < <(gh issue list -R "$R" --label adlc:ready --state open --limit 100 \
-             --json number,title,author,milestone,createdAt \
-             --jq 'sort_by((.milestone.dueOn // "9999"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv' 2>/dev/null)
+             --json number,title,author,milestone,createdAt,labels \
+             --jq "map($NOT_AGENT_WORK) | sort_by((.milestone.dueOn // \"9999\"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv" 2>/dev/null)
 }
 
 # ── Cleanup after merge/close ─────────────────────────────────────────────────

@@ -21,9 +21,13 @@ Iterate in conversation: split/merge, reorder, change scope, move items between 
 
 ## 3. Create on GitHub (after approval)
 Requires `gh` ≥ 2.94 (check with `gh --version`. If it's older, use the REST endpoints `issues/{n}/sub_issues` and `issues/{n}/dependencies/blocked_by`, which take issue **ids**, not numbers).
-1. Ensure the labels exist: `adlc:ready`, `adlc:queued`, `adlc:in-progress`, `adlc:pr-open`, `adlc:needs-info`, `adlc:blocked`, `adlc:needs-human-review`, `adlc:spike`, `adlc:regression`, `adlc:flaky`, `type:epic`, `adlc:risk-low|medium|high`.
+1. Ensure the labels exist: `adlc:ready`, `adlc:queued`, `adlc:in-progress`, `adlc:pr-open`, `adlc:needs-info`, `adlc:blocked`, `adlc:needs-human-review`, `adlc:spike`, `adlc:regression`, `adlc:flaky`, `adlc:owner` (description: "Owner's task; ADLC never runs it"), `type:epic`, `adlc:risk-low|medium|high`.
 2. Create the milestones.
 3. Create the epics (label `type:epic`, plus `--type Epic` if the org has issue types).
-4. Create the issues in topological order, so blockers exist first. Use `--body-file`, `--milestone`, `--parent <epic#>`, and `--blocked-by <#>,…` mapped from backlog keys. Label each one `adlc:ready` if it has no blockers, otherwise `adlc:queued`.
+4. Create the issues in topological order, so blockers exist first. Use `--body-file`, `--milestone`, `--parent <epic#>`, and `--blocked-by <#>,…` mapped from backlog keys. Labels:
+   - **Agent issues:** `adlc:ready` if nothing blocks them, otherwise `adlc:queued`.
+   - **Owner tasks** (accounts, credentials, infrastructure outside the runner, legal, reviews, prod deploys, release sign-offs): `adlc:owner` only, never `queued`/`ready`, and assigned to the owner (`--assignee <owner>`, the first CODEOWNERS entry). Agent issues that need one list it in `blocked-by`; the poller promotes them when the owner closes the task.
+   - **Waiting for a decision:** `adlc:needs-info` only, with the question in the body. Once answered, the owner relabels it `adlc:queued`.
+   - Before labelling a setup owner task, check whether it's already done (e.g. the CI runner, registry credentials, the GitHub App). Report done ones to the user and close them after they confirm, so they don't block the walking skeleton.
 5. Write the key → issue-number map back into `.adlc/backlog.md`, commit it on `adlc/backlog`, open a PR and auto-merge it.
-6. Report: the number of issues created, which are `ready` now, and the critical path. Remind the user that the poller promotes `queued` → `ready` as blockers close, and that `/adlc-core:deliver <n>` starts one manually.
+6. Report: the number of issues created, which are `ready` now, the critical path, and the open **owner tasks that block agent work** (owner, issue, what it unblocks). Remind the user that the poller promotes `queued` → `ready` as blockers close, and that `/adlc-core:deliver <n>` starts one manually.
