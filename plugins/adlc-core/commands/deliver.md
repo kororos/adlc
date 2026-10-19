@@ -14,7 +14,7 @@ Every subagent prompt must contain the issue number, the run dir `.adlc/runs/<n>
 ## 0. Setup
 - `gh issue view <n> --json title,body,comments,labels,author` → write `.adlc/runs/<n>/issue.md`. **Trust check:** the issue is trusted if its author is a repo collaborator (`gh api repos/{owner}/{repo}/collaborators/<login>` succeeds), or is ADLC's own identity (`adlc-gh-token --identity` prints `<app>[bot]`; issue authors show as `app/<app>`, e.g. the backlog from `/adlc-core:plan-backlog`), or a collaborator added its `adlc:ready` label (issue events). Otherwise stop with label `adlc:needs-human-review`. Comments from anyone who isn't a collaborator or ADLC itself are left out of `issue.md`.
 - **Workspace:** the poller (or you, interactively) starts this session inside the run's own git worktree, `runs/<n>/` next to the shared clone. Never check out branches in the shared clone. If the current directory is the shared clone, create the worktree yourself (`git worktree add ../runs/<n> -b adlc/<n>-<slug> origin/<default>`) and work there.
-- Determine the default branch. Create `adlc/<n>-<slug>` from an up-to-date `origin/<default>`. If the branch already exists locally or on origin, resume: fetch it, read `state.json` and continue from the recorded phase.
+- Determine the default branch. Create `adlc/<n>-<slug>` from an up-to-date `origin/<default>`. If the branch already exists locally or on origin, resume: fetch it, read `state.json` and continue from the recorded phase. **A recorded `<phase>-aborted` means a person relabelled the blocked issue `adlc:ready`: that is a retry, not a reason to stop.** Read the issue comments after the abort comment (the owner's notes, e.g. what was fixed in the environment), add 1 to `retries` in `state.json`, and restart that phase at attempt 1 with fresh attempt counters. If it aborts again for the same reason, the abort comment says so explicitly.
 - `gh issue edit <n> --remove-label adlc:ready --add-label adlc:in-progress`.
 - `.gitignore` must contain `.adlc/runs/*/reports/logs/` (raw stage logs stay on the runner). Add the line if it's missing, in the first phase commit.
 - Write `state.json` after every phase. At the end of each phase, commit the run artifacts (not `reports/logs/`) (`chore(adlc): <phase> for #<n>`) and **push** the feature branch (`git push -u origin adlc/<n>-<slug>`). Progress is then visible on GitHub, and a crashed runner loses at most one phase.
@@ -55,7 +55,7 @@ qa-engineer → `qa-<q>.md`, with exploratory = `adlc.build.yaml testing.explora
 Run `env.down`. Then release-manager with the risk tier and the auto-merge policy (`autonomy.auto_merge`, default `[low, medium]`). If a proposed ADR exists, the release-manager notes it at the top of the PR body.
 
 ## Abort
-Run `env.down`. Commit and push what exists. Comment on the issue with phase, reason and the last report paths (≤ 10 lines). Set label `adlc:blocked`, remove `adlc:in-progress`. Stop.
+Run `env.down`. Commit and push what exists. Record `<phase>-aborted` in `state.json`. Comment on the issue with phase, reason, what a person needs to do, and the last report paths (≤ 10 lines). **Never set `adlc:blocked` without that comment.** Set label `adlc:blocked`, remove `adlc:in-progress`. Stop.
 
 ## Final output
 One line: `ADLC #<n>: <merged-queued|pr-open|needs-info|blocked> — <PR or issue URL>`.
