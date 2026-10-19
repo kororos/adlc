@@ -3,3 +3,4 @@
 *.bak
 ui/**/node_modules/
 ui/web/dist/
+docs/presentation/node_modules/
