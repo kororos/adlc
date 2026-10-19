@@ -24,7 +24,8 @@ export function StateBadge({ state }: { state: QueueState }) {
   return <Badge className={cn("border-transparent", STATE_STYLE[state])}>{STATE_LABEL[state] ?? state}</Badge>
 }
 
-export function PauseControl({ slug, paused, pending }: { slug: string; paused: boolean; pending: string[] }) {
+export function PauseControl({ slug, paused, pending }: { slug: string; paused: boolean; pending: { action: string; at: string }[] }) {
+  const now = useNow(10_000)
   const qc = useQueryClient()
   const m = useMutation({
     mutationFn: (action: "pause" | "resume") => api.action(slug, action),
@@ -35,13 +36,20 @@ export function PauseControl({ slug, paused, pending }: { slug: string; paused: 
   })
   const waiting = pending.length > 0 || m.isPending
   const next = paused ? "resume" : "pause"
+  // The poller applies requests within seconds; two minutes means it isn't seeing them.
+  const stuck = pending.some((r) => now - new Date(r.at).getTime() > 120_000)
   return (
     <div className="flex items-center gap-2">
       <Button variant={paused ? "default" : "outline"} size="sm" disabled={waiting} onClick={() => m.mutate(next)}
         data-testid={`${next}-${slug}`}>
         {waiting ? <LoaderCircle className="animate-spin" /> : paused ? <CirclePlay /> : <CirclePause />}
-        {waiting ? `${pending[0] ?? next} requested…` : paused ? "Resume" : "Pause"}
+        {waiting ? `${pending[0]?.action ?? next} requested…` : paused ? "Resume" : "Pause"}
       </Button>
+      {stuck && (
+        <span className="max-w-xs text-xs text-amber-600 dark:text-amber-400">
+          The runner hasn't picked this up. Is it running and up to date? On the dev server: <code>adlc status {slug}</code>, then <code>adlc up {slug}</code>.
+        </span>
+      )}
       {m.isError && <span className="text-sm text-destructive">{(m.error as Error).message}</span>}
     </div>
   )

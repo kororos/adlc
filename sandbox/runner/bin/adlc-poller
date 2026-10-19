@@ -226,6 +226,15 @@ apply_ui_requests() {
   done
 }
 
+# Wait for the next cycle, but apply dashboard requests (pause/resume) within ~5 seconds.
+nap() {
+  local waited=0
+  while [ "$waited" -lt "$POLL_INTERVAL" ]; do
+    sleep 5; waited=$((waited + 5))
+    compgen -G "$UI_REQUESTS/*.json" >/dev/null && apply_ui_requests
+  done
+}
+
 # ── Cleanup after merge/close ─────────────────────────────────────────────────
 cleanup() {
   local wt n state
@@ -269,5 +278,5 @@ while :; do
   [ $((i % 10)) = 0 ] && cleanup
   write_snapshot
   i=$((i + 1))
-  sleep "$POLL_INTERVAL"
+  nap
 done

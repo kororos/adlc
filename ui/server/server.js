@@ -133,8 +133,13 @@ function state(p) {
     const u = Number(fs.readFileSync(st("backoff_until"), "utf8"))
     if (u * 1000 > Date.now()) backoffUntil = new Date(u * 1000).toISOString()
   } catch { /* none */ }
+  // Requests the runner hasn't applied yet: { action, at } from "<epoch-ms>-<action>.json".
   let pending = []
-  try { pending = fs.readdirSync(path.join(DATA, "ui", "requests", p.slug)).filter((f) => f.endsWith(".json")).map((f) => f.replace(/^\d+-|\.json$/g, "")) } catch { /* none */ }
+  try {
+    pending = fs.readdirSync(path.join(DATA, "ui", "requests", p.slug))
+      .map((f) => f.match(/^(\d+)-([a-z]+)\.json$/)).filter(Boolean)
+      .map(([, ms, action]) => ({ action, at: new Date(Number(ms)).toISOString() }))
+  } catch { /* none */ }
   let devDeployed = null
   try { devDeployed = fs.readFileSync(st("dev_deployed"), "utf8").trim() } catch { /* never */ }
   const health = Object.fromEntries(COMPONENTS.map((c) => {

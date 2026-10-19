@@ -63,7 +63,7 @@ export type ProjectSummary = {
   repo: string
   paused: boolean
   backoffUntil: string | null
-  pending: string[]
+  pending: { action: string; at: string }[]
   active: { issue: number; title: string; run: Run | null; progress: RunProgress | null }[]
   counts: Snapshot["counts"] | null
   snapshotAt: string | null
