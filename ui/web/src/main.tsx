@@ -1,12 +1,13 @@
-import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, Outlet, RouterProvider, createRootRoute, createRoute, createRouter } from "@tanstack/react-router"
-import { LogOut } from "lucide-react"
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
+import { Outlet, RouterProvider, createRootRoute, createRoute, createRouter } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import "./index.css"
-import { Logo, ThemeToggle } from "@/components/chrome"
+import { AppSidebar } from "@/components/app-sidebar"
 import { RunLog } from "@/components/logs"
-import { Button } from "@/components/ui/button"
+import { TopBar } from "@/components/top-bar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError, api, queryKeys } from "@/lib/api"
 import { LoginPage } from "@/pages/login"
@@ -33,26 +34,26 @@ queryClient.getQueryCache().subscribe((e) => {
   }
 })
 
+// The sidebar remembers expanded/collapsed in a cookie it writes itself.
+const sidebarOpen = () => !document.cookie.split("; ").includes("sidebar_state=false")
+
 function Shell() {
-  const qc = useQueryClient()
   const session = useQuery({ queryKey: queryKeys.session, queryFn: api.session })
-  const logout = useMutation({ mutationFn: api.logout, onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.session }) })
   if (session.isPending) return <div className="p-6"><Skeleton className="h-10 w-60" /></div>
   if (session.isError) return <p className="p-6 text-destructive">Dashboard server unreachable: {session.error.message}</p>
   if (!session.data.authenticated) return <LoginPage configured={session.data.configured} />
   return (
-    <div className="app-glow min-h-svh">
-      <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)] gap-6 px-4 py-4 md:px-6 md:py-6">
-        <header className="flex items-center justify-between gap-3">
-          <Link to="/" className="text-lg"><Logo /></Link>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button variant="ghost" size="sm" onClick={() => logout.mutate()}><LogOut /><span className="hidden sm:inline">Sign out</span></Button>
+    <TooltipProvider>
+      <SidebarProvider defaultOpen={sidebarOpen()}>
+        <AppSidebar />
+        <SidebarInset className="min-w-0">
+          <TopBar />
+          <div className="app-glow flex-1">
+            <main className="mx-auto grid max-w-6xl min-w-0 grid-cols-[minmax(0,1fr)] gap-6 px-4 py-5 md:px-6 md:py-6"><Outlet /></main>
           </div>
-        </header>
-        <main className="min-w-0"><Outlet /></main>
-      </div>
-    </div>
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   )
 }
 
@@ -77,7 +78,6 @@ const runRoute = createRoute({
     const { slug, file } = runRoute.useParams()
     return (
       <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
-        <p className="text-sm"><Link to="/p/$slug" params={{ slug }} search={{ tab: "history" }} className="text-muted-foreground hover:text-foreground">← {slug}</Link></p>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Run for #{file.split("-")[0]}</h1>
           <p className="font-mono text-xs text-muted-foreground">{file}</p>

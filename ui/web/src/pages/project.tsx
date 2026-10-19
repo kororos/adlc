@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useSidebar } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, queryKeys, type Component, type Project, type QueueItem } from "@/lib/api"
 import { ago, dateTime, duration, usd } from "@/lib/format"
@@ -21,6 +22,8 @@ export type ProjectTab = "now" | "queue" | "attention" | "history" | "health"
 
 export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
   const navigate = useNavigate()
+  const { isMobile, state } = useSidebar()
+  const showTabs = isMobile || state === "collapsed" // otherwise the sidebar lists the sections
   const q = useQuery({ queryKey: queryKeys.project(slug), queryFn: () => api.project(slug), refetchInterval: 10_000 })
   if (q.isPending) return <div className="grid gap-4"><Skeleton className="h-24" /><Skeleton className="h-80" /></div>
   if (q.isError) return <p className="text-destructive">{q.error.message}</p>
@@ -33,7 +36,6 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
     <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm"><Link to="/" className="text-muted-foreground hover:text-foreground">Projects</Link></p>
           <h1 className="flex items-center gap-3 text-3xl font-semibold tracking-tight">{p.slug}<PipelineBadge paused={p.paused} backoffUntil={p.backoffUntil} /></h1>
           <p className="mt-1 text-sm text-muted-foreground">
             <a href={`https://github.com/${p.repo}`} target="_blank" rel="noreferrer" className="hover:text-foreground">{p.repo}</a>
@@ -51,8 +53,8 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
         <Stat icon={CircleUserRound} label="Your tasks" tone={s?.counts.owner ? "warn" : "default"} value={s?.counts.owner ?? 0} hint="owner tasks open" />
       </div>
 
-      <Tabs className="min-w-0" value={tab} onValueChange={(v) => navigate({ to: "/p/$slug", params: { slug }, search: { tab: v as ProjectTab } })}>
-        <TabsList className="max-w-full justify-start overflow-x-auto">
+      <Tabs key={tab} className="min-w-0" value={tab} onValueChange={(v) => navigate({ to: "/p/$slug", params: { slug }, search: { tab: v as ProjectTab } })}>
+        <TabsList className={cn("max-w-full justify-start overflow-x-auto", !showTabs && "hidden")}>
           <TabsTrigger value="now"><Radio />Now{p.active.length ? ` (${p.active.length})` : ""}</TabsTrigger>
           <TabsTrigger value="queue"><ListOrdered />Queue</TabsTrigger>
           <TabsTrigger value="attention"><Inbox />Needs you{needYou ? ` (${needYou})` : ""}</TabsTrigger>
