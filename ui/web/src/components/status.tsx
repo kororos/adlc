@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { api, queryKeys, type QueueState } from "@/lib/api"
 import { ago } from "@/lib/format"
+import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 
 const STATE_STYLE: Record<QueueState, string> = {
@@ -55,11 +56,12 @@ export function PipelineBadge({ paused, backoffUntil }: { paused: boolean; backo
 // A component is "stale" when its log hasn't moved for a while (the poller logs at least every
 // ten minutes while paused; idle deployers and Remote Control can be quiet much longer).
 export function Freshness({ iso, staleAfterMin }: { iso: string | null; staleAfterMin: number }) {
-  const stale = !iso || Date.now() - new Date(iso).getTime() > staleAfterMin * 60_000
+  const now = useNow()
+  const stale = !iso || now - new Date(iso).getTime() > staleAfterMin * 60_000
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-sm", stale ? "text-amber-600" : "text-muted-foreground")}>
       <span className={cn("size-2 rounded-full", stale ? "bg-amber-500" : "bg-emerald-500")} />
-      {ago(iso)}
+      {ago(iso, now)}
     </span>
   )
 }
