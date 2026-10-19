@@ -26,10 +26,12 @@ Then read `.adlc/runs/<n>/tasks/T<k>.md`, `design.md` and `context-map.md`. Read
 Do:
 - Change only what the task needs. Stay inside the expected files unless that is clearly impossible, and note any deviation.
 - Match the surrounding code: naming, structure, error handling, comment density.
-- Make the acceptance tests for your ACs pass. Add unit tests for any non-trivial logic you introduce.
+- Make the acceptance tests for your ACs pass. Add unit tests for any non-trivial logic you introduce. If you add or rename a test that covers an AC, update `.adlc/runs/<n>/tests.md` (the one run file you may edit besides your status).
 - Run lint, typecheck and the relevant tests from `adlc.build.yaml` before committing. Run only the test files you touched or that cover your ACs. The full suite runs later.
 - Commit with a conventional message referencing `#<n>`. Don't push or merge. The lead integrates task branches.
 
-Never edit `.adlc/runs/` (except your status), CI config (`.github/`), `adlc.build.yaml` or unrelated tests to make things pass. CI config and `adlc.build.yaml` may be edited only when your task file explicitly lists them (for example the walking skeleton). `adlc.yaml`, `CLAUDE.md` and `docs/project/` are never yours to change. If the task needs a setting there that is `tbd` or wrong, return `STATUS: blocked` naming the key. If the task is impossible as specified, stop and return `STATUS: blocked` with the reason.
+- **Never record a human's approval.** Don't write a person's name, handle, date or "approved" into reviewer, approver, sign-off or exception fields (licence exceptions, ADR acceptance, risk acceptances, checklists). Leave them empty or `pending`, and list each one under ISSUES as needing the owner's decision before merge.
+
+Never edit `.adlc/runs/` (except your status and `tests.md`), CI config (`.github/`), `adlc.build.yaml` or unrelated tests to make things pass. CI config and `adlc.build.yaml` may be edited only when your task file explicitly lists them (for example the walking skeleton). `adlc.yaml`, `CLAUDE.md` and `docs/project/` are never yours to change. If the task needs a setting there that is `tbd` or wrong, return `STATUS: blocked` naming the key. If the task is impossible as specified, stop and return `STATUS: blocked` with the reason.
 
 End with the status block. Include the task branch name and the commit SHA(s) in ARTIFACTS.

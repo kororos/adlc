@@ -16,7 +16,8 @@ Every subagent prompt must contain the issue number, the run dir `.adlc/runs/<n>
 - **Workspace:** the poller (or you, interactively) starts this session inside the run's own git worktree, `runs/<n>/` next to the shared clone. Never check out branches in the shared clone. If the current directory is the shared clone, create the worktree yourself (`git worktree add ../runs/<n> -b adlc/<n>-<slug> origin/<default>`) and work there.
 - Determine the default branch. Create `adlc/<n>-<slug>` from an up-to-date `origin/<default>`. If the branch already exists locally or on origin, resume: fetch it, read `state.json` and continue from the recorded phase.
 - `gh issue edit <n> --remove-label adlc:ready --add-label adlc:in-progress`.
-- Write `state.json` after every phase. At the end of each phase, commit the run artifacts (`chore(adlc): <phase> for #<n>`) and **push** the feature branch (`git push -u origin adlc/<n>-<slug>`). Progress is then visible on GitHub, and a crashed runner loses at most one phase.
+- `.gitignore` must contain `.adlc/runs/*/reports/logs/` (raw stage logs stay on the runner). Add the line if it's missing, in the first phase commit.
+- Write `state.json` after every phase. At the end of each phase, commit the run artifacts (not `reports/logs/`) (`chore(adlc): <phase> for #<n>`) and **push** the feature branch (`git push -u origin adlc/<n>-<slug>`). Progress is then visible on GitHub, and a crashed runner loses at most one phase.
 
 ## 1. Understand
 1. codebase-scout → `context-map.md`.

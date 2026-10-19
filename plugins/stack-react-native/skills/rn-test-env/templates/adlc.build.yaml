@@ -2,6 +2,8 @@
 # Every command runs from the run's worktree; ADLC_RUN, ADLC_PROJECT_DOMAIN, ADLC_LOCK_DIR are exported.
 version: 1
 status: draft     # set to active once every command below is proven; CI runs its jobs from then on
+ci:
+  active: []      # jobs CI runs before that, once their commands work (e.g. [lint, typecheck, arch-check])
 
 commands:
   install:    pnpm install --frozen-lockfile

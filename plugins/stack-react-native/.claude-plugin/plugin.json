@@ -1,6 +1,6 @@
 {
   "name": "stack-react-native",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "ADLC stack pack: React Native with Expo (web, Android, iOS): app patterns, test environment, e2e with Playwright and Maestro.",
   "author": { "name": "Lefteris Kororos" }
 }

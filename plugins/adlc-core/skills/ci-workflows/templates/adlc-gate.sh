@@ -5,7 +5,8 @@
 # Required checks must report on every PR, including the setup, discovery and architecture PRs
 # that come before any code exists. So every job runs this first and skips its remaining steps
 # (still reporting success) when:
-#   - adlc.build.yaml is missing or its `status` isn't `active` (the walking skeleton sets it),
+#   - adlc.build.yaml is missing, or its `status` isn't `active` (the walking skeleton sets it) and
+#     this job isn't listed in `ci.active` (jobs that already work, switched on one by one),
 #   - the change only touches docs (docs/, .adlc/, *.md), or
 #   - path globs are given and no changed file matches one (e.g. 'apps/mobile/*' for e2e-android;
 #     `*` also matches `/`).
@@ -44,7 +45,10 @@ ensure_yq() {
 [ -f adlc.build.yaml ] || skip "no adlc.build.yaml yet"
 ensure_yq
 status=$(yq '.status // "draft"' adlc.build.yaml)
-[ "$status" = active ] || skip "adlc.build.yaml status is '$status' (the walking skeleton sets it to active)"
+if [ "$status" != active ]; then
+  JOB=${GITHUB_JOB:-} yq -e '(.ci.active // []) | contains([env(JOB)])' adlc.build.yaml >/dev/null 2>&1 \
+    || skip "adlc.build.yaml status is '$status' and ci.active doesn't list '${GITHUB_JOB:-?}' (the walking skeleton switches jobs on)"
+fi
 
 # Pull request: the checkout is the merge commit, whose first parent is the base branch tip.
 # Push to main: squash merges make each push one commit. (Needs actions/checkout fetch-depth: 2.)

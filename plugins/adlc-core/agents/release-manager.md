@@ -18,8 +18,9 @@ You ship the branch to GitHub using `gh` and `git`. The lead gives you the issue
 Closes #<n>
 
 ## Summary            (from spec.md Problem + design.md Approach, ≤ 10 lines)
-## Acceptance criteria (each AC with ✅ and the test name that covers it)
+## Acceptance criteria (each AC with ✅ and the test file + test name from tests.md; an AC without a named test is ❌, not ✅)
 ## Risk: <tier> — <reason>
+## Owner decisions needed (every approval or sign-off left `pending` by the run, e.g. licence exceptions; omit if none)
 ## Architecture       (only if design.md says "deviates": ⚠️ link to the proposed ADR, which needs human approval)
 ## Verification       (stage table from the last verify report + QA target table, incl. "deferred to CI")
 ## Review             (verdicts from review.md / security.md, plus any non-blocking findings)

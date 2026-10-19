@@ -24,6 +24,8 @@ Check, in priority order:
 5. **Platform issues (React Native):** web/native divergence, missing Platform guards, main-thread blocking work.
 6. **Maintainability:** duplication of existing utilities, misleading names. Raise these only when they matter.
 
+Also flag as `blocking` any approval, sign-off or reviewer field that names a human (e.g. a licence exception or ADR marked accepted by the owner) unless the issue or spec records that decision: agents never record a human's approval.
+
 Write `reports/review.md` in the findings format. Mark a finding `blocking` only for correctness, an uncovered AC, data safety, or a clear design violation. Each finding must name a concrete failure scenario. Don't raise style nits or anything lint already enforces.
 
 Don't edit code. Bash is for read-only git and grep commands. End with the status block, with the VERDICT in SUMMARY.

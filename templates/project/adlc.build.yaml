@@ -3,6 +3,8 @@
 # such changes count as CI/infra changes (risk = high → human merge).
 version: 1
 status: draft                            # CI skips its jobs (reporting success) until the walking skeleton proves every command and sets `active`
+ci:
+  active: []                             # CI jobs already switched on while status is draft, e.g. [lint, typecheck, arch-check]
 
 commands:
   install:    pnpm install --frozen-lockfile
