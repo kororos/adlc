@@ -46,7 +46,10 @@ runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
 # The runner's work folder (work_folder=_work under its home); see start_runner.
 WORK=/home/runner/_work
 # Bump when start_runner changes how runners are started, so idle runners are replaced.
-SPEC=3
+SPEC=4
+# Hosts jobs reach directly, not through the egress proxy: the run's own test environment
+# (http://<run>.app.<project>.ci.internal via the job's Traefik) and the dev domain.
+JOB_NO_PROXY=localhost,127.0.0.1,.lan,.internal
 
 replace_stale_runners() {
   local c labels image spec current token id why
@@ -130,7 +133,7 @@ start_runner() {
     || { log "ERROR: cannot prepare the job workspace $WORK on the CI engine"; return 1; }
   docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" --label "adlc.ci.spec=$SPEC" \
     -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$WORK:$WORK" \
-    -e ADLC_JOB_NO_PROXY="localhost,127.0.0.1,.lan,.internal" \
+    -e NO_PROXY="$JOB_NO_PROXY" -e no_proxy="$JOB_NO_PROXY" -e ADLC_JOB_NO_PROXY="$JOB_NO_PROXY" \
     "$IMAGE" "$start" --jitconfig "$jit" >/dev/null \
     && log "runner $name waiting for a job (labels: $LABELS)"
 }
