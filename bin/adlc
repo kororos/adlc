@@ -309,6 +309,14 @@ cmd_status() {
     say "    active runs: ${n:-none}"
     [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
     [ -e "$st/logged_in" ] || say "    not logged in (adlc login $slug)"
+    n=$(runner_exec "$slug" adlc-gh-token --identity 2>/dev/null | cut -f1) || n=""
+    if [ -z "${ADLC_GH_APP_ID:-}" ]; then
+      say "    agents act as: the gh_pat owner (no GitHub App: adlc app $slug --id … --key …)"
+    elif [ -n "$n" ]; then
+      say "    agents act as: $n (GitHub App $ADLC_GH_APP_ID)"
+    else
+      say "    agents act as: GitHub App $ADLC_GH_APP_ID, but its identity can not be resolved, so no runs start"
+    fi
     queue "$slug" ${2:+"$2"}
   done
 }

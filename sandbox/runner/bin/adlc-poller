@@ -23,10 +23,32 @@ running_count() { local n=0 f; for f in "$STATE_DIR"/running/*.pid; do [ -e "$f"
 max_runs() { local m; m=$(cfg '.autonomy.max_parallel_runs'); echo "${m:-${ADLC_MAX_PARALLEL_RUNS:-1}}"; }
 is_collaborator() { gh api "repos/$R/collaborators/$1" --silent >/dev/null 2>&1; }
 
-# The agents' own identity (the ADLC GitHub App's bot, or the gh_pat user). Issues it wrote, e.g.
-# with /adlc-core:plan-backlog, and labels it set (queued → ready) count as trusted.
-SELF=$(adlc-gh-token --identity 2>/dev/null | cut -f1)   # e.g. adlc-kororos[bot]
+# The agents' own identity: the GitHub App configured for this project (`adlc app <slug>`), seen
+# as <app-slug>[bot]. Issues it wrote (e.g. /adlc-core:plan-backlog) and labels it set
+# (queued → ready) count as trusted. Nothing here is specific to one owner or app.
+SELF=""
 is_self() { [ -n "$SELF" ] && { [ "$1" = "$SELF" ] || [ "$1" = "app/${SELF%\[bot\]}" ]; }; }
+
+# Before launching anything: the runtime identity must resolve and match adlc.yaml `identity`
+# (written by /adlc-core:init). Fails closed and quietly: nothing starts, and each distinct
+# problem is logged once (not every poll).
+id_err=""
+id_fail() { [ "$1" = "$id_err" ] || log "$1"; id_err=$1; return 1; }
+identity_ok() {
+  local want_mode want_app
+  [ -n "$SELF" ] || SELF=$(adlc-gh-token --identity 2>/dev/null | cut -f1)
+  want_mode=$(cfg '.identity.agents'); want_app=$(cfg '.identity.app')
+  if [ -n "${ADLC_GH_APP_ID:-}" ]; then
+    [[ "$SELF" == *"[bot]" ]] || { SELF=""; id_fail "ERROR: cannot resolve the GitHub App identity (app id $ADLC_GH_APP_ID); not launching. Check: adlc-gh-token --identity"; return; }
+  elif [ "$want_mode" = github-app ] || [ "$want_mode" = app ]; then
+    id_fail "ERROR: adlc.yaml identity.agents is '$want_mode' but the runner has no app configured; not launching. Run: adlc app $ADLC_SLUG --id <app-id> --key <file.pem>, then adlc up $ADLC_SLUG"; return
+  fi
+  if [ -n "$want_app" ] && [ "$want_app" != tbd ] && [ -n "${ADLC_GH_APP_ID:-}" ] && [ "$SELF" != "${want_app}[bot]" ]; then
+    id_fail "ERROR: runner acts as $SELF but adlc.yaml identity.app is '$want_app'; not launching. Fix the app (adlc app) or adlc.yaml (/adlc-core:init --update)"; return
+  fi
+  [ -z "$id_err" ] || log "identity OK: $SELF"
+  id_err=""
+}
 
 # Who may start a delivery run: an issue written by a collaborator or by ADLC itself, or any
 # issue a collaborator labelled adlc:ready (that's how you approve an outsider's issue).
@@ -156,6 +178,7 @@ launch_ready() {
   local slots n author title
   in_backoff && return 0
   [ -n "$(secret claude_oauth_token)" ] || { log "secret claude_oauth_token missing; not launching"; return 0; }
+  identity_ok || return 0
   slots=$(( $(max_runs) - $(running_count) ))
   [ "$slots" -gt 0 ] || return 0
   while IFS=$'\t' read -r n author title; do

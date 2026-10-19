@@ -92,7 +92,11 @@ secrets:                             # names and locations only — never values
   ci: github-environments
   runtime: { dev: docker-secrets, staging: tbd, prod: tbd }
   local: env-example-only
-  runner: [claude_oauth_token, gh_pat]
+  runner: [claude_oauth_token, gh_app_key]   # gh_pat only as a fallback without the GitHub App
+
+identity:                            # who agents act as on GitHub (checked by the runner before every run)
+  agents: github-app                 # github-app (recommended) | gh-pat (fallback: agents act as the owner's account)
+  app: tbd                           # the app's slug, e.g. adlc-<owner>: shown by `adlc status <slug>` after `adlc app <slug> …`
 
 release:
   versioning: semver

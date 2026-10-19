@@ -115,8 +115,9 @@ Consequences that init records for the architect (in setup.md, "Constraints for 
 | secrets.ci | CI secrets | GitHub Environments secrets (per env) |
 | secrets.runtime | Runtime secrets per env | dev: Docker secrets on dev-server; others `tbd` |
 | secrets.local | Local development | `.env.example` committed; real `.env` never committed |
-| secrets.runner | ADLC runner credentials | Docker secrets: `claude_oauth_token`, `gh_pat` (fine-grained, this repo only, no admin), optional `ci_admin_pat` (Administration only, CI registrar) |
-| identity.agents | Who agents act as on GitHub | **the ADLC GitHub App** (`adlc app <slug> --id … --key …`): PRs by `<app>[bot]` that the owner can approve, short-lived tokens, and the bot can't push to protected branches. Fallback `gh_pat` (owner's account): blocking open item before unattended runs |
+| secrets.runner | ADLC runner credentials | Docker secrets: `claude_oauth_token`, `gh_app_key` (the app's private key, via `adlc app`), optional `ci_admin_pat` (Administration only, CI registrar). `gh_pat` (fine-grained, this repo only, no admin) only without the app |
+| identity.agents | Who agents act as on GitHub | **`github-app`**: the owner's ADLC GitHub App (one per GitHub account, reused by all projects; README "Agent identity"), configured on the runner with `adlc app <slug> --id … --key …`. PRs by `<app>[bot]` that the owner can approve, short-lived tokens, and the bot can't push to protected branches. Fallback `gh-pat` (agents act as the owner's account): blocking open item before unattended runs |
+| identity.app | The app's slug | Detect it: `adlc-gh-token --identity` in the runner prints `<slug>[bot]`. `tbd` until the app exists. The poller refuses to start runs when the runner's identity doesn't match, and it trusts issues and labels from this identity (e.g. the backlog) |
 
 ### V — Versioning, release & dependencies
 | key | question | default |

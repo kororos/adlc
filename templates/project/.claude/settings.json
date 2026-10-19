@@ -1,7 +1,11 @@
 {
   "extraKnownMarketplaces": {
     "adlc": {
-      "source": { "source": "git", "url": "https://github.com/kororos/adlc.git", "ref": "main" }
+      "source": {
+        "source": "git",
+        "url": "https://github.com/<owner>/adlc.git",
+        "ref": "main"
+      }
     }
   },
   "enabledPlugins": {

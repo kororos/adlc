@@ -138,6 +138,8 @@ docker exec adlc-<slug>-runner-1 gh api repos/kororos/<slug> --jq .full_name   #
 ```
 Delete the downloaded `.pem` on your Mac (a new key can always be generated on the app page).
 
+**Record it in the project:** `/adlc-core:init` stores `identity: { agents: github-app, app: <app-slug> }` in `adlc.yaml` (the slug is what `adlc status <slug>` shows as `<slug>[bot]`). Before every run, the poller checks that the runner really acts as that app. If not, nothing starts and the poller log says why. Issues and labels from this identity, such as the backlog that `/adlc-core:plan-backlog` creates, are trusted like your own; issues from anyone else who isn't a collaborator need you to add `adlc:ready`.
+
 **3. Retire the personal token:** `: > /srv/adlc/secrets/<slug>/gh_pat`, then revoke that token under Settings → Developer settings → Fine-grained tokens. Keep `ci_admin_pat` (the CI registrar still uses it).
 
 **What changes:**
