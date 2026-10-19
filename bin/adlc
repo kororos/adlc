@@ -301,6 +301,8 @@ host_housekeep() {
 }
 cmd_prune() {
   local f slug before
+  # A project's settings (e.g. ADLC_HOST_BUILD_CACHE) apply to the host part too.
+  if [ -n "${1:-}" ]; then need_slug "$1"; load_cfg "$1"; fi
   before=$(disk_line)
   say "Freeing disk (before: $before)…"
   # Host: every untagged image (old builds of anything), then the build cache cap.
