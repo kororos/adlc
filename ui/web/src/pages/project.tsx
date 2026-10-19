@@ -16,6 +16,7 @@ import { useSidebar } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, queryKeys, type Component, type Project, type QueueItem } from "@/lib/api"
 import { ago, dateTime, duration, usd } from "@/lib/format"
+import { currentPhaseLabel } from "@/lib/phases"
 import { cn } from "@/lib/utils"
 
 export type ProjectTab = "now" | "queue" | "attention" | "history" | "health"
@@ -47,7 +48,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat icon={Workflow} label="Running" tone={run ? "primary" : "default"} value={run ? `#${run.issue}` : "idle"}
-          hint={run ? (run.progress?.phase.replace("-done", " ✓") ?? "starting") : `${s?.counts.ready ?? 0} ready`} />
+          hint={run ? currentPhaseLabel(run.progress) : `${s?.counts.ready ?? 0} ready`} />
         <Stat icon={ListOrdered} label="Queued" value={s?.counts.queued ?? 0} hint={`${s?.counts["pr-open"] ?? 0} with an open PR`} />
         <Stat icon={Inbox} label="Needs you" tone={needYou ? "warn" : "ok"} value={needYou} hint={`${reviews.length} PRs · ${s?.attention.length ?? 0} issues`} />
         <Stat icon={CircleUserRound} label="Your tasks" tone={s?.counts.owner ? "warn" : "default"} value={s?.counts.owner ?? 0} hint="owner tasks open" />

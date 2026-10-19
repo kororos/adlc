@@ -1,6 +1,7 @@
 import { Check, Monitor, Moon, Sun } from "lucide-react"
 import { useEffect, useState, type ReactNode } from "react"
 import type { RunProgress } from "@/lib/api"
+import { PHASES, currentPhaseIndex } from "@/lib/phases"
 import { cn } from "@/lib/utils"
 
 export function Logo({ className }: { className?: string }) {
@@ -87,23 +88,8 @@ export function EmptyState({ icon: Icon, title, children }: { icon: typeof Sun; 
   )
 }
 
-const PHASES = [
-  { id: "understand", label: "Understand" },
-  { id: "design", label: "Design" },
-  { id: "tests", label: "Tests" },
-  { id: "build", label: "Build" },
-  { id: "verify", label: "Verify" },
-  { id: "qa", label: "QA" },
-  { id: "review", label: "Review" },
-  { id: "release", label: "PR" },
-]
-
-// state.json `phase` is e.g. "design" (in progress) or "review-done" (finished).
 export function PhaseStepper({ progress }: { progress: RunProgress | null }) {
-  const phase = progress?.phase.toLowerCase() ?? ""
-  const idx = PHASES.findIndex((p) => phase.startsWith(p.id))
-  const done = phase.endsWith("-done")
-  const current = idx < 0 ? 0 : done ? idx + 1 : idx
+  const current = currentPhaseIndex(progress)
   return (
     <ol className="flex flex-wrap items-center gap-x-1 gap-y-2" aria-label="Delivery phases">
       {PHASES.map((p, i) => {

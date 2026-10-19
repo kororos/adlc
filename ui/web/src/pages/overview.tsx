@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, queryKeys } from "@/lib/api"
 import { ago } from "@/lib/format"
+import { currentPhaseLabel } from "@/lib/phases"
 
 export function OverviewPage() {
   const q = useQuery({ queryKey: queryKeys.projects, queryFn: api.projects, refetchInterval: 10_000 })
@@ -38,7 +39,7 @@ export function OverviewPage() {
               <CardContent className="grid gap-4">
                 <div className="grid grid-cols-2 gap-3">
                   <Stat icon={Workflow} label="Running" tone={run ? "primary" : "default"}
-                    value={run ? `#${run.issue}` : "idle"} hint={run ? run.title : `${p.counts?.ready ?? 0} ready to start`} />
+                    value={run ? `#${run.issue}` : "idle"} hint={run ? `${currentPhaseLabel(run.progress)} · ${run.title}` : `${p.counts?.ready ?? 0} ready to start`} />
                   <Stat icon={GitPullRequest} label="To review" tone={p.reviews ? "warn" : "default"} value={p.reviews} hint="pull requests" />
                   <Stat icon={OctagonAlert} label="Blocked" tone={p.attention ? "danger" : "default"} value={p.attention} hint="runs and questions" />
                   <Stat icon={CircleUserRound} label="Your tasks" tone={p.counts?.owner ? "warn" : "default"} value={p.counts?.owner ?? 0} hint={`${p.counts?.queued ?? 0} issues queued`} />
