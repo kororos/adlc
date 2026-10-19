@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+// adlc-queue [--all] [--limit N]: the project's open work in order of precedence.
+//
+// Mirrors the poller: an issue can start when all its "blocked by" issues are closed; among
+// those, the earliest milestone due date wins, then the oldest issue. Owner tasks (adlc:owner)
+// take their place in the same order, so you see when your task is the next thing in the way.
+// Epics and issues without ADLC labels aren't pipeline work and are left out.
+"use strict"
+const { execFileSync } = require("node:child_process")
+
+const args = process.argv.slice(2)
+const all = args.includes("--all")
+const li = args.indexOf("--limit")
+const limit = all ? Infinity : Number(li >= 0 ? args[li + 1] : 15)
+const [owner, name] = (process.env.ADLC_REPO || "").split("/")
+if (!owner || !name) { console.error("adlc-queue: ADLC_REPO is not set"); process.exit(2) }
+
+const query = `query($o:String!,$r:String!,$endCursor:String){repository(owner:$o,name:$r){
+  issues(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
+    nodes{number title createdAt milestone{title dueOn} labels(first:30){nodes{name}}
+          blockedBy(first:100){nodes{number state}}}}}}`
+const raw = execFileSync("gh", ["api", "graphql", "--paginate", "--slurp",
+  "-f", `query=${query}`, "-f", `o=${owner}`, "-f", `r=${name}`], { encoding: "utf8", maxBuffer: 64 << 20 })
+const issues = JSON.parse(raw).flatMap((p) => p.data.repository.issues.nodes)
+
+const STATES = ["in-progress", "pr-open", "needs-info", "blocked", "needs-human-review", "ready", "queued"]
+const work = new Map()
+for (const i of issues) {
+  const labels = i.labels.nodes.map((l) => l.name)
+  if (labels.includes("type:epic")) continue
+  const isOwner = labels.includes("adlc:owner") || labels.includes("owner-task")
+  const state = isOwner ? "owner" : STATES.find((s) => labels.includes(`adlc:${s}`))
+  if (!state) continue
+  work.set(i.number, {
+    n: i.number, title: i.title, state, created: i.createdAt,
+    ms: i.milestone?.title ?? "", due: i.milestone?.dueOn ?? "9999",
+    blockers: i.blockedBy.nodes.filter((b) => b.state === "OPEN").map((b) => b.number),
+  })
+}
+
+// Kahn's algorithm with the poller's tie-break. Blockers outside the pipeline (e.g. an epic or
+// an unlabelled issue) still hold an issue back but can't be ordered, so they count as "done"
+// for ordering and are shown on the issue.
+const remaining = new Map([...work].map(([n, w]) => [n, w.blockers.filter((b) => work.has(b)).length]))
+const blocks = new Map()
+for (const w of work.values()) for (const b of w.blockers) if (work.has(b)) {
+  if (!blocks.has(b)) blocks.set(b, [])
+  blocks.get(b).push(w.n)
+}
+const key = (w) => [w.due, w.created, w.n]
+const cmp = (a, b) => { const x = key(a), y = key(b); for (let k = 0; k < x.length; k++) if (x[k] !== y[k]) return x[k] < y[k] ? -1 : 1; return 0 }
+const avail = [...work.values()].filter((w) => remaining.get(w.n) === 0)
+const order = []
+while (avail.length) {
+  avail.sort(cmp)
+  const w = avail.shift()
+  order.push(w)
+  for (const d of blocks.get(w.n) ?? []) {
+    remaining.set(d, remaining.get(d) - 1)
+    if (remaining.get(d) === 0) avail.push(work.get(d))
+  }
+}
+const cyclic = [...work.values()].filter((w) => !order.includes(w)).sort(cmp)
+
+const pad = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s.padEnd(n))
+const line = (w, i, note = "") => {
+  // owner blockers first (they're what you can act on), at most 5 listed
+  const bs = [...w.blockers].sort((a, b) => (work.get(b)?.state === "owner") - (work.get(a)?.state === "owner") || a - b)
+  const tag = (b) => `#${b}${work.get(b)?.state === "owner" ? "(owner)" : ""}`
+  const why = bs.length ? `← ${bs.slice(0, 5).map(tag).join(" ")}${bs.length > 5 ? ` +${bs.length - 5}` : ""}` : ""
+  const unblocks = (blocks.get(w.n) ?? []).length
+  const tail = [why, w.state === "owner" && unblocks ? `→ unblocks ${unblocks}` : "", note].filter(Boolean).join("  ")
+  return `${String(i).padStart(4)}. #${String(w.n).padEnd(5)}${pad(w.state, 12)}${pad(w.ms.split(" ")[0] || "-", 4)} ${pad(w.title, 58)} ${tail}`
+}
+const shown = order.slice(0, limit)
+const counts = {}
+for (const w of work.values()) counts[w.state] = (counts[w.state] ?? 0) + 1
+console.log(`queue: ${work.size} open (${Object.entries(counts).map(([s, c]) => `${c} ${s}`).join(", ")})` +
+  (shown.length < order.length ? `, next ${shown.length} shown (--all for everything)` : ""))
+shown.forEach((w, i) => console.log(line(w, i + 1)))
+if (all) cyclic.forEach((w, i) => console.log(line(w, order.length + i + 1, "(dependency cycle)")))
+else if (cyclic.length) console.log(`  ${cyclic.length} issue(s) in a dependency cycle: ${cyclic.map((w) => `#${w.n}`).join(" ")}`)

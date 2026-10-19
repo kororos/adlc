@@ -222,7 +222,7 @@ cd ~/adlc
 ### Operating the runner
 | Command | Does |
 |---|---|
-| `adlc status [slug]` | containers, active runs, paused/backoff state, dev version, login state |
+| `adlc status [slug] [--all]` | containers, active runs, paused/backoff state, dev version, login state, and the **open work in order of precedence** (next 15; `--all` for everything): owner tasks in place, each issue's state and what it's waiting for |
 | `adlc session <slug> [name]` | **interactive Claude session in your SSH terminal**, in its own worktree, also reachable from claude.ai/app (see below) |
 | `adlc session <slug> --run <n> [--takeover]` | session inside delivery run #n's worktree; `--takeover` stops the unattended run so you can continue it |
 | `adlc shell <slug>` | bash inside the runner, with `gh` authenticated |
@@ -427,7 +427,7 @@ The **solution architect** works through nine steps with you:
    - label `adlc:ready` for issues with no blockers, `adlc:queued` for the rest;
    - **owner tasks** (accounts, credentials, prod infrastructure, legal, reviews, prod deploys, release sign-offs) labelled `adlc:owner` and assigned to you. Agents never run them; agent issues that need one are "blocked by" it.
 
-The poller promotes `queued` → `ready` when all blockers are closed, so implementation follows the dependency graph and independent issues can run in parallel. **Closing an owner task starts the work it was blocking** (within a minute, unless the pipeline is paused). `adlc status <slug>` lists your open owner tasks and how many issues each one blocks.
+The poller promotes `queued` → `ready` when all blockers are closed, so implementation follows the dependency graph and independent issues can run in parallel. **Closing an owner task starts the work it was blocking** (within a minute, unless the pipeline is paused). `adlc status <slug>` lists the open work in the order it will happen, with your owner tasks where they stand in the way.
 
 ### Writing issues by hand
 You can always add issues yourself. Give them this shape and label them `adlc:ready` (or `adlc:queued` with "blocked by" links):
@@ -513,7 +513,7 @@ Which tiers auto-merge is set in `adlc.yaml → autonomy.auto_merge`.
 | Situation | What you do |
 |---|---|
 | **`adlc:needs-info`** | Answer the questions in an issue comment, then relabel `adlc:ready` (or `adlc:queued` if it still has open blockers). The run resumes from where it stopped. |
-| **`adlc:owner`** (your tasks) | Do the task, check its acceptance criteria, close the issue. The issues it blocked start automatically. `adlc status <slug>` shows which owner tasks are holding up agent work. |
+| **`adlc:owner`** (your tasks) | Do the task, check its acceptance criteria, close the issue. The issues it blocked start automatically. `adlc status <slug>` shows where each owner task sits in the queue and what it unblocks. |
 | **`adlc:blocked`** | Read the summary comment (phase, reason, report paths). Fix the cause (clarify the issue, resolve a `tbd` setting, fix the environment), then relabel `adlc:ready`. Or open an interactive session and run `/adlc-core:deliver <n>` to work through it with Claude. |
 | **High-risk PR** | Review it like any PR. The body shows the spec, risk reason, AC → test mapping and review verdicts. If it contains a **proposed ADR**, accepting the PR accepts the ADR (change its status to `accepted` before merging). |
 | **An agent asks for a `tbd` setting** | `/adlc-core:init --update <section>`, then relabel the issue `adlc:ready`. |

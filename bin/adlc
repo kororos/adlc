@@ -22,7 +22,7 @@
 #                                    session in delivery run #n's worktree (--takeover stops the unattended run)
 #   adlc shell <slug>                bash inside the runner (gh authenticated)
 #   adlc attach <slug>               attach to the runner's tmux (rc / poller / deployer / shell / sessions)
-#   adlc status [slug]               runners, active runs, pause/backoff state
+#   adlc status [slug] [--all]       runners, active runs, pause state, open work in order of precedence
 #   adlc pause|resume <slug>         stop/start launching new delivery runs
 #   adlc logs <slug> [poller|deployer|rc|egress|ci|run <issue>]
 #   adlc audit <slug>                egress domains seen (to build the allowlist)
@@ -309,24 +309,15 @@ cmd_status() {
     say "    active runs: ${n:-none}"
     [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
     [ -e "$st/logged_in" ] || say "    not logged in (adlc login $slug)"
-    owner_tasks "$slug"
+    queue "$slug" ${2:+"$2"}
   done
 }
 
-# Open owner tasks (label adlc:owner) and how many open issues each one blocks.
-owner_tasks() {
+# The project's open work in order of precedence (owner tasks included), from inside the runner.
+queue() { # queue <slug> [--all]
   local out
-  # shellcheck disable=SC2016  # expanded inside the container
-  out=$(runner_exec "$1" bash -c '
-    gh issue list -R "$ADLC_REPO" --state open --limit 1000 --json number,title,labels \
-      --jq ".[] | select([.labels[].name] | any(. == \"adlc:owner\" or . == \"owner-task\")) | [.number, .title] | @tsv" |
-    while IFS=$'"'"'\t'"'"' read -r n t; do
-      b=$(gh api "repos/$ADLC_REPO/issues/$n/dependencies/blocking" --jq "[.[] | select(.state == \"open\")] | length" 2>/dev/null || echo "?")
-      printf "%s\t%s\t%s\n" "$b" "$n" "$t"
-    done | sort -t "$(printf "\t")" -k1,1nr' 2>/dev/null) || return 0
-  [ -n "$out" ] || return 0
-  say "    waiting on you (owner tasks · open issues each blocks):"
-  awk -F'\t' '$1 != "0" { printf "      #%-5s blocks %-3s %s\n", $2, $1, substr($3, 1, 70); n++ } END { if (n == 0) print "      none blocking agent work" }' <<<"$out"
+  out=$(runner_exec "$1" adlc-queue ${2:+"$2"} 2>&1) || { say "    queue: unavailable (${out:0:120})"; return 0; }
+  sed 's/^/    /' <<<"$out"
 }
 
 cmd_logs() {
@@ -379,7 +370,7 @@ main() {
     attach) cmd_attach "${1:-}" ;;
     session) cmd_session "$@" ;;
     shell) cmd_shell "${1:-}" ;;
-    status) cmd_status "${1:-}" ;;
+    status) cmd_status "${1:-}" "${2:-}" ;;
     pause) cmd_pause "${1:-}" ;;
     resume) cmd_resume "${1:-}" ;;
     logs) cmd_logs "$@" ;;
