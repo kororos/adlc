@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ExternalLink } from "lucide-react"
+import {
+  Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
+  HeartPulse, History, Inbox, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, Workflow,
+} from "lucide-react"
 import { useState } from "react"
+import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
 import { ComponentLog, RunLog } from "@/components/logs"
 import { Freshness, PauseControl, PipelineBadge, StateBadge } from "@/components/status"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,47 +15,65 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, queryKeys, type Component, type Project, type QueueItem } from "@/lib/api"
 import { ago, dateTime, duration, usd } from "@/lib/format"
+import { cn } from "@/lib/utils"
 
 export type ProjectTab = "now" | "queue" | "attention" | "history" | "health"
 
 export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
   const navigate = useNavigate()
   const q = useQuery({ queryKey: queryKeys.project(slug), queryFn: () => api.project(slug), refetchInterval: 10_000 })
-  if (q.isPending) return <Skeleton className="h-60 w-full" />
+  if (q.isPending) return <div className="grid gap-4"><Skeleton className="h-24" /><Skeleton className="h-80" /></div>
   if (q.isError) return <p className="text-destructive">{q.error.message}</p>
   const p = q.data
-  const reviews = p.snapshot?.pullRequests.filter((pr) => pr.labels.includes("adlc:needs-human-review")) ?? []
-  const needYou = (p.snapshot?.attention.length ?? 0) + reviews.length
+  const s = p.snapshot
+  const reviews = s?.pullRequests.filter((pr) => pr.labels.includes("adlc:needs-human-review")) ?? []
+  const needYou = (s?.attention.length ?? 0) + reviews.length
+  const run = p.active[0]
   return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">{p.slug}</h1>
-          <p className="text-sm text-muted-foreground">
-            <a href={`https://github.com/${p.repo}`} target="_blank" rel="noreferrer" className="hover:underline">{p.repo}</a>
-            {" · "}GitHub data {ago(p.snapshot?.generatedAt)}{p.devDeployed ? ` · dev: ${p.devDeployed}` : ""}
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm"><Link to="/" className="text-muted-foreground hover:text-foreground">Projects</Link></p>
+          <h1 className="flex items-center gap-3 text-3xl font-semibold tracking-tight">{p.slug}<PipelineBadge paused={p.paused} backoffUntil={p.backoffUntil} /></h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            <a href={`https://github.com/${p.repo}`} target="_blank" rel="noreferrer" className="hover:text-foreground">{p.repo}</a>
+            {" · "}GitHub data {ago(s?.generatedAt)}{p.devDeployed ? <> · dev runs <span className="font-mono">{p.devDeployed}</span></> : null}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <PipelineBadge paused={p.paused} backoffUntil={p.backoffUntil} />
-          <PauseControl slug={p.slug} paused={p.paused} pending={p.pending} />
-        </div>
+        <PauseControl slug={p.slug} paused={p.paused} pending={p.pending} />
       </div>
-      <Tabs value={tab} onValueChange={(v) => navigate({ to: "/p/$slug", params: { slug }, search: { tab: v as ProjectTab } })}>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat icon={Workflow} label="Running" tone={run ? "primary" : "default"} value={run ? `#${run.issue}` : "idle"}
+          hint={run ? (run.progress?.phase.replace("-done", " ✓") ?? "starting") : `${s?.counts.ready ?? 0} ready`} />
+        <Stat icon={ListOrdered} label="Queued" value={s?.counts.queued ?? 0} hint={`${s?.counts["pr-open"] ?? 0} with an open PR`} />
+        <Stat icon={Inbox} label="Needs you" tone={needYou ? "warn" : "ok"} value={needYou} hint={`${reviews.length} PRs · ${s?.attention.length ?? 0} issues`} />
+        <Stat icon={CircleUserRound} label="Your tasks" tone={s?.counts.owner ? "warn" : "default"} value={s?.counts.owner ?? 0} hint="owner tasks open" />
+      </div>
+
+      <Tabs className="min-w-0" value={tab} onValueChange={(v) => navigate({ to: "/p/$slug", params: { slug }, search: { tab: v as ProjectTab } })}>
         <TabsList className="max-w-full justify-start overflow-x-auto">
-          <TabsTrigger value="now">Now{p.active.length ? ` (${p.active.length})` : ""}</TabsTrigger>
-          <TabsTrigger value="queue">Queue</TabsTrigger>
-          <TabsTrigger value="attention">Needs you{needYou ? ` (${needYou})` : ""}</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-          <TabsTrigger value="health">Health</TabsTrigger>
+          <TabsTrigger value="now"><Radio />Now{p.active.length ? ` (${p.active.length})` : ""}</TabsTrigger>
+          <TabsTrigger value="queue"><ListOrdered />Queue</TabsTrigger>
+          <TabsTrigger value="attention"><Inbox />Needs you{needYou ? ` (${needYou})` : ""}</TabsTrigger>
+          <TabsTrigger value="history"><History />History</TabsTrigger>
+          <TabsTrigger value="health"><HeartPulse />Health</TabsTrigger>
         </TabsList>
-        <TabsContent value="now"><NowTab p={p} /></TabsContent>
-        <TabsContent value="queue"><QueueTab items={p.snapshot?.queue ?? []} /></TabsContent>
-        <TabsContent value="attention"><AttentionTab p={p} /></TabsContent>
-        <TabsContent value="history"><HistoryTab slug={slug} /></TabsContent>
-        <TabsContent value="health"><HealthTab p={p} /></TabsContent>
+        <TabsContent value="now" className="mt-2"><NowTab p={p} /></TabsContent>
+        <TabsContent value="queue" className="mt-2"><QueueTab items={s?.queue ?? []} /></TabsContent>
+        <TabsContent value="attention" className="mt-2"><AttentionTab p={p} /></TabsContent>
+        <TabsContent value="history" className="mt-2"><HistoryTab slug={slug} /></TabsContent>
+        <TabsContent value="health" className="mt-2"><HealthTab p={p} /></TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+function IssueLink({ item, className }: { item: Pick<QueueItem, "number" | "title" | "url">; className?: string }) {
+  return (
+    <a href={item.url} target="_blank" rel="noreferrer" className={cn("hover:text-primary", className)}>
+      <span className="font-mono text-muted-foreground">#{item.number}</span> {item.title}
+    </a>
   )
 }
 
@@ -61,25 +82,35 @@ function NowTab({ p }: { p: Project }) {
   if (!p.active.length) {
     const next = p.snapshot?.queue.find((i) => i.state === "ready")
     return (
-      <Card><CardContent className="py-6 text-muted-foreground">
-        No delivery run is active.{next ? <> Next up: <IssueLink item={next} />{p.paused ? " (when resumed)" : ""}.</> : null}
-      </CardContent></Card>
+      <EmptyState icon={Rocket} title={p.paused ? "The pipeline is paused" : "No delivery run is active"}>
+        {next ? <>Next up: <IssueLink item={next} />{p.paused ? ", once you resume." : "."}</> : "Nothing is ready to start: everything is waiting for blockers or for you."}
+      </EmptyState>
     )
   }
   const a = p.active[Math.min(selected, p.active.length - 1)]
   return (
-    <div className="grid gap-3">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
       {p.active.length > 1 && (
         <div className="flex gap-2">{p.active.map((x, i) => (
-          <button key={x.issue} onClick={() => setSelected(i)} className={i === selected ? "font-semibold underline" : "text-muted-foreground"}>#{x.issue}</button>
+          <button key={x.issue} onClick={() => setSelected(i)}
+            className={cn("rounded-full px-3 py-1 text-sm", i === selected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>#{x.issue}</button>
         ))}</div>
       )}
       <Card>
-        <CardHeader>
-          <CardTitle>#{a.issue} {a.title}</CardTitle>
-          <CardDescription>
-            {a.run ? <>started {ago(a.run.started)} · last output {ago(a.run.updated)} · <Link to="/p/$slug/runs/$file" params={{ slug: p.slug, file: a.run.file }} className="underline">full page</Link></> : "starting…"}
-          </CardDescription>
+        <CardHeader className="gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <CardTitle className="text-lg"><span className="font-mono text-muted-foreground">#{a.issue}</span> {a.title}</CardTitle>
+              <CardDescription className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                {a.run && <span className="inline-flex items-center gap-1"><Clock className="size-3.5" />started {ago(a.run.started)}</span>}
+                {a.run && <span className="inline-flex items-center gap-1"><Activity className="size-3.5" />last output {ago(a.run.updated)}</span>}
+                {a.progress?.tasks ? <span>{a.progress.tasks} tasks</span> : null}
+                {a.run && <Link to="/p/$slug/runs/$file" params={{ slug: p.slug, file: a.run.file }} className="text-primary hover:underline">open full log</Link>}
+              </CardDescription>
+            </div>
+            {a.progress?.risk && <RiskBadge risk={a.progress.risk} />}
+          </div>
+          <PhaseStepper progress={a.progress} />
         </CardHeader>
         <CardContent>{a.run ? <RunLog slug={p.slug} file={a.run.file} /> : <p className="text-muted-foreground">Waiting for the first output…</p>}</CardContent>
       </Card>
@@ -87,76 +118,132 @@ function NowTab({ p }: { p: Project }) {
   )
 }
 
-function IssueLink({ item }: { item: Pick<QueueItem, "number" | "title" | "url"> }) {
-  return <a href={item.url} target="_blank" rel="noreferrer" className="hover:underline">#{item.number} {item.title}</a>
+function RiskBadge({ risk }: { risk: string }) {
+  const tone = risk === "high" ? "border-red-500/40 text-red-600 dark:text-red-400" : risk === "medium" ? "border-amber-500/40 text-amber-600 dark:text-amber-400" : "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+  return <Badge variant="outline" className={tone}>{risk} risk</Badge>
 }
 
 function QueueTab({ items }: { items: QueueItem[] }) {
-  if (!items.length) return <p className="text-muted-foreground">No snapshot yet: the runner writes it within a minute.</p>
+  if (!items.length) return <EmptyState icon={ListOrdered} title="No queue data yet">The runner writes it within a minute.</EmptyState>
+  const groups: { milestone: string; items: QueueItem[] }[] = []
+  for (const i of items) {
+    const last = groups.at(-1)
+    if (last && last.milestone === i.milestone) last.items.push(i)
+    else groups.push({ milestone: i.milestone, items: [i] })
+  }
   return (
-    <Card><CardContent className="px-0">
-      <Table>
-        <TableHeader><TableRow>
-          <TableHead className="w-10">#</TableHead><TableHead>Issue</TableHead><TableHead>State</TableHead>
-          <TableHead className="hidden md:table-cell">Milestone</TableHead><TableHead className="hidden md:table-cell">Waiting for</TableHead>
-        </TableRow></TableHeader>
-        <TableBody>
-          {items.map((i) => (
-            <TableRow key={i.number} data-testid={`queue-${i.number}`}>
-              <TableCell className="text-muted-foreground">{i.rank}</TableCell>
-              <TableCell className="max-w-[28rem] whitespace-normal"><IssueLink item={i} />{i.state === "owner" && i.unblocks ? <span className="text-muted-foreground"> · unblocks {i.unblocks}</span> : null}</TableCell>
-              <TableCell><StateBadge state={i.state} /></TableCell>
-              <TableCell className="hidden md:table-cell text-muted-foreground">{i.milestone.split(" ")[0] || "–"}</TableCell>
-              <TableCell className="hidden md:table-cell">
-                {i.blockers.slice(0, 5).map((b) => <Badge key={b.number} variant={b.owner ? "default" : "secondary"} className="mr-1">#{b.number}{b.owner ? " you" : ""}</Badge>)}
-                {i.blockers.length > 5 && <span className="text-muted-foreground">+{i.blockers.length - 5}</span>}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </CardContent></Card>
+    <div className="grid gap-4">
+      {groups.map((g, gi) => (
+        <Card key={`${g.milestone}-${gi}`} className="gap-0 py-0">
+          <div className="flex items-center justify-between border-b px-4 py-2.5">
+            <h3 className="text-sm font-semibold">{g.milestone || "No milestone"}</h3>
+            <span className="text-xs text-muted-foreground">{g.items.length} issues</span>
+          </div>
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead className="w-12 pl-4">Order</TableHead><TableHead>Issue</TableHead><TableHead className="w-32">State</TableHead>
+              <TableHead className="hidden w-56 md:table-cell">Waiting for</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {g.items.map((i) => (
+                <TableRow key={i.number} data-testid={`queue-${i.number}`} className={cn(i.state === "owner" && "bg-amber-500/5 hover:bg-amber-500/10")}>
+                  <TableCell className="pl-4 font-mono text-xs text-muted-foreground">{i.rank}</TableCell>
+                  <TableCell className="max-w-[34rem] whitespace-normal">
+                    <IssueLink item={i} />
+                    {i.state === "owner" && i.unblocks ? <span className="ml-1.5 text-xs text-muted-foreground">unblocks {i.unblocks}</span> : null}
+                  </TableCell>
+                  <TableCell><StateBadge state={i.state} /></TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <div className="flex flex-wrap gap-1">
+                      {i.blockers.slice(0, 4).map((b) => (
+                        <Badge key={b.number} variant={b.owner ? "default" : "secondary"} className={cn("font-mono", b.owner && "bg-amber-500 text-black")}>#{b.number}{b.owner ? " you" : ""}</Badge>
+                      ))}
+                      {i.blockers.length > 4 && <span className="text-xs text-muted-foreground">+{i.blockers.length - 4}</span>}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      ))}
+    </div>
   )
 }
 
 function AttentionTab({ p }: { p: Project }) {
   const s = p.snapshot
-  if (!s) return <p className="text-muted-foreground">No snapshot yet.</p>
+  if (!s) return <EmptyState icon={Inbox} title="No data yet">The runner writes it within a minute.</EmptyState>
   const reviews = s.pullRequests.filter((pr) => pr.labels.includes("adlc:needs-human-review"))
-  const owner = s.queue.filter((i) => i.state === "owner").slice(0, 5)
+  const owner = s.queue.filter((i) => i.state === "owner").slice(0, 6)
+  if (!reviews.length && !s.attention.length && !owner.length) {
+    return <EmptyState icon={PartyPopper} title="Nothing needs you right now">The agents have everything they need.</EmptyState>
+  }
   return (
-    <div className="grid gap-4">
-      <Section title="Pull requests waiting for your review" empty="No PR is waiting for you.">
+    <div className="grid gap-6">
+      <Section icon={GitPullRequest} title="Pull requests to review" count={reviews.length} empty="No PR is waiting for you.">
         {reviews.map((pr) => (
-          <Alert key={pr.number}>
-            <AlertTitle><a href={pr.url} target="_blank" rel="noreferrer" className="hover:underline">PR #{pr.number} {pr.title}</a> <ExternalLink className="inline size-3.5" /></AlertTitle>
-            <AlertDescription>
-              {pr.labels.filter((l) => l.startsWith("adlc:risk-")).map((l) => l.replace("adlc:risk-", "")).join("")} risk · checks {pr.checks?.toLowerCase() ?? "–"} · {pr.mergeState.toLowerCase()}{pr.closes.length ? ` · closes #${pr.closes.join(", #")}` : ""} · opened {ago(pr.createdAt)}
-            </AlertDescription>
-          </Alert>
+          <a key={pr.number} href={pr.url} target="_blank" rel="noreferrer"
+            className="group flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card p-4 transition-colors hover:border-primary/40">
+            <div className="min-w-0">
+              <p className="font-medium group-hover:text-primary"><span className="font-mono text-muted-foreground">PR #{pr.number}</span> {pr.title}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {pr.closes.length ? `closes #${pr.closes.join(", #")} · ` : ""}opened {ago(pr.createdAt)} · {pr.mergeState.toLowerCase().replace("_", " ")}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {pr.labels.filter((l) => l.startsWith("adlc:risk-")).map((l) => <RiskBadge key={l} risk={l.replace("adlc:risk-", "")} />)}
+              <ChecksBadge state={pr.checks} />
+              <ExternalLink className="size-4 text-muted-foreground" />
+            </div>
+          </a>
         ))}
       </Section>
-      <Section title="Blocked runs and questions" empty="Nothing is blocked or waiting for an answer.">
+      <Section icon={OctagonAlert} title="Blocked runs and questions" count={s.attention.length} empty="Nothing is blocked or waiting for an answer.">
         {s.attention.map((a) => (
-          <Alert key={a.number} variant={a.state === "blocked" ? "destructive" : "default"}>
-            <AlertTitle className="flex items-center gap-2"><StateBadge state={a.state} /><IssueLink item={a} /></AlertTitle>
-            {a.lastComment && <AlertDescription className="whitespace-pre-wrap">{a.lastComment.body}</AlertDescription>}
-          </Alert>
+          <div key={a.number} className={cn("rounded-xl border bg-card p-4", a.state === "blocked" && "border-red-500/40")}>
+            <div className="flex flex-wrap items-center gap-2">
+              <StateBadge state={a.state} />
+              <IssueLink item={a} className="font-medium" />
+            </div>
+            {a.lastComment ? (
+              <div className="mt-3 rounded-lg bg-muted/60 p-3 text-sm">
+                <p className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground"><MessageCircleQuestion className="size-3.5" />{a.lastComment.author} · {ago(a.lastComment.at)}</p>
+                <p className="line-clamp-6 whitespace-pre-wrap">{a.lastComment.body}</p>
+              </div>
+            ) : <p className="mt-2 text-sm text-muted-foreground">The question is in the issue description.</p>}
+          </div>
         ))}
       </Section>
-      <Section title="Your next tasks" empty="No open owner tasks.">
-        <ul className="grid gap-1 text-sm">{owner.map((o) => <li key={o.number}><IssueLink item={o} />{o.unblocks ? <span className="text-muted-foreground"> · unblocks {o.unblocks}</span> : null}</li>)}</ul>
+      <Section icon={ClipboardList} title="Your next tasks" count={owner.length} empty="No open owner tasks.">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {owner.map((o) => (
+            <div key={o.number} className="rounded-xl border bg-card p-3 text-sm">
+              <IssueLink item={o} />
+              <p className="mt-1 text-xs text-muted-foreground">{o.milestone.split(" ")[0]}{o.unblocks ? ` · unblocks ${o.unblocks}` : ""}</p>
+            </div>
+          ))}
+        </div>
       </Section>
     </div>
   )
 }
 
-function Section({ title, empty, children }: { title: string; empty: string; children: React.ReactNode }) {
-  const has = Array.isArray(children) ? children.length > 0 : Boolean(children)
+function ChecksBadge({ state }: { state: string | null }) {
+  if (!state) return null
+  const ok = state === "SUCCESS", bad = state === "FAILURE" || state === "ERROR"
   return (
-    <section className="grid gap-2">
-      <h2 className="font-medium">{title}</h2>
-      {has ? children : <p className="text-sm text-muted-foreground">{empty}</p>}
+    <Badge variant="outline" className={cn(ok && "border-emerald-500/40 text-emerald-600 dark:text-emerald-400", bad && "border-red-500/40 text-red-600")}>
+      {ok ? <CircleCheck /> : bad ? <CircleX /> : <Clock />}checks {state.toLowerCase()}
+    </Badge>
+  )
+}
+
+function Section({ icon: Icon, title, count, empty, children }: { icon: typeof Inbox; title: string; count: number; empty: string; children: React.ReactNode }) {
+  return (
+    <section className="grid gap-3">
+      <h2 className="flex items-center gap-2 font-semibold"><Icon className="size-4 text-primary" />{title}{count ? <Badge variant="secondary">{count}</Badge> : null}</h2>
+      {count ? children : <p className="text-sm text-muted-foreground">{empty}</p>}
     </section>
   )
 }
@@ -165,50 +252,73 @@ function HistoryTab({ slug }: { slug: string }) {
   const q = useQuery({ queryKey: queryKeys.runs(slug), queryFn: () => api.runs(slug), refetchInterval: 30_000 })
   if (q.isPending) return <Skeleton className="h-40 w-full" />
   if (q.isError) return <p className="text-destructive">{q.error.message}</p>
-  if (!q.data.length) return <p className="text-muted-foreground">No delivery runs yet.</p>
+  if (!q.data.length) return <EmptyState icon={History} title="No delivery runs yet" />
+  const finished = q.data.filter((r) => r.result)
+  const ok = finished.filter((r) => r.result?.outcome === "success" && !r.result.error).length
+  const cost = finished.reduce((n, r) => n + (r.result?.costUsd ?? 0), 0)
+  const time = finished.reduce((n, r) => n + (r.result?.durationMs ?? 0), 0)
   return (
-    <Card><CardContent className="px-0">
-      <Table>
-        <TableHeader><TableRow>
-          <TableHead>Issue</TableHead><TableHead>Started</TableHead><TableHead>Result</TableHead>
-          <TableHead className="text-right">Duration</TableHead><TableHead className="text-right" title="What the run would cost at API prices; a Claude subscription isn't billed per run">API-equiv. cost</TableHead>
-        </TableRow></TableHeader>
-        <TableBody>
-          {q.data.map((r) => (
-            <TableRow key={r.file}>
-              <TableCell><Link to="/p/$slug/runs/$file" params={{ slug, file: r.file }} className="hover:underline">#{r.issue}</Link></TableCell>
-              <TableCell>{dateTime(r.started)}</TableCell>
-              <TableCell>{r.result ? r.result.outcome : <span className="text-muted-foreground">running or interrupted</span>}</TableCell>
-              <TableCell className="text-right">{duration(r.result?.durationMs)}</TableCell>
-              <TableCell className="text-right">{usd(r.result?.costUsd)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </CardContent></Card>
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat icon={History} label="Runs" value={q.data.length} hint={`${q.data.length - finished.length} running or interrupted`} />
+        <Stat icon={CircleCheck} label="Succeeded" tone="ok" value={finished.length ? `${Math.round((ok / finished.length) * 100)}%` : "–"} hint={`${ok} of ${finished.length} finished`} />
+        <Stat icon={Clock} label="Agent time" value={duration(time)} hint={finished.length ? `${duration(time / finished.length)} per run` : undefined} />
+        <Stat icon={Rocket} label="API-equiv. cost" value={usd(cost)} hint="not billed on a subscription" />
+      </div>
+      <Card className="py-0">
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead className="pl-4">Issue</TableHead><TableHead>Started</TableHead><TableHead>Result</TableHead>
+            <TableHead className="text-right">Duration</TableHead><TableHead className="pr-4 text-right">Cost</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {q.data.map((r) => {
+              const good = r.result?.outcome === "success" && !r.result.error
+              return (
+                <TableRow key={r.file}>
+                  <TableCell className="pl-4"><Link to="/p/$slug/runs/$file" params={{ slug, file: r.file }} className="font-mono text-primary hover:underline">#{r.issue}</Link></TableCell>
+                  <TableCell className="text-muted-foreground">{dateTime(r.started)}</TableCell>
+                  <TableCell>
+                    {r.result
+                      ? <span className={cn("inline-flex items-center gap-1.5", good ? "text-emerald-600 dark:text-emerald-400" : "text-red-600")}>{good ? <CircleCheck className="size-4" /> : <CircleX className="size-4" />}{r.result.outcome}</span>
+                      : <span className="text-muted-foreground">running or interrupted</span>}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{duration(r.result?.durationMs)}</TableCell>
+                  <TableCell className="pr-4 text-right tabular-nums">{usd(r.result?.costUsd)}</TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
   )
 }
 
-const COMPONENTS: { id: Component; name: string; staleAfterMin: number }[] = [
-  { id: "poller", name: "Poller (starts runs)", staleAfterMin: 15 },
-  { id: "deployer", name: "Dev deployer", staleAfterMin: 24 * 60 },
-  { id: "rc", name: "Remote Control", staleAfterMin: 24 * 60 },
+const COMPONENTS: { id: Component; name: string; what: string; staleAfterMin: number }[] = [
+  { id: "poller", name: "Poller", what: "starts runs, promotes the queue", staleAfterMin: 15 },
+  { id: "deployer", name: "Dev deployer", what: "deploys main to the dev environment", staleAfterMin: 24 * 60 },
+  { id: "rc", name: "Remote Control", what: "your sessions from the Claude app", staleAfterMin: 24 * 60 },
 ]
 
 function HealthTab({ p }: { p: Project }) {
   const [log, setLog] = useState<Component>("poller")
   return (
     <div className="grid gap-4">
-      <Card><CardContent className="grid gap-2">
+      <div className="grid gap-3 md:grid-cols-3">
         {COMPONENTS.map((c) => (
-          <div key={c.id} className="flex flex-wrap items-center justify-between gap-2">
-            <button className="text-left font-medium hover:underline" onClick={() => setLog(c.id)}>{c.name}</button>
-            <Freshness iso={p.health[c.id].updated} staleAfterMin={c.staleAfterMin} />
-            <p className="w-full truncate font-mono text-xs text-muted-foreground">{p.health[c.id].last}</p>
-          </div>
+          <button key={c.id} type="button" onClick={() => setLog(c.id)}
+            className={cn("grid gap-2 rounded-xl border bg-card p-4 text-left transition-colors hover:border-primary/40", log === c.id && "border-primary ring-2 ring-primary/15")}>
+            <span className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2 font-medium"><Server className="size-4 text-primary" />{c.name}</span>
+              <Freshness iso={p.health[c.id].updated} staleAfterMin={c.staleAfterMin} />
+            </span>
+            <span className="text-xs text-muted-foreground">{c.what}</span>
+            <span className="truncate font-mono text-xs text-muted-foreground">{p.health[c.id].last || "no log yet"}</span>
+          </button>
         ))}
-        {!p.loggedIn && <p className="text-sm text-amber-600">Remote Control isn't logged in: run <code>adlc login {p.slug}</code>.</p>}
-      </CardContent></Card>
+      </div>
+      {!p.loggedIn && <p className="text-sm text-amber-600">Remote Control isn't logged in: run <code>adlc login {p.slug}</code> on the dev server.</p>}
       <Card>
         <CardHeader><CardTitle>{COMPONENTS.find((c) => c.id === log)?.name} log</CardTitle></CardHeader>
         <CardContent><ComponentLog key={log} slug={p.slug} component={log} /></CardContent>

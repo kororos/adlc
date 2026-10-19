@@ -50,7 +50,11 @@ export function PauseControl({ slug, paused, pending }: { slug: string; paused: 
 export function PipelineBadge({ paused, backoffUntil }: { paused: boolean; backoffUntil: string | null }) {
   if (paused) return <Badge variant="outline" className="border-amber-500 text-amber-600">paused</Badge>
   if (backoffUntil) return <Badge variant="outline" className="border-orange-500 text-orange-600">usage limit · resumes {ago(backoffUntil)}</Badge>
-  return <Badge variant="outline" className="border-emerald-600 text-emerald-700 dark:text-emerald-400">running</Badge>
+  return (
+    <Badge variant="outline" className="gap-1.5 border-emerald-500/50 text-emerald-700 dark:text-emerald-400">
+      <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />active
+    </Badge>
+  )
 }
 
 // A component is "stale" when its log hasn't moved for a while (the poller logs at least every

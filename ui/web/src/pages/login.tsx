@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Logo } from "@/components/chrome"
 import { api, queryKeys } from "@/lib/api"
 
 export function LoginPage({ configured }: { configured: boolean }) {
@@ -15,11 +16,12 @@ export function LoginPage({ configured }: { configured: boolean }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.session }),
   })
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
+    <div className="app-glow flex min-h-svh flex-col items-center justify-center gap-6 p-4">
+      <Logo className="text-2xl" />
+      <Card className="w-full max-w-sm shadow-lg shadow-primary/5">
         <CardHeader>
-          <CardTitle>ADLC dashboard</CardTitle>
-          <CardDescription>Sign in with the dashboard token. Show it on the dev server with <code>adlc ui token</code>.</CardDescription>
+          <CardTitle>Sign in to the dashboard</CardTitle>
+          <CardDescription>Paste the token that <code className="rounded bg-muted px-1 py-0.5">adlc ui token</code> prints on the dev server.</CardDescription>
         </CardHeader>
         <CardContent>
           {!configured ? (

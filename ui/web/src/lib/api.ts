@@ -56,13 +56,15 @@ export type Run = { file: string; issue: number; started: string; updated: strin
 
 export type Component = "poller" | "deployer" | "rc"
 
+export type RunProgress = { phase: string; risk: "low" | "medium" | "high" | null; tasks: number | null }
+
 export type ProjectSummary = {
   slug: string
   repo: string
   paused: boolean
   backoffUntil: string | null
   pending: string[]
-  active: { issue: number; title: string; run: Run | null }[]
+  active: { issue: number; title: string; run: Run | null; progress: RunProgress | null }[]
   counts: Snapshot["counts"] | null
   snapshotAt: string | null
   attention: number

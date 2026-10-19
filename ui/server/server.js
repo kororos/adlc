@@ -122,7 +122,12 @@ function state(p) {
   let running = []
   try { running = fs.readdirSync(st("running")).filter((f) => f.endsWith(".pid")).map((f) => Number(f.slice(0, -4))) } catch { /* none */ }
   const all = runs(p.slug, 200)
-  const active = running.map((n) => ({ issue: n, title: titles.get(n) ?? "", run: all.find((r) => r.issue === n) ?? null }))
+  // The run's own progress record, in its worktree: runs/<n>/.adlc/runs/<n>/state.json
+  const runState = (n) => {
+    const j = readJson(pdir(p.slug, "runs", String(n), ".adlc", "runs", String(n), "state.json"))
+    return j ? { phase: String(j.phase ?? ""), risk: j.risk ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null } : null
+  }
+  const active = running.map((n) => ({ issue: n, title: titles.get(n) ?? "", run: all.find((r) => r.issue === n) ?? null, progress: runState(n) }))
   let backoffUntil = null
   try {
     const u = Number(fs.readFileSync(st("backoff_until"), "utf8"))

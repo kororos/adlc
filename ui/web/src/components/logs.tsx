@@ -1,4 +1,4 @@
-import { Bot, CircleCheck, CircleX, Terminal, Wrench } from "lucide-react"
+import { Bot, CircleCheck, CircleX, FilePen, FileSearch, ListTodo, Sparkles, Terminal, Users, Wrench } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import type { Component, RunEvent } from "@/lib/api"
 import { duration, usd } from "@/lib/format"
@@ -43,7 +43,7 @@ export function RunLog({ slug, file }: { slug: string; file: string }) {
         </label>
       </div>
       <div ref={ref} onScroll={onScroll} data-testid="run-log"
-        className="h-[65vh] overflow-y-auto rounded-md border bg-muted/30 p-3 font-mono text-[13px] leading-relaxed">
+        className="h-[65vh] overflow-y-auto rounded-xl border bg-muted/40 p-4 text-[13px] leading-relaxed">
         {items.length === 0 && <p className="text-muted-foreground">{status === "live" ? "Nothing logged yet." : "Connecting…"}</p>}
         {items.map((e, i) => <RunEventRow key={i} e={e} />)}
       </div>
@@ -51,22 +51,50 @@ export function RunLog({ slug, file }: { slug: string; file: string }) {
   )
 }
 
+const TOOL_ICON: Record<string, typeof Wrench> = {
+  Bash: Terminal, Edit: FilePen, Write: FilePen, NotebookEdit: FilePen,
+  Read: FileSearch, Grep: FileSearch, Glob: FileSearch, Skill: Sparkles, TodoWrite: ListTodo, Agent: Users, Task: Users,
+}
+
 function RunEventRow({ e }: { e: RunEvent }) {
-  const indent = e.sub ? "ml-6 border-l pl-3 opacity-80" : ""
-  if (e.kind === "start") return <p className={cn("text-muted-foreground", indent)}>— {e.sub ? "subagent" : "run"} started{e.model ? ` (${e.model})` : ""}</p>
-  if (e.kind === "text") return <p className={cn("my-1.5 whitespace-pre-wrap font-sans text-sm", indent)}><Bot className="mr-1.5 inline size-4 align-[-2px]" />{e.text}</p>
+  const indent = e.sub ? "ml-5 border-l-2 border-primary/15 pl-3" : ""
+  if (e.kind === "start") {
+    return <p className={cn("my-1 text-xs tracking-wide text-muted-foreground uppercase", indent)}>{e.sub ? "subagent" : "run"} started{e.model ? ` · ${e.model}` : ""}</p>
+  }
+  if (e.kind === "text") {
+    return (
+      <div className={cn("my-2 flex gap-2.5", indent)}>
+        <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-primary/12 text-primary"><Bot className="size-3.5" /></span>
+        <p className="min-w-0 text-sm whitespace-pre-wrap">{e.text}</p>
+      </div>
+    )
+  }
   if (e.kind === "tool") {
-    const Icon = e.tool === "Bash" ? Terminal : Wrench
-    return <p className={cn("truncate text-muted-foreground", indent)} title={e.summary}><Icon className="mr-1.5 inline size-3.5 align-[-2px]" />{e.tool}{e.summary ? ` · ${e.summary}` : ""}</p>
+    const Icon = TOOL_ICON[e.tool] ?? Wrench
+    if (e.tool === "Agent" || e.tool === "Task") {
+      const [who, ...what] = e.summary.split(": ")
+      return (
+        <div className={cn("my-2 ml-8 flex flex-wrap items-center gap-2", indent)}>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground"><Icon className="size-3.5" />{who.replace("adlc-core:", "")}</span>
+          <span className="text-sm text-muted-foreground">{what.join(": ")}</span>
+        </div>
+      )
+    }
+    return (
+      <p className={cn("ml-8 flex items-center gap-1.5 truncate font-mono text-xs text-muted-foreground", indent)} title={e.summary}>
+        <Icon className="size-3.5 shrink-0" /><span className="font-medium text-foreground/70">{e.tool}</span>{e.summary ? <span className="truncate">{e.summary}</span> : null}
+      </p>
+    )
   }
   const ok = e.outcome === "success" && !e.error
   return (
-    <div className={cn("my-2 rounded border p-2 font-sans text-sm", ok ? "border-emerald-600/50" : "border-red-600/50", indent)}>
-      <p className="font-medium">
-        {ok ? <CircleCheck className="mr-1.5 inline size-4 text-emerald-600" /> : <CircleX className="mr-1.5 inline size-4 text-red-600" />}
-        {e.sub ? "subagent finished" : "run finished"}: {e.outcome} · {duration(e.durationMs)} · {usd(e.costUsd)}{e.turns != null ? ` · ${e.turns} turns` : ""}
+    <div className={cn("my-3 rounded-xl border p-3 text-sm", ok ? "border-emerald-500/40 bg-emerald-500/5" : "border-red-500/40 bg-red-500/5", indent)}>
+      <p className="flex flex-wrap items-center gap-x-2 font-medium">
+        {ok ? <CircleCheck className="size-4 text-emerald-600" /> : <CircleX className="size-4 text-red-600" />}
+        {e.sub ? "Subagent finished" : "Run finished"}: {e.outcome}
+        <span className="font-normal text-muted-foreground">· {duration(e.durationMs)} · {usd(e.costUsd)}{e.turns != null ? ` · ${e.turns} turns` : ""}</span>
       </p>
-      {e.text && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{e.text}</p>}
+      {e.text && <p className="mt-1.5 whitespace-pre-wrap text-muted-foreground">{e.text}</p>}
     </div>
   )
 }
@@ -77,9 +105,9 @@ export function ComponentLog({ slug, component }: { slug: string; component: Com
   return (
     <div className="grid gap-2">
       <LiveDot status={status} />
-      <div ref={ref} onScroll={onScroll} className="h-[55vh] overflow-y-auto rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed">
+      <div ref={ref} onScroll={onScroll} className="h-[55vh] overflow-y-auto rounded-xl border bg-zinc-950 p-4 font-mono text-xs leading-relaxed text-zinc-200">
         {items.map((l, i) => <div key={i} className="whitespace-pre-wrap break-all">{l}</div>)}
-        {items.length === 0 && <p className="text-muted-foreground">No log lines yet.</p>}
+        {items.length === 0 && <p className="text-zinc-400">No log lines yet.</p>}
       </div>
     </div>
   )
