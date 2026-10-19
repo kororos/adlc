@@ -97,7 +97,10 @@ async function request<T>(method: "GET" | "POST", url: string, body?: unknown): 
   const res = await fetch(url, {
     method,
     credentials: "same-origin",
-    headers: method === "POST" ? { "content-type": "application/json", "x-adlc-request": "1" } : {},
+    headers: {
+      ...(method === "POST" ? { "x-adlc-request": "1" } : {}),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))

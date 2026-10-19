@@ -41,7 +41,8 @@ export function AppSidebar() {
   const loc = useLocation()
   const { setOpenMobile } = useSidebar()
   const projects = useQuery({ queryKey: queryKeys.projects, queryFn: api.projects, refetchInterval: 10_000 })
-  const logout = useMutation({ mutationFn: api.logout, onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.session }) })
+  // Whatever the server says, end up on the sign-in page (the session query decides).
+  const logout = useMutation({ mutationFn: api.logout, onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.session }) })
   const needYouTotal = (projects.data ?? []).reduce((n, p) => n + p.attention + p.reviews, 0)
   const close = () => setOpenMobile(false)
 
