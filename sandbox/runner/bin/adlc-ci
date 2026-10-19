@@ -43,14 +43,21 @@ runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
 # it and its GitHub registration. A runner that has started a job is left to finish.
 # A waiting runner started from an older CI image (the image was rebuilt) is replaced the same way,
 # so jobs always get the current image.
+# The runner's work folder (work_folder=_work under its home); see start_runner.
+WORK=/home/runner/_work
+# Bump when start_runner changes how runners are started, so idle runners are replaced.
+SPEC=2
+
 replace_stale_runners() {
-  local c labels image current token id why
+  local c labels image spec current token id why
   current=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null)
   for c in $(docker ps --filter label=adlc.ci=runner --format '{{.Names}}'); do
     labels=$(docker inspect -f '{{index .Config.Labels "adlc.ci.labels"}}' "$c" 2>/dev/null)
     image=$(docker inspect -f '{{.Image}}' "$c" 2>/dev/null)
+    spec=$(docker inspect -f '{{index .Config.Labels "adlc.ci.spec"}}' "$c" 2>/dev/null)
     if [ "$labels" != "$LABELS" ]; then why="labels ${labels:-unknown} → $LABELS"
     elif [ -n "$current" ] && [ "$image" != "$current" ]; then why="the CI image was updated"
+    elif [ "$spec" != "$SPEC" ]; then why="the runner setup changed"
     else continue; fi
     token=$(secret ci_admin_pat)
     id=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
@@ -112,8 +119,14 @@ start_runner() {
     return 1
   }
   gid=$(docker run --rm --entrypoint stat -v /var/run/docker.sock:/s "$IMAGE" -c %g /s 2>/dev/null || echo 0)
-  docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" \
-    -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" \
+  # Jobs talk to this engine, so the paths in their bind mounts (docker compose with ./files)
+  # are looked up on the engine, not in the runner. Give the engine the job workspace at the
+  # same path, fresh for each runner.
+  docker run --rm --user root --entrypoint sh -v "$(dirname "$WORK")":/h "$IMAGE" \
+    -c "rm -rf /h/$(basename "$WORK") && mkdir -p /h/$(basename "$WORK") && chown runner:runner /h/$(basename "$WORK")" >/dev/null 2>&1 \
+    || { log "ERROR: cannot prepare the job workspace $WORK on the CI engine"; return 1; }
+  docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" --label "adlc.ci.spec=$SPEC" \
+    -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$WORK:$WORK" \
     "$IMAGE" ./run.sh --jitconfig "$jit" >/dev/null \
     && log "runner $name waiting for a job (labels: $LABELS)"
 }
