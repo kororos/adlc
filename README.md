@@ -514,7 +514,7 @@ Which tiers auto-merge is set in `adlc.yaml → autonomy.auto_merge`.
 
 ### Disk housekeeping
 ADLC builds many images (every verify attempt rebuilds a run's images) and would fill the disk without cleanup. It cleans up after itself:
-- **Every few hours** (`ADLC_HOUSEKEEP_HOURS`, default 6) the poller removes the images of runs whose issue is closed, untagged images, and caps the agents' build cache (`ADLC_BUILD_CACHE_KEEP`, default 8 GB); oversized component logs are trimmed.
+- **Every few hours** (`ADLC_HOUSEKEEP_HOURS`, default 6) the poller cleans the agents' Docker engine: images no container uses that weren't built or pulled for `ADLC_IMAGE_MAX_IDLE_H` hours (default 48), whatever the agents named them; untagged images; the build cache above `ADLC_BUILD_CACHE_KEEP` (default 8 GB). Large images listed in `ADLC_KEEP_IMAGES` (default: the Android emulator, ~11 GB) are kept. Oversized component logs are trimmed. Set these in `/srv/adlc/config/<slug>.env`; on a small disk, e.g. `ADLC_IMAGE_MAX_IDLE_H=12` and `ADLC_BUILD_CACHE_KEEP=4GB`.
 - **After each run's issue closes**, its containers, volumes and built images are removed.
 - **Daily**, the CI engine prunes untagged images and caps its build cache (`ADLC_CI_BUILD_CACHE_KEEP`, 5 GB). The egress access log rotates at 50 MB.
 - **After `adlc up` / `adlc ui up`**, the ADLC images they replaced are removed and the host build cache is capped (`ADLC_HOST_BUILD_CACHE`, 10 GB).

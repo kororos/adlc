@@ -74,13 +74,25 @@ prune_build_cache() {
     docker builder prune -f --keep-storage "$1" >/dev/null 2>&1 || true
   fi
 }
-# Images built for a run (compose names them adlc-<n>-<service>) once the run's worktree is gone
-# (issue closed).
+# Images no container uses that weren't built or pulled here for ADLC_IMAGE_MAX_IDLE_H hours
+# (default 48), whatever their name (adlc-27-api, diet-test/api:27, t6webdev…): each rebuild or
+# pull resets the clock, so images in use stay. Large, slow-to-fetch images are kept: repositories
+# starting with an entry of ADLC_KEEP_IMAGES (space-separated, default: the Android emulator).
+# (Docker 29's containerd store gives local builds a digest too, so "pulled vs built" can't be told
+# apart.) An image a container uses can't be removed: no -f.
 prune_finished_runs() {
-  local ref n
-  docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^adlc-[0-9]+-' | while read -r ref; do
-    n=${ref#adlc-}; n=${n%%-*}
-    [ -d "$RUNS_DIR/$n" ] || docker rmi -f "$ref" >/dev/null 2>&1 || true
+  local max_age=$(( ${ADLC_IMAGE_MAX_IDLE_H:-48} * 3600 )) now id refs tagged keep k skip
+  keep=${ADLC_KEEP_IMAGES:-budtmo/docker-android}
+  now=$(date +%s)
+  docker images -q --no-trunc 2>/dev/null | sort -u | while read -r id; do
+    refs=$(docker image inspect -f '{{range .RepoTags}}{{.}} {{end}}' "$id" 2>/dev/null) || continue
+    skip=0
+    for k in $keep; do case " $refs" in *" $k"*) skip=1 ;; esac; done
+    [ "$skip" = 0 ] || continue
+    tagged=$(docker image inspect -f '{{if .Metadata.LastTagTime.IsZero}}{{.Created}}{{else}}{{.Metadata.LastTagTime}}{{end}}' "$id" 2>/dev/null)
+    [ $(( now - $(date -d "${tagged% UTC}" +%s 2>/dev/null || echo "$now") )) -gt "$max_age" ] || continue
+    # shellcheck disable=SC2086  # one tag per word
+    { [ -n "$refs" ] && docker rmi $refs; } >/dev/null 2>&1 || docker rmi "$id" >/dev/null 2>&1 || true
   done
 }
 free_gb() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }'; }

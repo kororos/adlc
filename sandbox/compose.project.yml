@@ -16,6 +16,7 @@ services:
       # The project's own preview URLs (<run>.app.<slug>.<base>:<edge port>) are allowed on the edge port.
       ADLC_PREVIEW_DOMAIN: ${ADLC_SLUG}.${ADLC_BASE_DOMAIN}
       ADLC_EDGE_PORT: ${ADLC_EDGE_PORT:-80}
+      ADLC_EGRESS_LOG_MAX_MB: ${ADLC_EGRESS_LOG_MAX_MB:-50}
     volumes:
       # The shared clone (kept at origin/<default> by the poller); the proxy reads adlc.yaml from it.
       - ${ADLC_ROOT}/projects/${ADLC_SLUG}/repo:/project:ro
@@ -64,6 +65,12 @@ services:
       ADLC_LOCK_DIR: ${ADLC_ROOT}/projects/${ADLC_SLUG}/locks
       ADLC_SUBNET_PREFIX: ${ADLC_SUBNET_PREFIX}
       ADLC_MAX_PARALLEL_RUNS: ${ADLC_MAX_PARALLEL_RUNS:-1}
+      # disk housekeeping (README: Disk housekeeping)
+      ADLC_HOUSEKEEP_HOURS: ${ADLC_HOUSEKEEP_HOURS:-6}
+      ADLC_IMAGE_MAX_IDLE_H: ${ADLC_IMAGE_MAX_IDLE_H:-48}
+      ADLC_KEEP_IMAGES: ${ADLC_KEEP_IMAGES:-budtmo/docker-android}
+      ADLC_BUILD_CACHE_KEEP: ${ADLC_BUILD_CACHE_KEEP:-8GB}
+      ADLC_MIN_FREE_GB: ${ADLC_MIN_FREE_GB:-15}
       ADLC_LEAD_MODEL: ${ADLC_LEAD_MODEL:-sonnet}
       ADLC_RC_PERMISSION_MODE: ${ADLC_RC_PERMISSION_MODE:-acceptEdits}
       ADLC_RC_SPAWN: ${ADLC_RC_SPAWN:-same-dir}
