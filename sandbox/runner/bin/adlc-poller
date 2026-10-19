@@ -23,6 +23,21 @@ running_count() { local n=0 f; for f in "$STATE_DIR"/running/*.pid; do [ -e "$f"
 max_runs() { local m; m=$(cfg '.autonomy.max_parallel_runs'); echo "${m:-${ADLC_MAX_PARALLEL_RUNS:-1}}"; }
 is_collaborator() { gh api "repos/$R/collaborators/$1" --silent >/dev/null 2>&1; }
 
+# The agents' own identity (the ADLC GitHub App's bot, or the gh_pat user). Issues it wrote, e.g.
+# with /adlc-core:plan-backlog, and labels it set (queued → ready) count as trusted.
+SELF=$(adlc-gh-token --identity 2>/dev/null | cut -f1)   # e.g. adlc-kororos[bot]
+is_self() { [ -n "$SELF" ] && { [ "$1" = "$SELF" ] || [ "$1" = "app/${SELF%\[bot\]}" ]; }; }
+
+# Who may start a delivery run: an issue written by a collaborator or by ADLC itself, or any
+# issue a collaborator labelled adlc:ready (that's how you approve an outsider's issue).
+trusted_issue() { # trusted_issue <n> <author>
+  local actor
+  is_self "$2" || is_collaborator "$2" && return 0
+  actor=$(gh api --paginate "repos/$R/issues/$1/events?per_page=100" \
+            --jq '.[] | select(.event == "labeled" and .label.name == "adlc:ready") | .actor.login' 2>/dev/null | tail -n 1)
+  [ -n "$actor" ] && ! is_self "$actor" && is_collaborator "$actor"
+}
+
 # ── Backoff (shared Max quota) ────────────────────────────────────────────────
 in_backoff() { local u; u=$(cat "$STATE_DIR/backoff_until" 2>/dev/null || echo 0); [ "$(date +%s)" -lt "$u" ]; }
 set_backoff() { # set_backoff [reset_epoch]
@@ -147,10 +162,10 @@ launch_ready() {
     [ -n "$n" ] || continue
     [ "$slots" -gt 0 ] || break
     is_running "$n" && continue
-    if ! is_collaborator "$author"; then
+    if ! trusted_issue "$n" "$author"; then
       log "#$n: author @$author is not a collaborator; needs human review"
       label "$n" adlc:ready adlc:needs-human-review
-      comment "$n" "ADLC: issues from non-collaborators aren't processed automatically. A maintainer can review it and relabel \`adlc:ready\`, or copy it into a new issue."
+      comment "$n" "ADLC: issues from non-collaborators aren't processed automatically. A maintainer can review it, remove \`adlc:needs-human-review\` and add \`adlc:ready\` to approve it."
       continue
     fi
     launch "$n" "$title" && slots=$((slots - 1))
