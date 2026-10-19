@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
-  HeartPulse, History, Inbox, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, Workflow,
+  HardDrive, HeartPulse, History, Inbox, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, Workflow,
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
@@ -304,10 +304,33 @@ const COMPONENTS: { id: Component; name: string; what: string; staleAfterMin: nu
   { id: "rc", name: "Remote Control", what: "your sessions from the Claude app", staleAfterMin: 24 * 60 },
 ]
 
+function DiskCard() {
+  const q = useQuery({ queryKey: queryKeys.disk, queryFn: api.disk, refetchInterval: 60_000 })
+  const d = q.data
+  if (!d) return null
+  const usedPct = Math.round(((d.totalGb - d.freeGb) / d.totalGb) * 100)
+  const low = d.freeGb < d.minFreeGb, warn = d.freeGb < d.minFreeGb * 2
+  return (
+    <div className={cn("grid gap-2 rounded-xl border bg-card p-4", low && "border-red-500/50")} data-testid="disk-card">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 font-medium"><HardDrive className="size-4 text-primary" />Dev server disk</span>
+        <span className={cn("text-sm tabular-nums", low ? "text-red-600" : warn ? "text-amber-600" : "text-muted-foreground")}>{d.freeGb} GB free of {d.totalGb} GB</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full rounded-full", low ? "bg-red-500" : warn ? "bg-amber-500" : "bg-primary")} style={{ width: `${usedPct}%` }} />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {low ? <>Below {d.minFreeGb} GB no new runs start. On the dev server: <code>adlc prune</code>.</> : <>Housekeeping runs every few hours; below {d.minFreeGb} GB new runs wait.</>}
+      </p>
+    </div>
+  )
+}
+
 function HealthTab({ p }: { p: Project }) {
   const [log, setLog] = useState<Component>("poller")
   return (
     <div className="grid gap-4">
+      <DiskCard />
       <div className="grid gap-3 md:grid-cols-3">
         {COMPONENTS.map((c) => (
           <button key={c.id} type="button" onClick={() => setLog(c.id)}

@@ -2,6 +2,7 @@
 # project by `playwright install chromium`, matching the project's Playwright version).
 ARG BASE=adlc/runner-base:local
 FROM ${BASE}
+LABEL org.adlc.managed="true"
 
 ARG PLAYWRIGHT_VERSION=1.64.1
 

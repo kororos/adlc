@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# adlc-housekeep: free disk in the project's Docker sidecar now (the poller also runs this every
+# few hours). Used by `adlc prune <slug>` on the host.
+set -uo pipefail
+ADLC_COMPONENT=housekeep
+# shellcheck source=adlc-lib.sh
+source /usr/local/bin/adlc-lib.sh
+housekeep

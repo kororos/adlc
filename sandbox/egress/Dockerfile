@@ -2,6 +2,7 @@
 #   open / audit → allow everything (audit logs every request)
 #   allowlist    → only core + stack-pack + project extra domains
 FROM debian:bookworm-slim
+LABEL org.adlc.managed="true"
 
 ARG YQ_VERSION=v4.44.3
 ARG TARGETARCH

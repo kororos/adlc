@@ -29,6 +29,7 @@
 #   adlc restart <slug> [--force]    restart the runner: reloads the ADLC plugins and Remote Control
 #                                    (refuses while delivery runs are active unless --force)
 #   adlc down <slug>                 stop the runner (workspace and volumes are kept)
+#   adlc prune [slug]                free disk now: old ADLC images, build caches, finished runs' images
 #   adlc ui [up|down|token|status]   web dashboard for all projects (LAN; login token)
 #       up [--host <name>]…          start it; --host adds names a reverse proxy will use
 #       token [--rotate]             show the login token (--rotate signs everyone out)
@@ -251,6 +252,7 @@ http:
 EOF
 
   compose "$slug" up -d --build --remove-orphans
+  host_housekeep
   say ""
   say "Runner for '$slug' is starting. Next:"
   [ -e "$ADLC_ROOT/projects/$slug/state/logged_in" ] \
@@ -283,6 +285,41 @@ cmd_restart() {
   fi
   compose "$slug" restart runner
   ok "runner restarted: plugins update and Remote Control comes back within a minute (open sessions reconnect in the app)"
+}
+
+# ── Disk ─────────────────────────────────────────────────────────────────────
+disk_line() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { printf "%dGB free of %dGB (%s used)", $4/1048576, $2/1048576, $5 }'; }
+host_build_cache_cap() {
+  local cap=${ADLC_HOST_BUILD_CACHE:-10GB}
+  if docker builder prune --help 2>/dev/null | grep -q -- --reserved-space; then docker builder prune -f --reserved-space "$cap" >/dev/null 2>&1 || true
+  else docker builder prune -f --keep-storage "$cap" >/dev/null 2>&1 || true; fi
+}
+# After builds: old ADLC images (replaced by a rebuild, now untagged) and the host build cache cap.
+host_housekeep() {
+  docker image prune -f --filter label=org.adlc.managed=true >/dev/null 2>&1 || true
+  host_build_cache_cap
+}
+cmd_prune() {
+  local f slug before
+  before=$(disk_line)
+  say "Freeing disk (before: $before)…"
+  # Host: every untagged image (old builds of anything), then the build cache cap.
+  docker image prune -f >/dev/null 2>&1 || true
+  host_build_cache_cap
+  ok "host: untagged images removed, build cache capped at ${ADLC_HOST_BUILD_CACHE:-10GB}"
+  for f in "$ADLC_ROOT"/config/*.env; do
+    [ -e "$f" ] || continue
+    slug=$(basename "$f" .env)
+    [ -n "${1:-}" ] && [ "$1" != "$slug" ] && continue
+    load_cfg "$slug"
+    if runner_exec "$slug" adlc-housekeep >/dev/null 2>&1; then ok "$slug: finished runs' images, untagged images and build cache pruned"
+    else warn "$slug: runner not reachable; skipped its Docker sidecar"; fi
+    if ci_enabled "$slug"; then
+      compose "$slug" exec -T ci-docker sh -c 'docker image prune -f; docker builder prune -f --reserved-space ${ADLC_CI_BUILD_CACHE_KEEP:-5GB} 2>/dev/null || docker builder prune -f --keep-storage ${ADLC_CI_BUILD_CACHE_KEEP:-5GB}' >/dev/null 2>&1 \
+        && ok "$slug: CI engine pruned" || warn "$slug: CI engine not reachable; skipped"
+    fi
+  done
+  say "Done: $(disk_line)"
 }
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
@@ -325,6 +362,7 @@ cmd_ui() {
         "  services:" "    adlc-ui:" "      loadBalancer:" "        servers:" '          - url: "http://adlc-ui:8080"' >"$route"
       say "Building and starting the dashboard…"
       ui_compose up -d --build --quiet-pull >/dev/null
+      host_housekeep
       local suffix=""; [ "$(edge_port)" = 80 ] || suffix=":$(edge_port)"
       ok "dashboard: http://$host$suffix"
       [ -z "$hosts" ] || say "  also answers to: $hosts (through your reverse proxy; serve it over HTTPS there)"
@@ -356,7 +394,10 @@ cmd_pause()  { need_slug "$1"; touch "$ADLC_ROOT/projects/$1/state/paused"; say 
 cmd_resume() { need_slug "$1"; rm -f "$ADLC_ROOT/projects/$1/state/paused"; say "resumed"; }
 
 cmd_status() {
-  local f slug st n
+  local f slug st n free
+  free=$(df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }')
+  if [ "${free:-0}" -lt "${ADLC_MIN_FREE_GB:-15}" ]; then warn "disk: $(disk_line). Below ${ADLC_MIN_FREE_GB:-15}GB no new runs start: adlc prune"
+  else say "disk: $(disk_line)"; fi
   for f in "$ADLC_ROOT"/config/*.env; do
     [ -e "$f" ] || { say "no projects"; return; }
     slug=$(basename "$f" .env)
@@ -436,6 +477,7 @@ main() {
     down) cmd_down "${1:-}" ;;
     restart) cmd_restart "$@" ;;
     ui) cmd_ui "$@" ;;
+    prune) cmd_prune "${1:-}" ;;
     login) cmd_login "${1:-}" ;;
     app) cmd_app "$@" ;;
     attach) cmd_attach "${1:-}" ;;
@@ -446,7 +488,7 @@ main() {
     resume) cmd_resume "${1:-}" ;;
     logs) cmd_logs "$@" ;;
     audit) cmd_audit "${1:-}" ;;
-    help|-h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    help|-h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
     *) die "unknown command '$c' (adlc help)" ;;
   esac
 }

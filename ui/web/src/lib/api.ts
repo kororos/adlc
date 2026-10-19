@@ -56,6 +56,8 @@ export type Run = { file: string; issue: number; started: string; updated: strin
 
 export type Component = "poller" | "deployer" | "rc"
 
+export type Disk = { freeGb: number; totalGb: number; minFreeGb: number }
+
 export type RunProgress = { phase: string; risk: "low" | "medium" | "high" | null; tasks: number | null }
 
 export type ProjectSummary = {
@@ -115,6 +117,7 @@ export const api = {
   projects: () => request<ProjectSummary[]>("GET", "/api/projects"),
   project: (slug: string) => request<Project>("GET", `/api/projects/${slug}`),
   runs: (slug: string) => request<Run[]>("GET", `/api/projects/${slug}/runs?limit=100`),
+  disk: () => request<Disk | null>("GET", "/api/disk"),
   action: (slug: string, action: "pause" | "resume") => request<{ ok: true }>("POST", `/api/projects/${slug}/actions`, { action }),
 }
 
@@ -123,4 +126,5 @@ export const queryKeys = {
   projects: ["projects"] as const,
   project: (slug: string) => ["project", slug] as const,
   runs: (slug: string) => ["runs", slug] as const,
+  disk: ["disk"] as const,
 }

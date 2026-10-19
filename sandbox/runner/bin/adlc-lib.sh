@@ -61,3 +61,38 @@ sync_repo() {
 ensure_dirs() {
   mkdir -p "$RUNS_DIR" "$STATE_DIR/running" "$LOG_DIR/runs" "$ADLC_WS/sessions" "$ADLC_WS/locks"
 }
+
+# ── Disk housekeeping (the project's Docker sidecar; used by the poller and adlc-housekeep) ─────
+# Every verify attempt rebuilds the run's images; the old ones become dangling, and a run's images
+# outlive its issue. Remove those and keep the build cache under a cap. Pulled base images
+# (emulator, browsers) stay, so builds stay fast.
+# Cap the build cache (Docker 29 renamed --keep-storage to --reserved-space).
+prune_build_cache() {
+  if docker builder prune --help 2>/dev/null | grep -q -- --reserved-space; then
+    docker builder prune -f --reserved-space "$1" >/dev/null 2>&1 || true
+  else
+    docker builder prune -f --keep-storage "$1" >/dev/null 2>&1 || true
+  fi
+}
+# Images built for a run (compose names them adlc-<n>-<service>) once the run's worktree is gone
+# (issue closed).
+prune_finished_runs() {
+  local ref n
+  docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^adlc-[0-9]+-' | while read -r ref; do
+    n=${ref#adlc-}; n=${n%%-*}
+    [ -d "$RUNS_DIR/$n" ] || docker rmi -f "$ref" >/dev/null 2>&1 || true
+  done
+}
+free_gb() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }'; }
+housekeep() {
+  local before after
+  before=$(free_gb)
+  prune_finished_runs
+  docker image prune -f >/dev/null 2>&1 || true
+  prune_build_cache "${ADLC_BUILD_CACHE_KEEP:-8GB}"
+  docker volume prune -f >/dev/null 2>&1 || true
+  # Component logs over 100 MB keep their last 20 MB, trimmed in place: their writers hold the file open.
+  find "$LOG_DIR" -maxdepth 1 -name '*.log' -size +100M -exec sh -c 'tail -c 20M "$1" >"$1.tmp" && cat "$1.tmp" >"$1"; rm -f "$1.tmp"' _ {} \; 2>/dev/null || true
+  after=$(free_gb)
+  log "housekeeping: finished runs' images, dangling images and build cache pruned (free ${before:-?}GB → ${after:-?}GB)"
+}

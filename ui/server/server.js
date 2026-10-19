@@ -155,6 +155,16 @@ function state(p) {
   }
 }
 
+// The dev server's disk (the data mounts live on it). Below the runner's minimum, no runs start.
+const MIN_FREE_GB = Number(process.env.ADLC_MIN_FREE_GB ?? 15)
+function disk() {
+  try {
+    const s = fs.statfsSync(DATA)
+    return { freeGb: Math.floor((s.bavail * s.bsize) / 2 ** 30), totalGb: Math.floor((s.blocks * s.bsize) / 2 ** 30), minFreeGb: MIN_FREE_GB }
+  } catch { return null }
+}
+app.get("/api/disk", async () => disk())
+
 app.get("/api/projects", async () => projects().map((p) => {
   const s = state(p)
   return { slug: s.slug, repo: s.repo, paused: s.paused, backoffUntil: s.backoffUntil, pending: s.pending,

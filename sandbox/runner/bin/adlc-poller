@@ -185,6 +185,7 @@ launch_ready() {
   in_backoff && return 0
   [ -n "$(secret claude_oauth_token)" ] || { log "secret claude_oauth_token missing; not launching"; return 0; }
   identity_ok || return 0
+  disk_ok || return 0
   slots=$(( $(max_runs) - $(running_count) ))
   [ "$slots" -gt 0 ] || return 0
   while IFS=$'\t' read -r n author title; do
@@ -235,6 +236,20 @@ nap() {
   done
 }
 
+# ── Disk housekeeping: see housekeep in adlc-lib.sh ────────────────────────────
+HOUSEKEEP_EVERY=$(( ${ADLC_HOUSEKEEP_HOURS:-6} * 3600 / POLL_INTERVAL ))
+MIN_FREE_GB=${ADLC_MIN_FREE_GB:-15}
+# Before launching: enough free disk, or housekeeping first, or nothing starts (logged once).
+disk_err=""
+disk_ok() {
+  local free; free=$(free_gb)
+  [ -n "$free" ] && [ "$free" -lt "$MIN_FREE_GB" ] || { [ -z "$disk_err" ] || log "disk OK again (${free}GB free)"; disk_err=""; return 0; }
+  housekeep; free=$(free_gb)
+  [ "$free" -lt "$MIN_FREE_GB" ] || return 0
+  [ "$disk_err" = "$free" ] || log "ERROR: only ${free}GB free on the dev server (minimum ${MIN_FREE_GB}GB); not starting runs. Free space: adlc prune $ADLC_SLUG"
+  disk_err=$free; return 1
+}
+
 # ── Cleanup after merge/close ─────────────────────────────────────────────────
 cleanup() {
   local wt n state
@@ -244,7 +259,7 @@ cleanup() {
     is_running "$n" && continue
     state=$(gh issue view "$n" -R "$R" --json state --jq .state 2>/dev/null) || continue
     [ "$state" = CLOSED ] || continue
-    docker compose -p "adlc-$n" down -v >/dev/null 2>&1 || true
+    docker compose -p "adlc-$n" down -v --rmi local >/dev/null 2>&1 || true   # its built images too
     git -C "$REPO_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
     git -C "$REPO_DIR" for-each-ref --format='%(refname:short)' "refs/heads/adlc/$n-*" \
       | xargs -r git -C "$REPO_DIR" branch -D >/dev/null 2>&1
@@ -276,6 +291,7 @@ while :; do
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup
+  [ $((i % HOUSEKEEP_EVERY)) = 1 ] && housekeep
   write_snapshot
   i=$((i + 1))
   nap

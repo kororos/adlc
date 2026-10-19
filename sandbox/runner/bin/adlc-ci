@@ -95,12 +95,33 @@ start_runner() {
 
 [ -n "$(secret ci_admin_pat)" ] && replace_stale_runners
 
+# Once a day, between jobs: drop dangling images and cap the build cache. Images in use (the
+# runner image) and pulled base images stay, so jobs keep their speed.
+# Cap the build cache (Docker 29 renamed --keep-storage to --reserved-space).
+prune_build_cache() {
+  if docker builder prune --help 2>/dev/null | grep -q -- --reserved-space; then
+    docker builder prune -f --reserved-space "$1" >/dev/null 2>&1 || true
+  else
+    docker builder prune -f --keep-storage "$1" >/dev/null 2>&1 || true
+  fi
+}
+last_prune=0
+prune_engine() {
+  local now; now=$(date +%s)
+  [ $((now - last_prune)) -gt 86400 ] || return 0
+  docker image prune -f >/dev/null 2>&1 || true
+  prune_build_cache "${ADLC_CI_BUILD_CACHE_KEEP:-5GB}"
+  last_prune=$now
+  log "housekeeping: dangling images and build cache pruned"
+}
+
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
     log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue
   fi
   if ! runner_running; then
     reset_engine
+    prune_engine
     ensure_image
     start_runner || sleep 60
   fi

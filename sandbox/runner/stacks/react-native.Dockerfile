@@ -2,6 +2,7 @@
 # Android platform-tools are x86_64-only: build this layer on amd64 hosts.
 ARG BASE=adlc/runner-base:local
 FROM ${BASE}
+LABEL org.adlc.managed="true"
 
 ARG ANDROID_CMDLINE_TOOLS=11076708
 ARG ANDROID_PLATFORM=android-35

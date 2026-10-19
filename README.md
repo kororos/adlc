@@ -512,6 +512,15 @@ Which tiers auto-merge is set in `adlc.yaml → autonomy.auto_merge`.
 
 ## 10. Day-to-day operation
 
+### Disk housekeeping
+ADLC builds many images (every verify attempt rebuilds a run's images) and would fill the disk without cleanup. It cleans up after itself:
+- **Every few hours** (`ADLC_HOUSEKEEP_HOURS`, default 6) the poller removes the images of runs whose issue is closed, untagged images, and caps the agents' build cache (`ADLC_BUILD_CACHE_KEEP`, default 8 GB); oversized component logs are trimmed.
+- **After each run's issue closes**, its containers, volumes and built images are removed.
+- **Daily**, the CI engine prunes untagged images and caps its build cache (`ADLC_CI_BUILD_CACHE_KEEP`, 5 GB). The egress access log rotates at 50 MB.
+- **After `adlc up` / `adlc ui up`**, the ADLC images they replaced are removed and the host build cache is capped (`ADLC_HOST_BUILD_CACHE`, 10 GB).
+- **Disk guard:** below `ADLC_MIN_FREE_GB` (default 15) free, the poller runs housekeeping first and, if still low, starts no new runs (logged once). `adlc status` and the dashboard show free space.
+- **Now:** `adlc prune [slug]` does all of the above immediately and prints free space before and after.
+
 ### Dashboard (`adlc ui`)
 A web page for all projects on the dev server: what's running now with its **live log**, the queue in order of precedence, what **needs you** (PRs to review, blocked runs and questions, your next owner tasks), run history with duration and cost, component health and logs, and **pause/resume**. It works on a phone.
 

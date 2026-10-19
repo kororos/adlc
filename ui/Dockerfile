@@ -12,6 +12,7 @@ COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 FROM node:22-bookworm-slim
+LABEL org.adlc.managed="true"
 ENV NODE_ENV=production PORT=8080 ADLC_DATA=/data
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules

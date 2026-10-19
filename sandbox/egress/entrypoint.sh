@@ -77,6 +77,7 @@ EOF
 http_access deny all
 logformat adlc %ts %>a %rm %ru %>Hs %Ss
 access_log stdio:$LOG/access.log adlc
+logfile_rotate 3
 cache_log stdio:$LOG/cache.log
 EOF
   # Validate before activating; on failure keep the previous (working) configuration.
@@ -96,13 +97,19 @@ mode=$(render) || { [ -f "$CONF" ] || exit 1; mode=unknown; }
 log "mode=$mode, $(wc -l <"$ALLOW") allowlisted domains"
 
 # Reload when the policy file changes (the poller keeps the shared clone at origin/<default>).
+# Squid runs as PID 1 (exec below), where `squid -k` refuses to act: signal it directly
+# (HUP = reconfigure, USR1 = rotate logs).
 (
   last=$(stat -c %Y "$POLICY" 2>/dev/null || echo 0)
   while sleep 60; do
+    # Keep the access log bounded: rotate past 50 MB (access.log.0 … .2 are kept).
+    if [ "$(stat -c %s "$LOG/access.log" 2>/dev/null || echo 0)" -gt $(( ${ADLC_EGRESS_LOG_MAX_MB:-50} * 1048576 )) ]; then
+      kill -USR1 1 && log "access log rotated"
+    fi
     now=$(stat -c %Y "$POLICY" 2>/dev/null || echo 0)
     [ "$now" = "$last" ] && continue
     last=$now
-    mode=$(render) && squid -k reconfigure -f "$CONF" && log "policy changed: mode=$mode"
+    mode=$(render) && kill -HUP 1 && log "policy changed: mode=$mode"
   done
 ) &
 
