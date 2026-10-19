@@ -35,4 +35,7 @@ RUN printf 'Defaults env_keep += "HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy htt
  && visudo -c
 ENV NODE_USE_ENV_PROXY=1
 
+# Entry point: gives the job's Docker client the proxy, then runs the runner.
+COPY adlc-runner-start /usr/local/bin/adlc-runner-start
+
 USER runner

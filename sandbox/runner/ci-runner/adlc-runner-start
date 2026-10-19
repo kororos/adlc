@@ -1,0 +1,12 @@
+#!/bin/sh
+# Start the Actions runner with the job's Docker client set up like the dev sandbox: containers
+# that jobs start (docker run, docker compose) get the egress proxy injected, since the CI
+# network has no other way out. The registrar passes the proxy in as HTTP(S)_PROXY/NO_PROXY.
+set -eu
+mkdir -p "$HOME/.docker"
+cat >"$HOME/.docker/config.json" <<JSON
+{ "proxies": { "default": {
+    "httpProxy": "${HTTP_PROXY:-}", "httpsProxy": "${HTTPS_PROXY:-${HTTP_PROXY:-}}",
+    "noProxy": "${ADLC_JOB_NO_PROXY:-localhost,127.0.0.1}" } } }
+JSON
+exec ./run.sh "$@"

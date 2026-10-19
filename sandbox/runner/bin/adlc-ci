@@ -46,7 +46,7 @@ runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
 # The runner's work folder (work_folder=_work under its home); see start_runner.
 WORK=/home/runner/_work
 # Bump when start_runner changes how runners are started, so idle runners are replaced.
-SPEC=2
+SPEC=3
 
 replace_stale_runners() {
   local c labels image spec current token id why
@@ -108,7 +108,7 @@ ensure_image() {
 }
 
 start_runner() {
-  local token name jit gid label_args=() l
+  local token name jit gid start label_args=() l
   token=$(secret ci_admin_pat)
   name="adlc-$ADLC_SLUG-$(date +%s)"
   for l in ${LABELS//,/ }; do label_args+=(-f "labels[]=$l"); done
@@ -118,6 +118,9 @@ start_runner() {
     log "ERROR: cannot create a JIT runner config ($jit). ci_admin_pat needs Administration: read and write on $R"
     return 1
   }
+  # The plain base image (fallback when the CI image cannot be built) has only run.sh.
+  start=./run.sh
+  docker run --rm --entrypoint sh "$IMAGE" -c 'command -v adlc-runner-start' >/dev/null 2>&1 && start=adlc-runner-start
   gid=$(docker run --rm --entrypoint stat -v /var/run/docker.sock:/s "$IMAGE" -c %g /s 2>/dev/null || echo 0)
   # Jobs talk to this engine, so the paths in their bind mounts (docker compose with ./files)
   # are looked up on the engine, not in the runner. Give the engine the job workspace at the
@@ -127,7 +130,8 @@ start_runner() {
     || { log "ERROR: cannot prepare the job workspace $WORK on the CI engine"; return 1; }
   docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" --label "adlc.ci.spec=$SPEC" \
     -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$WORK:$WORK" \
-    "$IMAGE" ./run.sh --jitconfig "$jit" >/dev/null \
+    -e ADLC_JOB_NO_PROXY="localhost,127.0.0.1,.lan,.internal" \
+    "$IMAGE" "$start" --jitconfig "$jit" >/dev/null \
     && log "runner $name waiting for a job (labels: $LABELS)"
 }
 
