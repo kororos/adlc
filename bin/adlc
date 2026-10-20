@@ -323,8 +323,15 @@ cmd_prune() {
     if runner_exec "$slug" adlc-housekeep >/dev/null 2>&1; then ok "$slug: finished runs' images, untagged images and build cache pruned"
     else warn "$slug: runner not reachable; skipped its Docker sidecar"; fi
     if ci_enabled "$slug"; then
-      compose "$slug" exec -T ci-docker sh -c 'docker image prune -f; docker builder prune -f --reserved-space ${ADLC_CI_BUILD_CACHE_KEEP:-4GB} 2>/dev/null || docker builder prune -f --keep-storage ${ADLC_CI_BUILD_CACHE_KEEP:-4GB}' >/dev/null 2>&1 \
-        && ok "$slug: CI engine pruned" || warn "$slug: CI engine not reachable; skipped"
+      # Same rule as the registrar's after-job cleanup, from the ci container (it has adlc-lib and the
+      # engine's address): compose-built images idle 1h+ (not one a running job just built), others
+      # idle ADLC_CI_IMAGE_MAX_IDLE_H, the build cache cap. Runner and emulator images stay.
+      # shellcheck disable=SC2016  # expanded inside the container
+      compose "$slug" exec -T ci bash -c 'source /usr/local/bin/adlc-lib.sh
+        ADLC_BUILT_IMAGE_MAX_IDLE_H=1 ADLC_IMAGE_MAX_IDLE_H=${ADLC_CI_IMAGE_MAX_IDLE_H:-24} \
+          prune_finished_runs "adlc/ci-runner:local ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}"
+        docker image prune -f; prune_build_cache "${ADLC_CI_BUILD_CACHE_KEEP:-4GB}"' >/dev/null 2>&1 \
+        && ok "$slug: CI engine: job images and idle images removed, build cache capped" || warn "$slug: CI engine not reachable; skipped"
     fi
   done
   say "Done: $(disk_line)"
