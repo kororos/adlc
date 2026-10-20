@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# .github/scripts/adlc-gate.sh [path-glob...]: decides whether a CI job does real work
+# .github/scripts/adlc-gate.sh [--status-only | path-glob...]: decides whether a CI job does real work
 # (output run=true|false).
 #
 # Required checks must report on every PR, including the setup, discovery and architecture PRs
@@ -12,11 +12,15 @@
 #     version fields release-please-config.json names (checked: nothing else in those files moved), or
 #   - path globs are given and no changed file matches one (e.g. 'apps/mobile/*' for e2e-android;
 #     `*` also matches `/`).
+# With `--status-only` as the first argument only the first skip applies (no docs-only, release or
+# path skips). publish.yml uses it so that every push to the default branch publishes its images.
 # Never use workflow-level `paths:` filters on required checks instead: a workflow that doesn't
 # run leaves its checks "expected" forever.
 # It fails closed: any error here fails the job. /adlc.build.yaml and /.github/ are in CODEOWNERS,
 # so nobody can switch CI off without the owner's review.
 set -euo pipefail
+status_only=false
+if [ "${1:-}" = "--status-only" ]; then status_only=true; shift; fi
 out=${GITHUB_OUTPUT:-/dev/stdout}
 
 skip() {
@@ -80,6 +84,11 @@ release_only() {
     [ "$before" = "$after" ] || return 1
   done <<<"$1"
 }
+
+if [ "$status_only" = true ]; then
+  echo "run=true" >>"$out"
+  exit 0
+fi
 
 # Pull request: the checkout is the merge commit, whose first parent is the base branch tip.
 # Push to main: squash merges make each push one commit. Dispatched run on a release-please
