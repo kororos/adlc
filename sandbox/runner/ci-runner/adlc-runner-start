@@ -9,4 +9,20 @@ cat >"$HOME/.docker/config.json" <<JSON
     "httpProxy": "${HTTP_PROXY:-}", "httpsProxy": "${HTTPS_PROXY:-${HTTP_PROXY:-}}",
     "noProxy": "${ADLC_JOB_NO_PROXY:-localhost,127.0.0.1}" } } }
 JSON
+# Java tools ignore HTTP(S)_PROXY: Gradle reads gradle.properties, and every JVM (sdkmanager from
+# setup-android, Maestro) reads JAVA_TOOL_OPTIONS. The run's own hosts (.internal) stay direct.
+proxy=${HTTPS_PROXY:-${HTTP_PROXY:-}}
+if [ -n "$proxy" ]; then
+  hp=${proxy#*://}; hp=${hp%/}; host=${hp%:*}; port=${hp##*:}
+  nonproxy="localhost|127.0.0.1|*.internal|*.lan"
+  mkdir -p "$HOME/.gradle"
+  cat >"$HOME/.gradle/gradle.properties" <<PROPS
+systemProp.http.proxyHost=$host
+systemProp.http.proxyPort=$port
+systemProp.https.proxyHost=$host
+systemProp.https.proxyPort=$port
+systemProp.http.nonProxyHosts=$nonproxy
+PROPS
+  export JAVA_TOOL_OPTIONS="-Dhttp.proxyHost=$host -Dhttp.proxyPort=$port -Dhttps.proxyHost=$host -Dhttps.proxyPort=$port -Dhttp.nonProxyHosts=$nonproxy"
+fi
 exec ./run.sh "$@"
