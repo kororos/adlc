@@ -260,10 +260,20 @@ cleanup() {
     state=$(gh issue view "$n" -R "$R" --json state --jq .state 2>/dev/null) || continue
     [ "$state" = CLOSED ] || continue
     docker compose -p "adlc-$n" down -v --rmi local >/dev/null 2>&1 || true   # its built images too
-    git -C "$REPO_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
+    git -C "$REPO_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt" 2>/dev/null
+    # Test-environment containers (e.g. vite as root) leave files this user can't delete. The
+    # Docker sidecar sees the workspace at the same path and runs as root: remove them there.
+    if [ -e "$wt" ]; then
+      docker run --rm -v "$RUNS_DIR:/runs" alpine:3.22 rm -rf "/runs/$n" >/dev/null 2>&1 || true
+    fi
+    git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
     git -C "$REPO_DIR" for-each-ref --format='%(refname:short)' "refs/heads/adlc/$n-*" \
       | xargs -r git -C "$REPO_DIR" branch -D >/dev/null 2>&1
-    log "#$n closed: removed worktree and local branches"
+    if [ -e "$wt" ]; then
+      log "ERROR: #$n closed but its worktree $wt could not be removed; remove it by hand (sudo rm -rf)"
+    else
+      log "#$n closed: removed worktree and local branches"
+    fi
   done
   git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
   find "$LOG_DIR/runs" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
