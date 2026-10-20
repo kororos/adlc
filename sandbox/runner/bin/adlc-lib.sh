@@ -74,26 +74,39 @@ prune_build_cache() {
     docker builder prune -f --keep-storage "$1" >/dev/null 2>&1 || true
   fi
 }
-# Images no container uses that weren't built or pulled here for ADLC_IMAGE_MAX_IDLE_H hours
-# (default 48), whatever their name (adlc-27-api, diet-test/api:27, t6webdev…): each rebuild or
-# pull resets the clock, so images in use stay. Large, slow-to-fetch images are kept: repositories
-# starting with an entry of ADLC_KEEP_IMAGES (space-separated, default: the Android emulator).
-# (Docker 29's containerd store gives local builds a digest too, so "pulled vs built" can't be told
-# apart.) An image a container uses can't be removed: no -f.
+# Images no container uses, by how long ago they were last built, pulled or tagged (each rebuild or
+# pull resets the clock, so images in use stay):
+#   - built by docker compose (label com.docker.compose.project: test environments, whatever the
+#     agents named them): after ADLC_BUILT_IMAGE_MAX_IDLE_H hours (default 6); they rebuild quickly
+#     from the build cache,
+#   - anything else (pulled base images, plain builds): after ADLC_IMAGE_MAX_IDLE_H hours (default 48).
+# Images whose tag starts with an entry of ADLC_KEEP_IMAGES (space-separated, default: the Android
+# emulator) or of the first argument are kept. (Docker 29's containerd store gives local builds a
+# digest too, so "pulled vs built" can't be told apart by digest.) An image a container uses can't
+# be removed: no -f.
 prune_finished_runs() {
-  local max_age=$(( ${ADLC_IMAGE_MAX_IDLE_H:-48} * 3600 )) now id refs tagged keep k skip
-  keep=${ADLC_KEEP_IMAGES:-budtmo/docker-android}
+  local built_age=$(( ${ADLC_BUILT_IMAGE_MAX_IDLE_H:-6} * 3600 )) max_age=$(( ${ADLC_IMAGE_MAX_IDLE_H:-48} * 3600 ))
+  local now id refs tagged keep k skip age limit
+  keep="${ADLC_KEEP_IMAGES:-budtmo/docker-android} ${1:-}"
   now=$(date +%s)
   docker images -q --no-trunc 2>/dev/null | sort -u | while read -r id; do
     refs=$(docker image inspect -f '{{range .RepoTags}}{{.}} {{end}}' "$id" 2>/dev/null) || continue
     skip=0
     for k in $keep; do case " $refs" in *" $k"*) skip=1 ;; esac; done
     [ "$skip" = 0 ] || continue
+    limit=$max_age
+    [ -n "$(docker image inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$id" 2>/dev/null)" ] && limit=$built_age
     tagged=$(docker image inspect -f '{{if .Metadata.LastTagTime.IsZero}}{{.Created}}{{else}}{{.Metadata.LastTagTime}}{{end}}' "$id" 2>/dev/null)
-    [ $(( now - $(date -d "${tagged% UTC}" +%s 2>/dev/null || echo "$now") )) -gt "$max_age" ] || continue
+    age=$(( now - $(date -d "${tagged% UTC}" +%s 2>/dev/null || echo "$now") ))
+    [ "$age" -ge "$limit" ] || continue
     # shellcheck disable=SC2086  # one tag per word
     { [ -n "$refs" ] && docker rmi $refs; } >/dev/null 2>&1 || docker rmi "$id" >/dev/null 2>&1 || true
   done
+}
+# One line per Docker engine for status output: images, build cache, volumes (size / reclaimable).
+engine_usage() {
+  docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}' 2>/dev/null \
+    | awk -F'|' '$1 != "Containers" { sub(/ .*/, "", $3); printf "%s%s %s (%s reclaimable)", sep, tolower($1), $2, $3; sep=" · " } END { print "" }'
 }
 free_gb() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }'; }
 housekeep() {
@@ -101,10 +114,12 @@ housekeep() {
   before=$(free_gb)
   prune_finished_runs
   docker image prune -f >/dev/null 2>&1 || true
-  prune_build_cache "${ADLC_BUILD_CACHE_KEEP:-8GB}"
+  prune_build_cache "${ADLC_BUILD_CACHE_KEEP:-6GB}"
   docker volume prune -f >/dev/null 2>&1 || true
   # Component logs over 100 MB keep their last 20 MB, trimmed in place: their writers hold the file open.
   find "$LOG_DIR" -maxdepth 1 -name '*.log' -size +100M -exec sh -c 'tail -c 20M "$1" >"$1.tmp" && cat "$1.tmp" >"$1"; rm -f "$1.tmp"' _ {} \; 2>/dev/null || true
   after=$(free_gb)
+  # For the dashboard's Health tab (it has no Docker access).
+  engine_usage >"$STATE_DIR/docker_usage.tmp" 2>/dev/null && mv "$STATE_DIR/docker_usage.tmp" "$STATE_DIR/docker_usage"
   log "housekeeping: finished runs' images, dangling images and build cache pruned (free ${before:-?}GB → ${after:-?}GB)"
 }

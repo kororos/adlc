@@ -304,12 +304,12 @@ const COMPONENTS: { id: Component; name: string; what: string; staleAfterMin: nu
   { id: "rc", name: "Remote Control", what: "your sessions from the Claude app", staleAfterMin: 24 * 60 },
 ]
 
-function DiskCard() {
+function DiskCard({ dockerUsage }: { dockerUsage: Project["dockerUsage"] }) {
   const q = useQuery({ queryKey: queryKeys.disk, queryFn: api.disk, refetchInterval: 60_000 })
   const d = q.data
   if (!d) return null
   const usedPct = Math.round(((d.totalGb - d.freeGb) / d.totalGb) * 100)
-  const low = d.freeGb < d.minFreeGb, warn = d.freeGb < d.minFreeGb * 2
+  const low = d.freeGb < d.minFreeGb, warn = d.freeGb < d.minFreeGb * 2 || usedPct >= d.warnPct
   return (
     <div className={cn("grid gap-2 rounded-xl border bg-card p-4", low && "border-red-500/50")} data-testid="disk-card">
       <div className="flex items-center justify-between gap-2">
@@ -320,8 +320,16 @@ function DiskCard() {
         <div className={cn("h-full rounded-full", low ? "bg-red-500" : warn ? "bg-amber-500" : "bg-primary")} style={{ width: `${usedPct}%` }} />
       </div>
       <p className="text-xs text-muted-foreground">
-        {low ? <>Below {d.minFreeGb} GB no new runs start. On the dev server: <code>adlc prune</code>.</> : <>Housekeeping runs every few hours; below {d.minFreeGb} GB new runs wait.</>}
+        {low ? <>Below {d.minFreeGb} GB no new runs start. On the dev server: <code>adlc prune</code>.</>
+          : warn ? <>{usedPct}% used, above the {d.warnPct}% warning level. On the dev server: <code>adlc status</code> shows what uses it, <code>adlc prune</code> frees it.</>
+          : <>Housekeeping runs every few hours; below {d.minFreeGb} GB new runs wait.</>}
       </p>
+      {dockerUsage && (
+        <p className="text-xs text-muted-foreground" data-testid="docker-usage">
+          <span className="font-medium text-foreground">Agents' Docker:</span> {dockerUsage.text}{" "}
+          <span className="whitespace-nowrap">(<Freshness iso={dockerUsage.updated} staleAfterMin={12 * 60} />)</span>
+        </p>
+      )}
     </div>
   )
 }
@@ -330,7 +338,7 @@ function HealthTab({ p }: { p: Project }) {
   const [log, setLog] = useState<Component>("poller")
   return (
     <div className="grid gap-4">
-      <DiskCard />
+      <DiskCard dockerUsage={p.dockerUsage} />
       <div className="grid gap-3 md:grid-cols-3">
         {COMPONENTS.map((c) => (
           <button key={c.id} type="button" onClick={() => setLog(c.id)}

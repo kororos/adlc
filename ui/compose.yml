@@ -12,6 +12,8 @@ services:
     user: "${ADLC_UID}:${ADLC_GID}"
     environment:
       ADLC_UI_HOSTS: ${ADLC_UI_HOSTS:-}
+      ADLC_MIN_FREE_GB: ${ADLC_MIN_FREE_GB:-15}
+      ADLC_DISK_WARN_PCT: ${ADLC_DISK_WARN_PCT:-75}
     volumes:
       - ${ADLC_ROOT}/config:/data/config:ro
       - ${ADLC_ROOT}/projects:/data/projects:ro

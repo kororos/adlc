@@ -85,6 +85,11 @@ reset_engine() {
   fi
   docker volume prune -af >/dev/null 2>&1 || true
   docker network prune -f >/dev/null 2>&1 || true
+  # Images the job's docker compose built (test environments): the next job rebuilds them from the
+  # build cache, which is capped here too. Pulled images (postgres, …) stay for speed; see prune_engine.
+  ADLC_BUILT_IMAGE_MAX_IDLE_H=0 ADLC_IMAGE_MAX_IDLE_H=876000 prune_finished_runs "$IMAGE $BASE"
+  docker image prune -f >/dev/null 2>&1 || true
+  prune_build_cache "${ADLC_CI_BUILD_CACHE_KEEP:-4GB}"
 }
 
 last_pull=0
@@ -139,24 +144,16 @@ start_runner() {
 }
 
 
-# Once a day, between jobs: drop dangling images and cap the build cache. Images in use (the
-# runner image) and pulled base images stay, so jobs keep their speed.
-# Cap the build cache (Docker 29 renamed --keep-storage to --reserved-space).
-prune_build_cache() {
-  if docker builder prune --help 2>/dev/null | grep -q -- --reserved-space; then
-    docker builder prune -f --reserved-space "$1" >/dev/null 2>&1 || true
-  else
-    docker builder prune -f --keep-storage "$1" >/dev/null 2>&1 || true
-  fi
-}
+# Once a day, between jobs: images no job used for ADLC_CI_IMAGE_MAX_IDLE_H hours (default 24), e.g.
+# publish's local copies of pushed images and base images a project stopped using. The runner images
+# and ADLC_KEEP_IMAGES (the Android emulator) stay. (prune_build_cache comes from adlc-lib.sh.)
 last_prune=0
 prune_engine() {
   local now; now=$(date +%s)
   [ $((now - last_prune)) -gt 86400 ] || return 0
-  docker image prune -f >/dev/null 2>&1 || true
-  prune_build_cache "${ADLC_CI_BUILD_CACHE_KEEP:-5GB}"
+  ADLC_IMAGE_MAX_IDLE_H=${ADLC_CI_IMAGE_MAX_IDLE_H:-24} prune_finished_runs "$IMAGE $BASE"
   last_prune=$now
-  log "housekeeping: dangling images and build cache pruned"
+  log "housekeeping: images idle for ${ADLC_CI_IMAGE_MAX_IDLE_H:-24}h removed; $(engine_usage)"
 }
 
 log "registrar started: one runner at a time with labels $LABELS, image $IMAGE"

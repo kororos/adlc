@@ -56,7 +56,7 @@ export type Run = { file: string; issue: number; started: string; updated: strin
 
 export type Component = "poller" | "deployer" | "rc"
 
-export type Disk = { freeGb: number; totalGb: number; minFreeGb: number }
+export type Disk = { freeGb: number; totalGb: number; minFreeGb: number; warnPct: number }
 
 export type RunProgress = { phase: string; risk: "low" | "medium" | "high" | null; tasks: number | null }
 
@@ -77,6 +77,7 @@ export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention"
   baseDomain: string
   loggedIn: boolean
   devDeployed: string | null
+  dockerUsage: { text: string; updated: string } | null
   health: Record<Component, { updated: string | null; last: string }>
   snapshot: Snapshot | null
 }

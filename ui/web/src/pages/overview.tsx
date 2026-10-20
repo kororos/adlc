@@ -18,7 +18,7 @@ export function OverviewPage() {
   if (!q.data.length) return <EmptyState icon={FolderGit2} title="No projects yet">Create one on the dev server with <code>adlc up &lt;slug&gt; --repo owner/name</code>.</EmptyState>
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
-      {disk.data && disk.data.freeGb < disk.data.minFreeGb * 2 && (
+      {disk.data && (disk.data.freeGb < disk.data.minFreeGb * 2 || (disk.data.totalGb - disk.data.freeGb) * 100 >= disk.data.warnPct * disk.data.totalGb) && (
         <div className={cn("flex items-center gap-3 rounded-xl border p-3 text-sm", disk.data.freeGb < disk.data.minFreeGb ? "border-red-500/50 bg-red-500/5" : "border-amber-500/50 bg-amber-500/5")} data-testid="disk-warning">
           <HardDrive className="size-4 shrink-0" />
           <span>Dev server disk: <b>{disk.data.freeGb} GB free</b> of {disk.data.totalGb} GB.{disk.data.freeGb < disk.data.minFreeGb ? " New runs are on hold until there's more space." : ""} On the dev server: <code>adlc prune</code>.</span>

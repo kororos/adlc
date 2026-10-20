@@ -48,6 +48,10 @@ while :; do
        docker compose -p "$ADLC_SLUG-dev" --project-directory "$REPO_DIR" "${files[@]}" up -d --remove-orphans --wait; then
     echo "$tag" >"$STATE_DIR/dev_deployed"
     log "dev is now at $tag"
+    # The previous versions' images (each ~0.5 GB) are no longer needed: the registry keeps them.
+    old=$(docker images --format '{{.Repository}}:{{.Tag}}' "$ns/*" 2>/dev/null | grep -v ":$tag\$" || true)
+    # shellcheck disable=SC2086  # one image per word; in-use images fail harmlessly (no -f)
+    [ -z "$old" ] || { docker rmi $old >/dev/null 2>&1 || true; log "removed $(wc -w <<<"$old") previous dev image(s)"; }
   else
     log "ERROR: dev deployment of $tag failed; will retry"
   fi

@@ -142,6 +142,9 @@ function state(p) {
   } catch { /* none */ }
   let devDeployed = null
   try { devDeployed = fs.readFileSync(st("dev_deployed"), "utf8").trim() } catch { /* never */ }
+  // The agents' Docker engine (images, build cache, volumes), written by the poller's housekeeping.
+  let dockerUsage = null
+  try { dockerUsage = { text: fs.readFileSync(st("docker_usage"), "utf8").trim(), updated: fs.statSync(st("docker_usage")).mtime.toISOString() } } catch { /* not yet */ }
   const health = Object.fromEntries(COMPONENTS.map((c) => {
     const f = pdir(p.slug, "logs", `${c}.log`)
     return [c, { updated: mtime(f), last: stripAnsi(tailLines(f, 1)[0] ?? "").slice(0, 300) }]
@@ -150,17 +153,19 @@ function state(p) {
     ...p,
     paused: fs.existsSync(st("paused")),
     loggedIn: fs.existsSync(st("logged_in")),
-    backoffUntil, pending, devDeployed, active, health,
+    backoffUntil, pending, devDeployed, dockerUsage, active, health,
     snapshot,
   }
 }
 
 // The dev server's disk (the data mounts live on it). Below the runner's minimum, no runs start.
 const MIN_FREE_GB = Number(process.env.ADLC_MIN_FREE_GB ?? 15)
+// Warn earlier than the hard minimum: growth shows up while there's still room to act.
+const WARN_PCT = Number(process.env.ADLC_DISK_WARN_PCT ?? 75)
 function disk() {
   try {
     const s = fs.statfsSync(DATA)
-    return { freeGb: Math.floor((s.bavail * s.bsize) / 2 ** 30), totalGb: Math.floor((s.blocks * s.bsize) / 2 ** 30), minFreeGb: MIN_FREE_GB }
+    return { freeGb: Math.floor((s.bavail * s.bsize) / 2 ** 30), totalGb: Math.floor((s.blocks * s.bsize) / 2 ** 30), minFreeGb: MIN_FREE_GB, warnPct: WARN_PCT }
   } catch { return null }
 }
 app.get("/api/disk", async () => disk())

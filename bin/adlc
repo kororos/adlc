@@ -289,8 +289,14 @@ cmd_restart() {
 
 # ── Disk ─────────────────────────────────────────────────────────────────────
 disk_line() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { printf "%dGB free of %dGB (%s used)", $4/1048576, $2/1048576, $5 }'; }
+disk_used_pct() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { sub(/%/, "", $5); print $5 }'; }
+# `docker system df` of one engine as one line: images, build cache, volumes (size, reclaimable).
+DF_FMT='{{.Type}}|{{.Size}}|{{.Reclaimable}}'
+usage_fmt() {
+  awk -F'|' '$1 != "Containers" { sub(/ .*/, "", $3); printf "%s%s %s (%s reclaimable)", sep, tolower($1), $2, $3; sep=" · " } END { print "" }'
+}
 host_build_cache_cap() {
-  local cap=${ADLC_HOST_BUILD_CACHE:-10GB}
+  local cap=${ADLC_HOST_BUILD_CACHE:-4GB}
   if docker builder prune --help 2>/dev/null | grep -q -- --reserved-space; then docker builder prune -f --reserved-space "$cap" >/dev/null 2>&1 || true
   else docker builder prune -f --keep-storage "$cap" >/dev/null 2>&1 || true; fi
 }
@@ -308,7 +314,7 @@ cmd_prune() {
   # Host: every untagged image (old builds of anything), then the build cache cap.
   docker image prune -f >/dev/null 2>&1 || true
   host_build_cache_cap
-  ok "host: untagged images removed, build cache capped at ${ADLC_HOST_BUILD_CACHE:-10GB}"
+  ok "host: untagged images removed, build cache capped at ${ADLC_HOST_BUILD_CACHE:-4GB}"
   for f in "$ADLC_ROOT"/config/*.env; do
     [ -e "$f" ] || continue
     slug=$(basename "$f" .env)
@@ -317,7 +323,7 @@ cmd_prune() {
     if runner_exec "$slug" adlc-housekeep >/dev/null 2>&1; then ok "$slug: finished runs' images, untagged images and build cache pruned"
     else warn "$slug: runner not reachable; skipped its Docker sidecar"; fi
     if ci_enabled "$slug"; then
-      compose "$slug" exec -T ci-docker sh -c 'docker image prune -f; docker builder prune -f --reserved-space ${ADLC_CI_BUILD_CACHE_KEEP:-5GB} 2>/dev/null || docker builder prune -f --keep-storage ${ADLC_CI_BUILD_CACHE_KEEP:-5GB}' >/dev/null 2>&1 \
+      compose "$slug" exec -T ci-docker sh -c 'docker image prune -f; docker builder prune -f --reserved-space ${ADLC_CI_BUILD_CACHE_KEEP:-4GB} 2>/dev/null || docker builder prune -f --keep-storage ${ADLC_CI_BUILD_CACHE_KEEP:-4GB}' >/dev/null 2>&1 \
         && ok "$slug: CI engine pruned" || warn "$slug: CI engine not reachable; skipped"
     fi
   done
@@ -399,7 +405,9 @@ cmd_status() {
   local f slug st n free
   free=$(df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }')
   if [ "${free:-0}" -lt "${ADLC_MIN_FREE_GB:-15}" ]; then warn "disk: $(disk_line). Below ${ADLC_MIN_FREE_GB:-15}GB no new runs start: adlc prune"
+  elif [ "$(disk_used_pct)" -ge "${ADLC_DISK_WARN_PCT:-75}" ]; then warn "disk: $(disk_line), above ${ADLC_DISK_WARN_PCT:-75}%. Free space: adlc prune"
   else say "disk: $(disk_line)"; fi
+  say "  host Docker: $(docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
   for f in "$ADLC_ROOT"/config/*.env; do
     [ -e "$f" ] || { say "no projects"; return; }
     slug=$(basename "$f" .env)
@@ -413,6 +421,8 @@ cmd_status() {
     n=$(find "$st/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
     say "    active runs: ${n:-none}"
     [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
+    say "    Docker (agents): $(runner_exec "$slug" docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+    ci_enabled "$slug" && say "    Docker (CI): $(compose "$slug" exec -T ci-docker docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
     [ -e "$st/logged_in" ] || say "    not logged in (adlc login $slug)"
     n=$(runner_exec "$slug" adlc-gh-token --identity 2>/dev/null | cut -f1) || n=""
     if [ -z "${ADLC_GH_APP_ID:-}" ]; then

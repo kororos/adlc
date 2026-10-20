@@ -514,11 +514,20 @@ Which tiers auto-merge is set in `adlc.yaml → autonomy.auto_merge`.
 
 ### Disk housekeeping
 ADLC builds many images (every verify attempt rebuilds a run's images) and would fill the disk without cleanup. It cleans up after itself:
-- **Every few hours** (`ADLC_HOUSEKEEP_HOURS`, default 6) the poller cleans the agents' Docker engine: images no container uses that weren't built or pulled for `ADLC_IMAGE_MAX_IDLE_H` hours (default 48), whatever the agents named them; untagged images; the build cache above `ADLC_BUILD_CACHE_KEEP` (default 8 GB). Large images listed in `ADLC_KEEP_IMAGES` (default: the Android emulator, ~11 GB) are kept. Oversized component logs are trimmed. Set these in `/srv/adlc/config/<slug>.env`; on a small disk, e.g. `ADLC_IMAGE_MAX_IDLE_H=12` and `ADLC_BUILD_CACHE_KEEP=4GB`.
-- **After each run's issue closes**, its containers, volumes and built images are removed.
-- **Daily**, the CI engine prunes untagged images and caps its build cache (`ADLC_CI_BUILD_CACHE_KEEP`, 5 GB). The egress access log rotates at 50 MB.
-- **After `adlc up` / `adlc ui up`**, the ADLC images they replaced are removed and the host build cache is capped (`ADLC_HOST_BUILD_CACHE`, 10 GB).
-- **Disk guard:** below `ADLC_MIN_FREE_GB` (default 15) free, the poller runs housekeeping first and, if still low, starts no new runs (logged once). `adlc status` and the dashboard show free space.
+- **Every few hours** (`ADLC_HOUSEKEEP_HOURS`, default 6) the poller cleans the agents' Docker engine. It removes images no container uses, by how long ago they were last built, pulled or tagged:
+  - images docker compose built (test environments, whatever the agents named them) after `ADLC_BUILT_IMAGE_MAX_IDLE_H` hours (default 6),
+  - everything else after `ADLC_IMAGE_MAX_IDLE_H` (default 48).
+
+  It also removes untagged images and caps the build cache at `ADLC_BUILD_CACHE_KEEP` (default 6 GB). Large images listed in `ADLC_KEEP_IMAGES` (default: the Android emulator, ~11 GB) are kept, and oversized component logs are trimmed. Set these in `/srv/adlc/config/<slug>.env`.
+- **After each dev deployment**, the dev environment's previous `sha-…` images are removed; the registry still has them.
+- **After each run's issue closes**, its containers, volumes, built images and worktree are removed.
+- **CI engine, after every job:** the images that job built with docker compose are removed, and the build cache is capped at `ADLC_CI_BUILD_CACHE_KEEP` (default 4 GB). **Daily**, images no job used for `ADLC_CI_IMAGE_MAX_IDLE_H` hours (default 24) are removed, e.g. publish's local copies of pushed images. The runner images and `ADLC_KEEP_IMAGES` stay. The egress access log rotates at 50 MB.
+- **After `adlc up` / `adlc ui up`**, the ADLC images they replaced are removed and the host build cache is capped (`ADLC_HOST_BUILD_CACHE`, default 4 GB).
+- **Visibility:**
+  - `adlc status` shows free space and one usage line per Docker engine (host, agents, CI): images, build cache and volumes, with what's reclaimable. It warns above `ADLC_DISK_WARN_PCT` (default 75%) used.
+  - The dashboard shows the same warning, and the agents' engine usage on a project's Health tab.
+- **Disk guard:** below `ADLC_MIN_FREE_GB` (default 15) free, the poller runs housekeeping first. If space is still low, it starts no new runs (logged once).
+- Docker volumes and buildx builders that ADLC didn't create, such as other projects' or a `docker buildx create` builder, are never touched. Check them with `docker system df -v` and `docker buildx ls`.
 - **Now:** `adlc prune [slug]` does all of the above immediately and prints free space before and after.
 
 ### Dashboard (`adlc ui`)
