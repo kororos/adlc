@@ -1,0 +1,48 @@
+# .github/workflows/release.yml: release-please opens and updates the release PR (changelog and
+# version bumps from Conventional Commits). It never creates tags or releases: the owner finishes a
+# release by hand (docs/ops/release.md).
+# The repo must allow GitHub Actions to create pull requests (provision.sh sets it).
+# A PR opened with GITHUB_TOKEN starts no workflows, so this job dispatches the workflows that hold
+# the required checks on the release branch. Their gate sees a version-only change and reports
+# success in seconds. Add every workflow with required checks to WORKFLOWS.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    # Hosted runner: the job only calls the GitHub API, so it doesn't queue behind the
+    # one-job-at-a-time self-hosted test runner.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write   # dispatch the required-check workflows on the release branch
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+      - name: Run the required checks on the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOWS: ci.yml e2e.yml
+        run: |
+          branch=$(gh pr list -R "$GITHUB_REPOSITORY" --state open --json headRefName \
+                     --jq '.[] | select(.headRefName | startswith("release-please--")) | .headRefName' | head -n 1)
+          if [ -z "$branch" ]; then echo "no open release PR"; exit 0; fi
+          for w in $WORKFLOWS; do
+            gh workflow run "$w" -R "$GITHUB_REPOSITORY" --ref "$branch"
+            echo "dispatched $w on $branch"
+          done

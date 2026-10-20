@@ -2,6 +2,9 @@ name: ci
 on:
   pull_request:
   push: { branches: [main] }
+  # release.yml dispatches this on the release-please branch: its PR is opened with GITHUB_TOKEN,
+  # which starts no workflows, so its required checks would otherwise never report.
+  workflow_dispatch:
 permissions: { contents: read }
 concurrency: { group: "ci-${{ github.ref }}", cancel-in-progress: true }
 

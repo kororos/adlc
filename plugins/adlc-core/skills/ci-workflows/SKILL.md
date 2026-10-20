@@ -13,6 +13,7 @@ Templates are in `templates/`. Copy them to `.github/workflows/` and adapt. Rule
 - **Runners:** `runs-on` comes from repository variables: `ADLC_TEST_RUNS_ON` (default `"ubuntu-latest"`, or `["self-hosted","adlc-test"]`) and `ADLC_PUBLISH_RUNS_ON` (`["self-hosted","adlc-publish"]`). Set them with `gh variable set` (JSON).
 - **Publish** only on `push` to the default branch, with `environment: publish` (registry push credentials live only there), `docker build --pull`, and tags `sha-<7>` plus the version on release.
 - **Permissions:** least privilege per workflow (`contents: read` by default). No `pull_request_target`. Never echo secrets.
+- **Release PR checks:** release-please's PR is opened with `GITHUB_TOKEN`, which starts no workflows. So every workflow with required checks also has `workflow_dispatch:`, and `release.yml` dispatches them on the release branch (list them in its `WORKFLOWS`). The gate skips a version-only change, so they report success quickly. Without this the release PR waits for "expected" checks.
 - **Prod is not deployed from CI.** The owner runs `adlc-swarm-deploy` on the manager. Don't add deploy jobs, and never add push or tag triggers that touch prod.
 - Changes under `.github/` need the owner's review (CODEOWNERS).
 
@@ -21,6 +22,7 @@ Templates are in `templates/`. Copy them to `.github/workflows/` and adapt. Rule
 | `adlc-gate.sh` | copy to `.github/scripts/`: decides per job whether to run (see "Gate first") |
 | `ci.yml` | PR and main checks from `adlc.build.yaml` |
 | `publish.yml` | build and push images to the registry (`registry.namespace`, `registry.images` in adlc.yaml) |
+| `release.yml` | release-please release PR (when `release.tool` is release-please); dispatches the required-check workflows on it |
 | `nightly.yml` | full test and e2e suite on main; opens or updates an `adlc:regression` issue on failure |
 
 Stack-specific e2e jobs (`e2e-web`, `e2e-android`, `e2e-ios`) are in the stack pack (for React Native: `stack-react-native:rn-test-env`, `templates/e2e.yml`).

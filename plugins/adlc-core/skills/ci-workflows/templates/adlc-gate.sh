@@ -7,7 +7,9 @@
 # (still reporting success) when:
 #   - adlc.build.yaml is missing, or its `status` isn't `active` (the walking skeleton sets it) and
 #     this job isn't listed in `ci.active` (jobs that already work, switched on one by one),
-#   - the change only touches docs (docs/, .adlc/, *.md), or
+#   - the change only touches docs (docs/, .adlc/, *.md),
+#   - the change is a release-please release PR: only *.md, .release-please-manifest.json and the
+#     version fields release-please-config.json names (checked: nothing else in those files moved), or
 #   - path globs are given and no changed file matches one (e.g. 'apps/mobile/*' for e2e-android;
 #     `*` also matches `/`).
 # Never use workflow-level `paths:` filters on required checks instead: a workflow that doesn't
@@ -50,12 +52,45 @@ if [ "$status" != active ]; then
     || skip "adlc.build.yaml status is '$status' and ci.active doesn't list '${GITHUB_JOB:-?}' (the walking skeleton switches jobs on)"
 fi
 
+# The JSON files release-please bumps and the field it bumps in each (path<TAB>yq path): each
+# package's package.json (release-type node) and its json extra-files with a plain $.a.b jsonpath.
+release_fields() {
+  yq -p json -o tsv '(."release-type" // "") as $rt | .packages | to_entries | .[]
+    | select((.value."release-type" // $rt) == "node")
+    | [(.key | sub("^\\.$"; "") | sub("([^/])$"; "${1}/")) + "package.json", ".version"]' \
+    release-please-config.json
+  yq -p json -o tsv '.packages | to_entries | .[] | .key as $k | (.value."extra-files" // [])[]
+    | select(tag == "!!map" and .type == "json" and (.jsonpath | test("^\\$(\\.[A-Za-z0-9_-]+)+$")))
+    | [($k | sub("^\\.$"; "") | sub("([^/])$"; "${1}/")) + .path, (.jsonpath | sub("^\\$"; ""))]' \
+    release-please-config.json
+}
+
+# True when every changed file is release-please's own: *.md, the manifest, or a JSON file in which
+# only its version field differs. A file it doesn't know about makes this false (the jobs run).
+release_only() {
+  [ -f release-please-config.json ] || return 1
+  local fields f path before after
+  fields=$(release_fields 2>/dev/null) || return 1
+  while IFS= read -r f; do
+    case $f in *.md|.release-please-manifest.json) continue ;; esac
+    path=$(awk -F'\t' -v f="$f" '$1 == f { print $2; exit }' <<<"$fields")
+    [ -n "$path" ] || return 1
+    before=$(git show "HEAD^1:$f" | yq -p json -o json "del($path)") || return 1
+    after=$(git show "HEAD:$f" | yq -p json -o json "del($path)") || return 1
+    [ "$before" = "$after" ] || return 1
+  done <<<"$1"
+}
+
 # Pull request: the checkout is the merge commit, whose first parent is the base branch tip.
-# Push to main: squash merges make each push one commit. (Needs actions/checkout fetch-depth: 2.)
+# Push to main: squash merges make each push one commit. Dispatched run on a release-please
+# branch (see release.yml): one commit on top of the default branch. (Needs fetch-depth: 2.)
 if git rev-parse --verify --quiet HEAD^1 >/dev/null; then
   changed=$(git diff --name-only HEAD^1 HEAD)
   if [ -n "$changed" ] && ! grep -qvE '^(docs/|\.adlc/)|\.md$' <<<"$changed"; then
     skip "docs-only change"
+  fi
+  if [ -n "$changed" ] && release_only "$changed"; then
+    skip "release-please version bump only"
   fi
   if [ $# -gt 0 ]; then
     match=false
