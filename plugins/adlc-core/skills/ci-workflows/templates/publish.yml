@@ -19,13 +19,24 @@ jobs:
         env: { USER: "${{ secrets.HARBOR_PUSH_USER }}", TOKEN: "${{ secrets.HARBOR_PUSH_TOKEN }}" }
         run: printf '%s' "$TOKEN" | docker login "$(yq '.registry.namespace | split("/") | .[0]' adlc.yaml)" -u "$USER" --password-stdin
       - if: steps.gate.outputs.run == 'true'
-        name: Build and push
+        name: Build, scan and push
+        env:
+          # Same scanner as Harbor (Trivy). An image at or above this severity is not pushed: the
+          # registry's "prevent vulnerable images" policy would refuse to serve it, and the dev
+          # deployer would wait for it forever. Keep it equal to the Harbor project's threshold.
+          SCAN_FAIL_ON: ${{ vars.ADLC_SCAN_FAIL_ON || 'CRITICAL' }}
         run: |
           ns=$(yq '.registry.namespace' adlc.yaml)
           tag="sha-${GITHUB_SHA::7}"
           extra=""; [ "${{ github.event_name }}" = release ] && extra="${{ github.event.release.tag_name }}"
+          scan() { docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.58.1 image --quiet --scanners vuln "$@"; }
           for img in $(yq '.registry.images[]' adlc.yaml); do
             docker build --pull -f "apps/$img/Dockerfile" --target prod -t "$ns/$img:$tag" ${extra:+-t "$ns/$img:$extra"} .
+            scan --severity HIGH,CRITICAL "$ns/$img:$tag" || true     # report
+            if ! scan --severity "$SCAN_FAIL_ON" --exit-code 1 --format json "$ns/$img:$tag" >/dev/null; then
+              echo "::error title=$img image not published::$SCAN_FAIL_ON vulnerabilities in $ns/$img:$tag (table above). Update the base image or the dependencies."
+              exit 1
+            fi
             docker push --all-tags "$ns/$img"
           done
       - if: always() && steps.gate.outputs.run == 'true'

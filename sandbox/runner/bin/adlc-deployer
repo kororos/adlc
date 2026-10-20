@@ -23,10 +23,21 @@ while :; do
 
   ns=$(cfg '.registry.namespace')
   [ -n "$ns" ] && [ "$ns" != tbd ] || { log "registry.namespace is not set; skipping"; continue; }
-  missing=""
+  missing="" refused=""
   for img in $(cfg '.registry.images[]'); do
-    docker manifest inspect "$ns/$img:$tag" >/dev/null 2>&1 || missing="$missing $img"
+    if ! err=$(docker manifest inspect "$ns/$img:$tag" 2>&1 >/dev/null); then
+      # Harbor answers 412 when its "prevent vulnerable images" policy blocks the pull; any other
+      # error that isn't "not found" (auth, network) is worth showing too.
+      case $err in
+        *"no such manifest"*|*"manifest unknown"*|*"not found"*) missing="$missing $img" ;;
+        *) refused="$refused $img ($(tr '\n' ' ' <<<"$err" | cut -c1-200))" ;;
+      esac
+    fi
   done
+  if [ -n "$refused" ]; then
+    log "ERROR: the registry refuses $tag:$refused. A vulnerability policy block means the image must be fixed (or the registry threshold changed); the publish workflow's scan shows the findings"
+    continue
+  fi
   if [ -n "$missing" ]; then log "waiting for CI to publish $tag:$missing"; continue; fi
 
   files=(-f "$REPO_DIR/$base"); [ -n "$dev" ] && [ -f "$REPO_DIR/$dev" ] && files+=(-f "$REPO_DIR/$dev")

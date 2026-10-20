@@ -8,7 +8,7 @@ svc="${STACK}-migrate-${IMAGE_TAG}"
 docker service create --detach=false --with-registry-auth --name "$svc" \
   --restart-condition none --network "${STACK}_internal" \
   --secret app_database_url_v1 -e DATABASE_URL_FILE=/run/secrets/app_database_url_v1 \
-  "$ns/api:$IMAGE_TAG" node dist/migrate.js >/dev/null
+  "$ns/api:$IMAGE_TAG" dist/migrate.js >/dev/null   # the image's entrypoint is node (distroless)
 state=$(docker service ps "$svc" --format '{{.CurrentState}}' | head -1)
 docker service logs "$svc" 2>/dev/null | tail -20
 docker service rm "$svc" >/dev/null

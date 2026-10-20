@@ -10,6 +10,10 @@
 ghcr.io
 # Docs for agents
 .context7.com
+# Google container registries: distroless runtime images (gcr.io) and the Trivy vulnerability DB
+# (mirror.gcr.io; ghcr.io is its fallback). Blobs are served from the same hosts.
+gcr.io
+mirror.gcr.io
 # Docker Hub (images for test environments)
 .docker.io
 .docker.com

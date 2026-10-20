@@ -1,10 +1,11 @@
 # apps/api/Dockerfile (build context: repo root). Targets: dev (watch) and prod.
-FROM node:22-bookworm-slim AS base
+FROM node:22-trixie-slim AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 # Builds behind the ADLC egress proxy: Node's fetch (used by corepack to download pnpm) only
 # honours HTTP(S)_PROXY with this set. The prod stage starts from a fresh image without it.
 ENV NODE_USE_ENV_PROXY=1
-RUN corepack enable
+# /nodejs/bin/node is where the distroless prod image keeps node: one healthcheck works for all targets.
+RUN corepack enable && mkdir -p /nodejs/bin && ln -s "$(command -v node)" /nodejs/bin/node
 WORKDIR /repo
 
 FROM base AS deps
@@ -21,11 +22,15 @@ FROM deps AS build
 COPY . .
 RUN pnpm --filter api build && pnpm --filter api deploy --prod /out
 
-FROM node:22-bookworm-slim AS prod
+# Runtime: distroless Node (same Debian 13 glibc as the build stage, so native modules work). No
+# shell, package manager, npm or corepack: far fewer CVEs, so the registry's vulnerability policy
+# lets it be pulled. node is /nodejs/bin/node (the entrypoint); the user is nonroot (65532).
+FROM gcr.io/distroless/nodejs22-debian13:nonroot AS prod
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=build --chown=node:node /out ./
-USER node
+COPY --from=build --chown=65532:65532 /out ./
+USER 65532:65532
 EXPOSE 3000
-HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD node -e "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "dist/main.js"]
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+CMD ["dist/main.js"]
