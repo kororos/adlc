@@ -3,8 +3,9 @@
 # release by hand (docs/ops/release.md).
 # The repo must allow GitHub Actions to create pull requests (provision.sh sets it).
 # A PR opened with GITHUB_TOKEN starts no workflows, so this job dispatches the workflows that hold
-# the required checks on the release branch. Their gate sees a version-only change and reports
-# success in seconds. Add every workflow with required checks to WORKFLOWS.
+# the required checks on the release branch, after rebasing the release PR if it is behind (release-
+# please rebuilds it only for feat/fix/perf commits). Their gate sees a version-only change and
+# reports success in seconds. Add every workflow with required checks to WORKFLOWS.
 name: release
 
 on:
@@ -39,9 +40,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WORKFLOWS: ci.yml e2e.yml
         run: |
-          branch=$(gh pr list -R "$GITHUB_REPOSITORY" --state open --json headRefName \
-                     --jq '.[] | select(.headRefName | startswith("release-please--")) | .headRefName' | head -n 1)
-          if [ -z "$branch" ]; then echo "no open release PR"; exit 0; fi
+          pr=$(gh pr list -R "$GITHUB_REPOSITORY" --state open --json number,headRefName,baseRefName,headRefOid \
+                 --jq '[.[] | select(.headRefName | startswith("release-please--"))][0] // empty
+                       | "\(.number) \(.headRefName) \(.baseRefName) \(.headRefOid)"')
+          if [ -z "$pr" ]; then echo "no open release PR"; exit 0; fi
+          read -r n branch base head <<<"$pr"
+          # release-please rebuilds its PR only for releasable commits (feat, fix, perf). After any
+          # other merge the PR is behind its base: it can't merge, and its workflows may lack the
+          # current triggers. Rebase it first (the commit stays release-please's version bump).
+          behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/$base...$head" --jq .behind_by)
+          if [ "$behind" != 0 ]; then
+            if ! gh pr update-branch "$n" -R "$GITHUB_REPOSITORY" --rebase; then
+              echo "::warning::release PR #$n is $behind commit(s) behind $base and could not be rebased here. Use 'Update branch' on the PR: that also starts its checks."
+              exit 0
+            fi
+            for _ in $(seq 1 30); do
+              [ "$(gh pr view "$n" -R "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)" != "$head" ] && break
+              sleep 2
+            done
+            echo "rebased #$n onto $base ($behind commit(s) behind)"
+          fi
           for w in $WORKFLOWS; do
             gh workflow run "$w" -R "$GITHUB_REPOSITORY" --ref "$branch"
             echo "dispatched $w on $branch"
