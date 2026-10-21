@@ -45,14 +45,26 @@ runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
 # The runner's work folder (work_folder=_work under its home); see start_runner.
 WORK=/home/runner/_work
 # Bump when start_runner changes how runners are started, so idle runners are replaced.
-SPEC=5
+SPEC=6
 # Caches that survive between jobs (named volumes labelled org.adlc.ci.cache, which reset_engine
 # keeps): Gradle (dependencies, wrapper, build cache) and the Android SDK/NDK, so Android builds
 # don't start from cold. A volume above ADLC_CI_CACHE_MAX_GB is emptied by the daily housekeeping.
 # PR jobs can write to them; each runner start rewrites gradle.properties and drops Gradle init
 # scripts, and the publish job doesn't run Gradle.
-CACHES="adlc-ci-cache-gradle:/home/runner/.gradle adlc-ci-cache-android:/home/runner/.android"
+# Only the roles that build Android apps need them (ADLC_CI_CACHES=on, set for kvm in compose.ci.yml);
+# on other engines, cache volumes left from before are removed once no runner holds them.
+CACHE_VOLUMES="adlc-ci-cache-gradle adlc-ci-cache-android"
+CACHES=""
+[ "${ADLC_CI_CACHES:-off}" = on ] && CACHES="adlc-ci-cache-gradle:/home/runner/.gradle adlc-ci-cache-android:/home/runner/.android"
 CACHE_LABEL=org.adlc.ci.cache
+drop_unused_caches() {
+  [ -z "$CACHES" ] || return 0
+  local v
+  for v in $CACHE_VOLUMES; do
+    docker volume inspect "$v" >/dev/null 2>&1 || continue
+    docker volume rm "$v" >/dev/null 2>&1 && log "removed cache volume $v (this runner role doesn't use it)"
+  done
+}
 ensure_caches() {
   local c vol
   for c in $CACHES; do
@@ -100,6 +112,7 @@ reset_engine() {
     log "removed $(wc -l <<<"$ids") leftover container(s) from the previous job"
   fi
   docker volume prune -af --filter "label!=$CACHE_LABEL" >/dev/null 2>&1 || true
+  drop_unused_caches
   docker network prune -f >/dev/null 2>&1 || true
   # Images the job's docker compose built (test environments): the next job rebuilds them from the
   # build cache, which is capped here too. Pulled images (postgres, …) stay for speed; see prune_engine.

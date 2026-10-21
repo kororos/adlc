@@ -130,6 +130,7 @@ services:
       <<: *ci-env
       ADLC_CI_ROLE: kvm
       ADLC_CI_LABELS: self-hosted,linux,adlc-kvm
+      ADLC_CI_CACHES: "on"          # Gradle and Android SDK caches survive between jobs
       ADLC_KEEP_IMAGES: ${ADLC_KEEP_IMAGES:-budtmo/docker-android}
       NO_PROXY: localhost,127.0.0.1,ci-docker-kvm
       DOCKER_HOST: tcp://ci-docker-kvm:2376
