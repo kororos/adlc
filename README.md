@@ -504,6 +504,7 @@ adlc:pr-open ──(checks fail)──► adlc:ready (rework)       at most auto
 
   This happens at most once per commit and `autonomy.ci_rework_max` times per PR (default 2). After that the issue gets `adlc:needs-human-review`.
 - **`main`:** if a push workflow fails on the latest commit, the poller opens one `adlc:regression` issue for it, which the agent picks up like the nightly's.
+- **Merge conflicts:** an agent's PR that conflicts with its base goes back to the agent the same way, with the same limits. GitHub runs no PR checks while a PR has conflicts, so this is checked first. The agent merges the base, resolves the conflicts keeping both sides' intent, and verifies again. If a conflict needs a product decision, it asks.
 - **Behind `main`:** branch protection requires PRs to be up to date, so any merge leaves the other open PRs unmergeable. When an agent's PR has all checks green but is behind its base, the poller merges the base into it (a merge, not a rebase), and its checks run again on the current base. Low and medium risk PRs then auto-merge; high-risk ones reach you already up to date. Switch it off with `autonomy.keep_prs_current: false`.
 - **PRs from people** (yours, Renovate's) are left alone.
 - Switch it off with `autonomy.ci_auto_rework: false` in `adlc.yaml`.

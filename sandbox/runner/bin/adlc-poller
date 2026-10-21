@@ -238,44 +238,58 @@ keep_current() { # keep_current <pr> <issue> <head sha>
     log "WARN: #$n: PR #$pr is $behind commit(s) behind $base but could not be updated (retrying next cycle)"
   fi
 }
+# Send an agent PR back to its issue's delivery run. Shared by failed checks and merge conflicts: once per
+# head commit, at most autonomy.ci_rework_max automatic reworks per PR, then adlc:needs-human-review.
+request_rework() { # request_rework <pr> <issue> <head sha> <what> <comment>
+  local pr=$1 n=$2 sha=$3 what=$4 body=$5 max f tried
+  max=$(cfg '.autonomy.ci_rework_max'); max=${max:-${ADLC_CI_REWORK_MAX:-2}}
+  is_running "$n" && return 0
+  has_label "$n" adlc:pr-open || return 0
+  f="$CI_DIR/$pr"
+  grep -qx "$sha" "$f" 2>/dev/null && return 0         # this commit was handled already
+  tried=$(grep -c . "$f" 2>/dev/null || true); tried=${tried:-0}
+  if [ "$tried" -ge "$max" ]; then
+    echo "$sha" >>"$f"
+    gh pr comment "$pr" -R "$R" --body "ADLC: $what on \`${sha:0:7}\` after $tried automatic rework(s). Leaving it to a person." >/dev/null 2>&1 || true
+    label "$n" "" adlc:needs-human-review
+    log "#$n: PR #$pr: $what after $tried rework(s); needs human review"
+    return 0
+  fi
+  gh pr comment "$pr" -R "$R" --body "$body
+The delivery agent will rework this PR (automatic attempt $((tried + 1)) of $max)." >/dev/null 2>&1 \
+    || { log "WARN: could not comment on PR #$pr (retrying next cycle)"; return 0; }
+  # Recorded only once the comment is posted, so a failed attempt is retried.
+  echo "$sha" >>"$f"
+  label "$n" adlc:pr-open adlc:ready
+  log "#$n: PR #$pr: $what on ${sha:0:7}; queued for rework ($((tried + 1))/$max)"
+}
 watch_pr_checks() {
   ci_auto || return 0
-  local max rows pr branch sha failed n f tried
-  max=$(cfg '.autonomy.ci_rework_max'); max=${max:-${ADLC_CI_REWORK_MAX:-2}}
+  local rows pr branch sha mergeable base failed n
   mkdir -p "$CI_DIR"
-  # Agents' PRs: number, branch, head sha. Their checks come from the Actions runs for the head commit:
-  # the App token has Actions: read, while a PR's check rollup needs Checks: read, which it lacks.
-  rows=$(gh pr list -R "$R" --state open --limit 100 --json number,headRefName,headRefOid \
-           --jq '.[] | select(.headRefName | test("^adlc/[0-9]+-")) | [.number, .headRefName, .headRefOid] | @tsv' 2>/dev/null) || return 0
-  while IFS=$'\t' read -r pr branch sha; do
+  # Agents' PRs: number, branch, head sha, mergeable (MERGEABLE, CONFLICTING or UNKNOWN while GitHub
+  # computes it), base branch. Their checks come from the Actions runs for the head commit: the App token
+  # has Actions: read, while a PR's check rollup needs Checks: read, which it lacks.
+  rows=$(gh pr list -R "$R" --state open --limit 100 --json number,headRefName,headRefOid,mergeable,baseRefName \
+           --jq '.[] | select(.headRefName | test("^adlc/[0-9]+-")) | [.number, .headRefName, .headRefOid, .mergeable, .baseRefName] | @tsv' 2>/dev/null) || return 0
+  while IFS=$'\t' read -r pr branch sha mergeable base; do
     [ -n "$pr" ] || continue
+    n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
+    # Conflicts first: GitHub runs no pull_request workflows for a conflicting PR, so its checks would
+    # look pending forever.
+    if [ "$mergeable" = CONFLICTING ]; then
+      request_rework "$pr" "$n" "$sha" "merge conflicts with $base" "ADLC: this PR has merge conflicts with \`$base\` at \`${sha:0:7}\`. Merge \`$base\` into the branch and resolve them, keeping the intent of both sides; then verify and review again."
+      continue
+    fi
     # "PENDING" while any run for the commit is unfinished (or none started yet); else the failed
     # workflows as "name <url>" joined by "; " (empty = all green). Superseded runs (cancelled) don't count.
     failed=$(gh run list -R "$R" --commit "$sha" --event pull_request --limit 50 --json name,status,conclusion,url --jq '
       if length == 0 or any(.[]; .status != "completed") then "PENDING" else
       [.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | "\(.name) <\(.url)>"] | join("; ") end' 2>/dev/null) || continue
     [ "$failed" != PENDING ] || continue
-    n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
     if [ -z "$failed" ]; then keep_current "$pr" "$n" "$sha"; continue; fi
-    is_running "$n" && continue
-    has_label "$n" adlc:pr-open || continue
-    f="$CI_DIR/$pr"
-    grep -qx "$sha" "$f" 2>/dev/null && continue          # this commit was handled already
-    tried=$(grep -c . "$f" 2>/dev/null || true); tried=${tried:-0}
-    if [ "$tried" -ge "$max" ]; then
-      echo "$sha" >>"$f"
-      gh pr comment "$pr" -R "$R" --body "ADLC: checks failed again on \`${sha:0:7}\` after $tried automatic rework(s): ${failed}. Leaving it to a person." >/dev/null 2>&1 || true
-      label "$n" "" adlc:needs-human-review
-      log "#$n: PR #$pr checks still failing after $tried rework(s); needs human review"
-      continue
-    fi
-    gh pr comment "$pr" -R "$R" --body "ADLC: required checks failed on \`${sha:0:7}\`: ${failed}
-The delivery agent will rework this PR (automatic attempt $((tried + 1)) of $max). It fixes code and test failures; failures of the environment (runner, emulator, network, disk) it reports instead of changing the code or the tests." >/dev/null 2>&1 \
-      || { log "WARN: could not comment on PR #$pr (retrying next cycle)"; continue; }
-    # Recorded only once the comment is posted, so a failed attempt is retried.
-    echo "$sha" >>"$f"
-    label "$n" adlc:pr-open adlc:ready
-    log "#$n: PR #$pr checks failed on ${sha:0:7} ($failed); queued for rework ($((tried + 1))/$max)"
+    request_rework "$pr" "$n" "$sha" "checks failed" "ADLC: required checks failed on \`${sha:0:7}\`: ${failed}
+It fixes code and test failures; failures of the environment (runner, emulator, network, disk) it reports instead of changing the code or the tests."
   done <<<"$rows"
 }
 # A push workflow that fails on the default branch's head: one regression issue per commit (the agent
