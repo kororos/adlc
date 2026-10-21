@@ -13,8 +13,11 @@ JSON
 # compiles in-process instead of a separate daemon), at most ADLC_CI_GRADLE_WORKERS (2) workers and a
 # fixed heap, so a build plus its test environment stay inside the host's RAM. User-level
 # gradle.properties override the project's for these keys.
+# ~/.gradle is a cache volume shared by jobs (see adlc-ci): rewrite the settings and drop init scripts.
 mkdir -p "$HOME/.gradle"
+rm -rf "$HOME/.gradle/init.d" "$HOME/.gradle/init.gradle"
 cat >"$HOME/.gradle/gradle.properties" <<PROPS
+org.gradle.caching=true
 kotlin.compiler.execution.strategy=in-process
 org.gradle.workers.max=${ADLC_CI_GRADLE_WORKERS:-2}
 org.gradle.jvmargs=-Xmx${ADLC_CI_GRADLE_HEAP:-3g} -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8

@@ -522,6 +522,7 @@ ADLC builds many images (every verify attempt rebuilds a run's images) and would
 - **After each dev deployment**, the dev environment's previous `sha-…` images are removed; the registry still has them.
 - **After each run's issue closes**, its containers, volumes, built images and worktree are removed.
 - **CI engine, after every job:** the images that job built with docker compose are removed, and the build cache is capped at `ADLC_CI_BUILD_CACHE_KEEP` (default 4 GB). **Daily**, images no job used for `ADLC_CI_IMAGE_MAX_IDLE_H` hours (default 24) are removed, e.g. publish's local copies of pushed images. The runner images and `ADLC_KEEP_IMAGES` stay. The egress access log rotates at 50 MB.
+- **CI build caches:** Gradle (`~/.gradle`) and the Android SDK/NDK (`~/.android`) live in two volumes in the CI engine that survive between jobs, so Android builds don't start from cold. Each is emptied by the daily housekeeping once it's above `ADLC_CI_CACHE_MAX_GB` (default 12). Every runner start rewrites `gradle.properties` and removes Gradle init scripts, so a job can't leave build settings for the next one.
 - **After `adlc up` / `adlc ui up`**, the ADLC images they replaced are removed and the host build cache is capped (`ADLC_HOST_BUILD_CACHE`, default 4 GB).
 - **Visibility:**
   - `adlc status` shows free space and one usage line per Docker engine (host, agents, CI): images, build cache and volumes, with what's reclaimable. It warns above `ADLC_DISK_WARN_PCT` (default 75%) used.

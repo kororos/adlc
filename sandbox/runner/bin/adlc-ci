@@ -46,7 +46,24 @@ runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
 # The runner's work folder (work_folder=_work under its home); see start_runner.
 WORK=/home/runner/_work
 # Bump when start_runner changes how runners are started, so idle runners are replaced.
-SPEC=4
+SPEC=5
+# Caches that survive between jobs (named volumes labelled org.adlc.ci.cache, which reset_engine
+# keeps): Gradle (dependencies, wrapper, build cache) and the Android SDK/NDK, so Android builds
+# don't start from cold. A volume above ADLC_CI_CACHE_MAX_GB is emptied by the daily housekeeping.
+# PR jobs can write to them; each runner start rewrites gradle.properties and drops Gradle init
+# scripts, and the publish job doesn't run Gradle.
+CACHES="adlc-ci-cache-gradle:/home/runner/.gradle adlc-ci-cache-android:/home/runner/.android"
+CACHE_LABEL=org.adlc.ci.cache
+ensure_caches() {
+  local c vol
+  for c in $CACHES; do
+    vol=${c%%:*}
+    docker volume inspect "$vol" >/dev/null 2>&1 || docker volume create --label "$CACHE_LABEL=true" "$vol" >/dev/null || return 1
+    docker run --rm --user root --entrypoint sh -v "$vol:/c" "$IMAGE" \
+      -c 'chown runner:runner /c && rm -rf /c/init.d /c/init.gradle /c/gradle.properties' >/dev/null 2>&1 || return 1
+  done
+}
+cache_mounts() { local c; for c in $CACHES; do printf -- '-v %s ' "$c"; done; }
 # Hosts jobs reach directly, not through the egress proxy: the run's own test environment
 # (http://<run>.app.<project>.ci.internal via the job's Traefik) and the dev domain.
 JOB_NO_PROXY=localhost,127.0.0.1,.lan,.internal
@@ -83,7 +100,7 @@ reset_engine() {
     xargs docker rm -f <<<"$ids" >/dev/null 2>&1
     log "removed $(wc -l <<<"$ids") leftover container(s) from the previous job"
   fi
-  docker volume prune -af >/dev/null 2>&1 || true
+  docker volume prune -af --filter "label!=$CACHE_LABEL" >/dev/null 2>&1 || true
   docker network prune -f >/dev/null 2>&1 || true
   # Images the job's docker compose built (test environments): the next job rebuilds them from the
   # build cache, which is capped here too. Pulled images (postgres, …) stay for speed; see prune_engine.
@@ -136,8 +153,10 @@ start_runner() {
   docker run --rm --user root --entrypoint sh -v "$(dirname "$WORK")":/h "$IMAGE" \
     -c "rm -rf /h/$(basename "$WORK") && mkdir -p /h/$(basename "$WORK") && chown runner:runner /h/$(basename "$WORK")" >/dev/null 2>&1 \
     || { log "ERROR: cannot prepare the job workspace $WORK on the CI engine"; return 1; }
+  ensure_caches || log "WARN: cannot prepare the build caches; this job starts cold"
+  # shellcheck disable=SC2046  # cache_mounts prints -v options
   docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" --label "adlc.ci.spec=$SPEC" \
-    -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$WORK:$WORK" \
+    -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$WORK:$WORK" $(cache_mounts) \
     -e NO_PROXY="$JOB_NO_PROXY" -e no_proxy="$JOB_NO_PROXY" -e ADLC_JOB_NO_PROXY="$JOB_NO_PROXY" \
     "$IMAGE" "$start" --jitconfig "$jit" >/dev/null \
     && log "runner $name waiting for a job (labels: $LABELS)"
@@ -152,6 +171,15 @@ prune_engine() {
   local now; now=$(date +%s)
   [ $((now - last_prune)) -gt 86400 ] || return 0
   ADLC_IMAGE_MAX_IDLE_H=${ADLC_CI_IMAGE_MAX_IDLE_H:-24} prune_finished_runs "$IMAGE $BASE"
+  local c vol mb
+  for c in $CACHES; do
+    vol=${c%%:*}
+    docker volume inspect "$vol" >/dev/null 2>&1 || continue
+    mb=$(docker run --rm --entrypoint du -v "$vol:/c" "$IMAGE" -sm /c 2>/dev/null | cut -f1)
+    if [ "${mb:-0}" -gt $(( ${ADLC_CI_CACHE_MAX_GB:-12} * 1024 )) ]; then
+      docker volume rm "$vol" >/dev/null 2>&1 && log "housekeeping: cache $vol was ${mb} MB (over ${ADLC_CI_CACHE_MAX_GB:-12} GB): emptied"
+    fi
+  done
   last_prune=$now
   log "housekeeping: images idle for ${ADLC_CI_IMAGE_MAX_IDLE_H:-24}h removed; $(engine_usage)"
 }
