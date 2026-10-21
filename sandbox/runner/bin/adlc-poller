@@ -214,18 +214,21 @@ CI_DIR="$STATE_DIR/ci_rework"
 ci_auto() { [ "$(cfg '.autonomy.ci_auto_rework')" != false ]; }
 watch_pr_checks() {
   ci_auto || return 0
-  local max rows pr branch sha pending failed n f tried
+  local max rows pr branch sha failed n f tried
   max=$(cfg '.autonomy.ci_rework_max'); max=${max:-${ADLC_CI_REWORK_MAX:-2}}
   mkdir -p "$CI_DIR"
-  # number, branch, head sha, pending (true/false), failed checks as "name <url>" joined by "; "
-  rows=$(gh pr list -R "$R" --state open --limit 100 --json number,headRefName,headRefOid,statusCheckRollup --jq '
-    .[] | select(.headRefName | test("^adlc/[0-9]+-")) |
-    [.number, .headRefName, .headRefOid,
-     ([.statusCheckRollup[]? | (.status // .state)] | any(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING" or . == "EXPECTED" or . == "REQUESTED")),
-     ([.statusCheckRollup[]? | select((.conclusion // .state) as $c | ["FAILURE","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED","ERROR"] | index($c))
-       | "\(.name // .context) <\(.detailsUrl // .targetUrl)>"] | join("; "))] | @tsv' 2>/dev/null) || return 0
-  while IFS=$'\t' read -r pr branch sha pending failed; do
-    [ -n "$pr" ] && [ "$pending" = false ] && [ -n "$failed" ] || continue
+  # Agents' PRs: number, branch, head sha. Their checks come from the Actions runs for the head commit:
+  # the App token has Actions: read, while a PR's check rollup needs Checks: read, which it lacks.
+  rows=$(gh pr list -R "$R" --state open --limit 100 --json number,headRefName,headRefOid \
+           --jq '.[] | select(.headRefName | test("^adlc/[0-9]+-")) | [.number, .headRefName, .headRefOid] | @tsv' 2>/dev/null) || return 0
+  while IFS=$'\t' read -r pr branch sha; do
+    [ -n "$pr" ] || continue
+    # "PENDING" while any run for the commit is unfinished (or none started yet); else the failed
+    # workflows as "name <url>" joined by "; " (empty = all green). Superseded runs (cancelled) don't count.
+    failed=$(gh run list -R "$R" --commit "$sha" --event pull_request --limit 50 --json name,status,conclusion,url --jq '
+      if length == 0 or any(.[]; .status != "completed") then "PENDING" else
+      [.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | "\(.name) <\(.url)>"] | join("; ") end' 2>/dev/null) || continue
+    [ -n "$failed" ] && [ "$failed" != PENDING ] || continue
     n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
     is_running "$n" && continue
     has_label "$n" adlc:pr-open || continue
