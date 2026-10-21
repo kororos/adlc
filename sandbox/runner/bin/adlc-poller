@@ -231,9 +231,9 @@ watch_pr_checks() {
     has_label "$n" adlc:pr-open || continue
     f="$CI_DIR/$pr"
     grep -qx "$sha" "$f" 2>/dev/null && continue          # this commit was handled already
-    tried=$(grep -c . "$f" 2>/dev/null || echo 0)
-    echo "$sha" >>"$f"
+    tried=$(grep -c . "$f" 2>/dev/null || true); tried=${tried:-0}
     if [ "$tried" -ge "$max" ]; then
+      echo "$sha" >>"$f"
       gh pr comment "$pr" -R "$R" --body "ADLC: checks failed again on \`${sha:0:7}\` after $tried automatic rework(s): ${failed}. Leaving it to a person." >/dev/null 2>&1 || true
       label "$n" "" adlc:needs-human-review
       log "#$n: PR #$pr checks still failing after $tried rework(s); needs human review"
@@ -241,7 +241,9 @@ watch_pr_checks() {
     fi
     gh pr comment "$pr" -R "$R" --body "ADLC: required checks failed on \`${sha:0:7}\`: ${failed}
 The delivery agent will rework this PR (automatic attempt $((tried + 1)) of $max). It fixes code and test failures; failures of the environment (runner, emulator, network, disk) it reports instead of changing the code or the tests." >/dev/null 2>&1 \
-      || { log "WARN: could not comment on PR #$pr"; continue; }
+      || { log "WARN: could not comment on PR #$pr (retrying next cycle)"; continue; }
+    # Recorded only once the comment is posted, so a failed attempt is retried.
+    echo "$sha" >>"$f"
     label "$n" adlc:pr-open adlc:ready
     log "#$n: PR #$pr checks failed on ${sha:0:7} ($failed); queued for rework ($((tried + 1))/$max)"
   done <<<"$rows"
