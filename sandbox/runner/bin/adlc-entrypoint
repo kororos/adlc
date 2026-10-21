@@ -95,9 +95,14 @@ if claude plugin marketplace list 2>/dev/null | grep -q '\badlc\b'; then
 else
   claude plugin marketplace add "${ADLC_MARKETPLACE:-/opt/adlc}" >/dev/null || die "cannot add ADLC marketplace"
 fi
-install_plugin() { claude plugin install "$1@adlc" >/dev/null 2>&1 || claude plugin update "$1@adlc" >/dev/null 2>&1 || true; }
+# Update first: `plugin install` succeeds as a no-op when the plugin is already installed, so with install
+# first an installed plugin never moved to a newer version from the marketplace.
+install_plugin() { claude plugin update "$1@adlc" >/dev/null 2>&1 || claude plugin install "$1@adlc" >/dev/null 2>&1 || true; }
 install_plugin adlc-core
 claude plugin list 2>/dev/null | grep -q 'adlc-core' || die "adlc-core plugin is not installed"
+want=$(jq -r .version "${ADLC_MARKETPLACE:-/opt/adlc}/plugins/adlc-core/.claude-plugin/plugin.json" 2>/dev/null)
+claude plugin list 2>/dev/null | grep -A3 'adlc-core' | grep -q "$want" \
+  && log "adlc-core $want" || log "WARN: adlc-core is not at the marketplace version $want: $(claude plugin list 2>/dev/null | grep -A3 adlc-core | tr -s ' \n' ' ')"
 for s in $(cfg '.stacks[]'); do
   if [ -d "${ADLC_MARKETPLACE:-/opt/adlc}/plugins/stack-$s" ]; then install_plugin "stack-$s"; log "stack pack stack-$s installed"
   else log "no stack pack for '$s' (agents rely on general knowledge for it)"; fi
