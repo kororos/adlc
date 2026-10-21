@@ -204,6 +204,68 @@ launch_ready() {
              --jq "map($NOT_AGENT_WORK) | sort_by((.milestone.dueOn // \"9999\"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv" 2>/dev/null)
 }
 
+# ── Failed checks go back to the agent ───────────────────────────────────────
+# An agent's PR (branch adlc/<n>-…, issue labelled adlc:pr-open) whose checks on the head commit have all
+# finished with a failure: comment the failed checks on the PR and relabel the issue adlc:ready, so the
+# delivery run reworks it (see /adlc-core:deliver "Rework of an open PR"). Once per commit, at most
+# autonomy.ci_rework_max times per PR (default 2); then adlc:needs-human-review. PRs from people, Renovate
+# etc. are left alone. Off with autonomy.ci_auto_rework: false.
+CI_DIR="$STATE_DIR/ci_rework"
+ci_auto() { [ "$(cfg '.autonomy.ci_auto_rework')" != false ]; }
+watch_pr_checks() {
+  ci_auto || return 0
+  local max rows pr branch sha pending failed n f tried
+  max=$(cfg '.autonomy.ci_rework_max'); max=${max:-${ADLC_CI_REWORK_MAX:-2}}
+  mkdir -p "$CI_DIR"
+  # number, branch, head sha, pending (true/false), failed checks as "name <url>" joined by "; "
+  rows=$(gh pr list -R "$R" --state open --limit 100 --json number,headRefName,headRefOid,statusCheckRollup --jq '
+    .[] | select(.headRefName | test("^adlc/[0-9]+-")) |
+    [.number, .headRefName, .headRefOid,
+     ([.statusCheckRollup[]? | (.status // .state)] | any(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING" or . == "EXPECTED" or . == "REQUESTED")),
+     ([.statusCheckRollup[]? | select((.conclusion // .state) as $c | ["FAILURE","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED","ERROR"] | index($c))
+       | "\(.name // .context) <\(.detailsUrl // .targetUrl)>"] | join("; "))] | @tsv' 2>/dev/null) || return 0
+  while IFS=$'\t' read -r pr branch sha pending failed; do
+    [ -n "$pr" ] && [ "$pending" = false ] && [ -n "$failed" ] || continue
+    n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
+    is_running "$n" && continue
+    has_label "$n" adlc:pr-open || continue
+    f="$CI_DIR/$pr"
+    grep -qx "$sha" "$f" 2>/dev/null && continue          # this commit was handled already
+    tried=$(grep -c . "$f" 2>/dev/null || echo 0)
+    echo "$sha" >>"$f"
+    if [ "$tried" -ge "$max" ]; then
+      gh pr comment "$pr" -R "$R" --body "ADLC: checks failed again on \`${sha:0:7}\` after $tried automatic rework(s): ${failed}. Leaving it to a person." >/dev/null 2>&1 || true
+      label "$n" "" adlc:needs-human-review
+      log "#$n: PR #$pr checks still failing after $tried rework(s); needs human review"
+      continue
+    fi
+    gh pr comment "$pr" -R "$R" --body "ADLC: required checks failed on \`${sha:0:7}\`: ${failed}
+The delivery agent will rework this PR (automatic attempt $((tried + 1)) of $max). It fixes code and test failures; failures of the environment (runner, emulator, network, disk) it reports instead of changing the code or the tests." >/dev/null 2>&1 \
+      || { log "WARN: could not comment on PR #$pr"; continue; }
+    label "$n" adlc:pr-open adlc:ready
+    log "#$n: PR #$pr checks failed on ${sha:0:7} ($failed); queued for rework ($((tried + 1))/$max)"
+  done <<<"$rows"
+}
+# A push workflow that fails on the default branch's head: one regression issue per commit (the agent
+# picks it up like the nightly's regression issues).
+watch_main_checks() {
+  ci_auto || return 0
+  local b sha failed f title
+  b=$(default_branch); sha=$(git -C "$REPO_DIR" rev-parse "origin/$b" 2>/dev/null) || return 0
+  f="$CI_DIR/main-$sha"; [ -e "$f" ] && return 0
+  # all push runs for this commit finished, at least one failed
+  failed=$(gh run list -R "$R" --commit "$sha" --event push --limit 50 --json name,status,conclusion,url --jq '
+    if any(.[]; .status != "completed") or length == 0 then "" else
+    [.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | "\(.name) <\(.url)>"] | join("; ") end' 2>/dev/null) || return 0
+  [ -n "$failed" ] || { gh run list -R "$R" --commit "$sha" --event push --limit 1 --json status --jq '.[0].status' 2>/dev/null | grep -q completed && touch "$f"; return 0; }
+  mkdir -p "$CI_DIR"; touch "$f"
+  title="CI failed on $b at ${sha:0:7}"
+  gh issue create -R "$R" --title "$title" --label adlc:regression --label adlc:ready --body "ADLC: workflows failed on \`$b\` at $sha: ${failed}
+Find the cause and fix it. If it's the environment (runner, emulator, network, disk, registry), report it instead of changing code or tests." >/dev/null 2>&1 \
+    && log "$b at ${sha:0:7}: workflows failed ($failed); opened a regression issue" \
+    || log "WARN: workflows failed on $b at ${sha:0:7} ($failed) but the regression issue could not be created"
+}
+
 # ── ADLC dashboard ────────────────────────────────────────────────────────────
 # The dashboard (adlc ui) has no GitHub credentials and can't write runner state: it reads a
 # snapshot written here, and asks for actions by dropping request files that are applied here.
@@ -298,6 +360,7 @@ while :; do
     [ $((i % 10)) = 0 ] && log "paused (adlc resume $ADLC_SLUG)"
   else
     promote_queued
+    [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; }
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup

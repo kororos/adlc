@@ -484,7 +484,20 @@ adlc:queued ──► adlc:ready ──► adlc:in-progress ──► adlc:pr-op
                                    ├──► adlc:needs-info          questions posted on the issue
                                    ├──► adlc:blocked             retry budget exhausted, summary posted
                                    └──► adlc:needs-human-review  high risk, proposed ADR, or untrusted author
+adlc:pr-open ──(checks fail)──► adlc:ready (rework)       at most autonomy.ci_rework_max times per PR
 ```
+
+### When checks fail
+- **An agent's PR:** when all checks on its latest commit have finished and one has failed, the poller comments the failed checks on the PR and relabels the issue `adlc:ready`. The delivery agent then reworks the same PR. It classifies each failure first:
+  - **code or test bug:** it fixes it,
+  - **outdated branch:** it merges `main`,
+  - **environment** (runner, emulator, network, disk): it never changes the app or weakens the tests. It opens an issue for the project's test setup, or reports a dev-server or ADLC problem, and sets `adlc:blocked`,
+  - **flaky:** it reports it.
+
+  This happens at most once per commit and `autonomy.ci_rework_max` times per PR (default 2). After that the issue gets `adlc:needs-human-review`.
+- **`main`:** if a push workflow fails on the latest commit, the poller opens one `adlc:regression` issue for it, which the agent picks up like the nightly's.
+- **PRs from people** (yours, Renovate's) are left alone.
+- Switch it off with `autonomy.ci_auto_rework: false` in `adlc.yaml`.
 
 ### Risk tiers and merging
 | Risk | Typical changes | Review | Merge |
