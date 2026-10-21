@@ -13,6 +13,7 @@
 #       --registry-ca <file>         CA certificate for a registry with a private CA
 #       --edge-port <port>           host port for preview URLs (default 80; stored for all projects)
 #       --ci-kvm on|off              add the kvm CI runner (ci-kvm, /dev/kvm, label adlc-kvm): Android e2e on this host
+#       --force                      update even while a delivery run is active (it may be stopped)
 #   adlc app <slug> --id <app-id> --key <private-key.pem>
 #                                    agents act as the ADLC GitHub App (recommended over gh_pat)
 #   adlc login <slug>                one-time Claude login inside the runner
@@ -155,9 +156,10 @@ cmd_secrets() {
 
 cmd_up() {
   local slug=$1; shift; need_slug "$slug"
-  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca="" edge_port="" ci_kvm=""
+  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca="" edge_port="" ci_kvm="" force=0 runs
   while [ $# -gt 0 ]; do
     case $1 in
+      --force) force=1; shift ;;
       --repo) repo=$2; shift 2 ;;
       --domain) domain=$2; shift 2 ;;
       --stacks) stacks=$2; shift 2 ;;
@@ -170,6 +172,11 @@ cmd_up() {
       *) die "unknown option $1" ;;
     esac
   done
+  # Recreating the runner (a new image or settings) stops a delivery run in it, like adlc restart.
+  runs=$(find "$ADLC_ROOT/projects/$slug/state/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
+  if [ -n "$runs" ] && [ "$force" = 0 ]; then
+    die "delivery runs in progress: $runs(updating may restart the runner and stop them). Wait, or: adlc pause $slug, then retry; --force updates anyway"
+  fi
   [ "$(id -u)" != 0 ] || die "run as the non-root owner of $ADLC_ROOT"
   mkdir -p "$ADLC_ROOT"/{config,cache,edge/dynamic} "$ADLC_ROOT/projects/$slug"/{repo,runs,state,sessions,logs/egress} \
            "$ADLC_ROOT/ui/requests/$slug"
