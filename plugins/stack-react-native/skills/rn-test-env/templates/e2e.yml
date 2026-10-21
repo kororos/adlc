@@ -67,6 +67,9 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - if: steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
         uses: android-actions/setup-android@v3          # hosted images already have the SDK
+        # only adb: the default list includes `tools`, gone from the SDK repository (sdkmanager fails);
+        # Gradle installs the platform, build-tools and NDK it needs
+        with: { packages: platform-tools }
       - if: steps.gate.outputs.run == 'true'
         run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
       - if: steps.gate.outputs.run == 'true'

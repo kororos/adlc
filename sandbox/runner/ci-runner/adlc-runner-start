@@ -9,20 +9,31 @@ cat >"$HOME/.docker/config.json" <<JSON
     "httpProxy": "${HTTP_PROXY:-}", "httpsProxy": "${HTTPS_PROXY:-${HTTP_PROXY:-}}",
     "noProxy": "${ADLC_JOB_NO_PROXY:-localhost,127.0.0.1}" } } }
 JSON
-# Java tools ignore HTTP(S)_PROXY: Gradle reads gradle.properties, and every JVM (sdkmanager from
-# setup-android, Maestro) reads JAVA_TOOL_OPTIONS. The run's own hosts (.internal) stay direct.
+# Gradle on a shared, memory-bound host (Android builds on the adlc-kvm runner): one JVM (Kotlin
+# compiles in-process instead of a separate daemon), at most ADLC_CI_GRADLE_WORKERS (2) workers and a
+# fixed heap, so a build plus its test environment stay inside the host's RAM. User-level
+# gradle.properties override the project's for these keys.
+mkdir -p "$HOME/.gradle"
+cat >"$HOME/.gradle/gradle.properties" <<PROPS
+kotlin.compiler.execution.strategy=in-process
+org.gradle.workers.max=${ADLC_CI_GRADLE_WORKERS:-2}
+org.gradle.jvmargs=-Xmx${ADLC_CI_GRADLE_HEAP:-3g} -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
+PROPS
+# Java tools ignore HTTP(S)_PROXY: Gradle (and the SDK parts it installs) reads gradle.properties,
+# sdkmanager (setup-android) reads SDKMANAGER_OPTS. Not JAVA_TOOL_OPTIONS: every JVM then prints
+# "Picked up JAVA_TOOL_OPTIONS", which breaks the Kotlin compile daemon's startup handshake.
+# The run's own hosts (.internal) stay direct.
 proxy=${HTTPS_PROXY:-${HTTP_PROXY:-}}
 if [ -n "$proxy" ]; then
   hp=${proxy#*://}; hp=${hp%/}; host=${hp%:*}; port=${hp##*:}
   nonproxy="localhost|127.0.0.1|*.internal|*.lan"
-  mkdir -p "$HOME/.gradle"
-  cat >"$HOME/.gradle/gradle.properties" <<PROPS
+  cat >>"$HOME/.gradle/gradle.properties" <<PROPS
 systemProp.http.proxyHost=$host
 systemProp.http.proxyPort=$port
 systemProp.https.proxyHost=$host
 systemProp.https.proxyPort=$port
 systemProp.http.nonProxyHosts=$nonproxy
 PROPS
-  export JAVA_TOOL_OPTIONS="-Dhttp.proxyHost=$host -Dhttp.proxyPort=$port -Dhttps.proxyHost=$host -Dhttps.proxyPort=$port -Dhttp.nonProxyHosts=$nonproxy"
+  export SDKMANAGER_OPTS="-Dhttp.proxyHost=$host -Dhttp.proxyPort=$port -Dhttps.proxyHost=$host -Dhttps.proxyPort=$port -Dhttp.nonProxyHosts=$nonproxy"
 fi
 exec ./run.sh "$@"
