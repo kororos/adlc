@@ -1,5 +1,11 @@
-# Same as compose.registry-ca.yml, for the CI Docker engine.
+# Same as compose.registry-ca.yml, for the CI Docker engines.
 services:
   ci-docker:
+    volumes:
+      - ${ADLC_REGISTRY_CA}:/etc/docker/certs.d/${ADLC_REGISTRY_HOST}/ca.crt:ro
+  ci-docker-publish:
+    volumes:
+      - ${ADLC_REGISTRY_CA}:/etc/docker/certs.d/${ADLC_REGISTRY_HOST}/ca.crt:ro
+  ci-docker-kvm:
     volumes:
       - ${ADLC_REGISTRY_CA}:/etc/docker/certs.d/${ADLC_REGISTRY_HOST}/ca.crt:ro

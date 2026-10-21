@@ -150,12 +150,20 @@ Delete the downloaded `.pem` on your Mac (a new key can always be generated on t
 Limitation: apps can't edit Project boards owned by a personal account.
 
 ### CI runner (self-hosted, sandboxed)
-Jobs run on GitHub-hosted runners unless a repository variable sends them to the **ADLC CI runner** on your dev server. Jobs that need your network, such as **publishing images to an internal registry**, always run there (`[self-hosted, adlc-publish]`). It's enabled per project by setting `ci_admin_pat`. Its labels are `self-hosted,linux,adlc-publish,adlc-test` (`ADLC_CI_LABELS`), plus `adlc-kvm` with `--ci-kvm on`:
-- A **registrar** container holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time**. It never runs workflow code.
-- Jobs run in a **separate Docker engine** (`ci-docker`) that agents can't reach, behind the same egress proxy. Before each new job, everything the previous job left behind is removed.
+Jobs run on GitHub-hosted runners unless a repository variable sends them to the **ADLC CI runners** on your dev server. Jobs that need your network, such as **publishing images to an internal registry**, always run there (`[self-hosted, adlc-publish]`). They're enabled per project by setting `ci_admin_pat`. There is one runner per role, so a publish never waits behind a test job, and an Android job doesn't hold up the checks:
+
+| Role | Registrar + Docker engine | Labels | Jobs |
+|---|---|---|---|
+| test | `ci` + `ci-docker` | `self-hosted,linux,adlc-test` | lint, typecheck, arch-check, test, e2e-web |
+| publish | `ci-publish` + `ci-docker-publish` | `self-hosted,linux,adlc-publish` | publish |
+| kvm | `ci-kvm` + `ci-docker-kvm` (only with `adlc up <slug> --ci-kvm on`) | `self-hosted,linux,adlc-kvm` | e2e-android |
+
+- Each **registrar** holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time** in its own engine. It never runs workflow code.
+- Each role has its **own Docker engine**, which agents can't reach, behind the same egress proxy. Before each new job, everything the previous job in that engine left behind is removed. Jobs that run at the same time never share an engine, so a pull-request job can't reach a running publish job or leave anything behind for it.
+- Up to three jobs can run at once. Expect some CPU contention on a small host (an Android job next to a test job).
 - Because agents can edit workflows, two GitHub-side rules (set by `provision.sh`) complete the picture: `.github/` changes need **your review** (CODEOWNERS + "Require review from Code Owners"), and registry **push credentials live in the `publish` environment, limited to `main`**, so PR-branch workflows can't read them.
 
-`adlc logs <slug> ci` shows the registrar. Runners appear under the repo's Settings → Actions → Runners while waiting for a job.
+`adlc logs <slug> ci` shows the registrars. Runners appear under the repo's Settings → Actions → Runners while waiting for a job.
 
 Where jobs run (repository variables, JSON; `provision.sh` sets them from `adlc.yaml ci.runners`):
 | Variable | Jobs | Default | On your host |
@@ -164,7 +172,7 @@ Where jobs run (repository variables, JSON; `provision.sh` sets them from `adlc.
 | `ADLC_ANDROID_RUNS_ON` | e2e-android | `"ubuntu-latest"` (has KVM) | `["self-hosted","adlc-kvm"]` after `adlc up <slug> --ci-kvm on` (host needs `/dev/kvm`) |
 | `ADLC_PUBLISH_RUNS_ON` | publish | `["self-hosted","adlc-publish"]` | |
 
-On your host, `e2e-android` builds the APK first and then starts the stack's emulator container (`deploy/compose.emulator.yml`) in `ci-docker`, which gets `/dev/kvm`. Switching back is one command: `gh variable delete ADLC_ANDROID_RUNS_ON -R <owner/repo>`.
+On your host, `e2e-android` builds the APK first and then starts the stack's emulator container (`deploy/compose.emulator.yml`) in `ci-docker-kvm`, the only engine with `/dev/kvm`. Switching back is one command: `gh variable delete ADLC_ANDROID_RUNS_ON -R <owner/repo>`.
 - **Host requirements:**
   - **24 GB RAM** for the dev server. With 15 GB, Gradle or the emulator were killed for lack of memory next to the agents' stacks.
   - `/dev/kvm`. On a VM, enable nested virtualisation: vSphere "Expose hardware assisted virtualization to the guest OS".
@@ -173,7 +181,7 @@ On your host, `e2e-android` builds the APK first and then starts the stack's emu
 - **Timings measured on a 4-vCPU / 24 GB VM:**
   - About 28 minutes per job on GitHub-hosted.
   - On the dev server, about 20 minutes with a cold build cache, and about **10 minutes warm**: the APK build drops from 14½ to 4½ minutes thanks to the CI caches, plus about 2½ minutes for boot and flows.
-- **The runner takes one job at a time,** so other checks queue behind an Android job.
+- Android jobs have their own runner, so other checks don't queue behind them.
 
 ### Using Harbor (or another private registry)
 ```bash

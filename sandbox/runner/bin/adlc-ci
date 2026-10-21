@@ -8,7 +8,8 @@
 # - Before every new runner, everything the previous job left in ci-docker is removed, so a
 #   pull-request job can't plant anything for a later main-branch publish job.
 set -uo pipefail
-ADLC_COMPONENT=ci
+ROLE=${ADLC_CI_ROLE:-test}
+ADLC_COMPONENT=ci-$ROLE
 # shellcheck source=adlc-lib.sh
 source /usr/local/bin/adlc-lib.sh
 
@@ -18,10 +19,8 @@ R="$ADLC_REPO"
 BASE=${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
 IMAGE=adlc/ci-runner:local
 CI_IMAGE_DIR=/usr/local/share/adlc/ci-runner
-LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish,adlc-test}
+LABELS=${ADLC_CI_LABELS:-self-hosted,linux,adlc-test}
 INTERVAL=${ADLC_CI_INTERVAL:-15}
-# With /dev/kvm in ci-docker (adlc up --ci-kvm on), jobs can run the Android emulator here.
-[ "${ADLC_CI_KVM:-0}" = 1 ] && [[ ",$LABELS," != *",adlc-kvm,"* ]] && LABELS="$LABELS,adlc-kvm"
 # The real gh, not the wrapper on PATH: the wrapper always swaps in the agents' token, and this
 # container must use ci_admin_pat (the only credential that can register runners).
 GH=/usr/bin/gh
@@ -135,7 +134,7 @@ ensure_image() {
 start_runner() {
   local token name jit gid start label_args=() l
   token=$(secret ci_admin_pat)
-  name="adlc-$ADLC_SLUG-$(date +%s)"
+  name="adlc-$ADLC_SLUG-$ROLE-$(date +%s)"
   for l in ${LABELS//,/ }; do label_args+=(-f "labels[]=$l"); done
   jit=$(GH_TOKEN=$token $GH api -X POST "repos/$R/actions/runners/generate-jitconfig" \
           -f name="$name" -F runner_group_id=1 -f work_folder=_work "${label_args[@]}" \
@@ -184,7 +183,7 @@ prune_engine() {
   log "housekeeping: images idle for ${ADLC_CI_IMAGE_MAX_IDLE_H:-24}h removed; $(engine_usage)"
 }
 
-log "registrar started: one runner at a time with labels $LABELS, image $IMAGE"
+log "registrar ($ROLE) started: one runner at a time with labels $LABELS, image $IMAGE"
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
     log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue

@@ -12,7 +12,7 @@
 #       --registry-user <user>       registry pull user (Harbor: robot$<project>+<name>)
 #       --registry-ca <file>         CA certificate for a registry with a private CA
 #       --edge-port <port>           host port for preview URLs (default 80; stored for all projects)
-#       --ci-kvm on|off              give the CI runner /dev/kvm and the adlc-kvm label (Android e2e on this host)
+#       --ci-kvm on|off              add the kvm CI runner (ci-kvm, /dev/kvm, label adlc-kvm): Android e2e on this host
 #   adlc app <slug> --id <app-id> --key <private-key.pem>
 #                                    agents act as the ADLC GitHub App (recommended over gh_pat)
 #   adlc login <slug>                one-time Claude login inside the runner
@@ -75,10 +75,15 @@ compose() { # compose <slug> <args...>
     files+=(-f "$SANDBOX/compose.ci.yml")
     [ "${ADLC_DIND_MODE:-}" = sysbox ] && files+=(-f "$SANDBOX/compose.ci-sysbox.yml")
     [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.ci-registry-ca.yml")
-    [ "${ADLC_CI_KVM:-0}" = 1 ] && [ -e /dev/kvm ] && files+=(-f "$SANDBOX/compose.ci-kvm.yml")
   fi
-  docker compose --env-file "$f" "${files[@]}" "$@"
+  # The kvm CI runner (ci-kvm + ci-docker-kvm) is the compose profile "kvm".
+  COMPOSE_PROFILES=$(ci_kvm "$slug" && echo kvm) docker compose --env-file "$f" "${files[@]}" "$@"
 }
+ci_kvm() { ci_enabled "$1" && [ "${ADLC_CI_KVM:-0}" = 1 ] && [ -e /dev/kvm ]; }
+# The CI registrars of a project and their Docker engines (one pair per role, see compose.ci.yml).
+ci_registrars() { ci_enabled "$1" || return 0; echo ci ci-publish; ci_kvm "$1" && echo ci-kvm; }
+ci_engine() { case $1 in ci) echo ci-docker ;; *) echo "ci-docker-${1#ci-}" ;; esac; }
+ci_role() { case $1 in ci) echo test ;; *) echo "${1#ci-}" ;; esac; }
 runner_exec() { local slug=$1; shift; compose "$slug" exec runner "$@"; }
 ci_enabled() { [ -s "$ADLC_ROOT/secrets/$1/ci_admin_pat" ]; }
 
@@ -306,7 +311,7 @@ host_housekeep() {
   host_build_cache_cap
 }
 cmd_prune() {
-  local f slug before
+  local f slug before r
   # A project's settings (e.g. ADLC_HOST_BUILD_CACHE) apply to the host part too.
   if [ -n "${1:-}" ]; then need_slug "$1"; load_cfg "$1"; fi
   before=$(disk_line)
@@ -322,17 +327,18 @@ cmd_prune() {
     load_cfg "$slug"
     if runner_exec "$slug" adlc-housekeep >/dev/null 2>&1; then ok "$slug: finished runs' images, untagged images and build cache pruned"
     else warn "$slug: runner not reachable; skipped its Docker sidecar"; fi
-    if ci_enabled "$slug"; then
-      # Same rule as the registrar's after-job cleanup, from the ci container (it has adlc-lib and the
-      # engine's address): compose-built images idle 1h+ (not one a running job just built), others
-      # idle ADLC_CI_IMAGE_MAX_IDLE_H, the build cache cap. Runner and emulator images stay.
+    # Each CI engine, with the same rule as its registrar's after-job cleanup, run from the registrar
+    # (it has adlc-lib and the engine's address): compose-built images idle 1h+ (not one a running job
+    # just built), others idle ADLC_CI_IMAGE_MAX_IDLE_H, the build cache cap. Runner images and the
+    # registrar's ADLC_KEEP_IMAGES (the emulator, on the kvm engine) stay.
+    for r in $(ci_registrars "$slug"); do
       # shellcheck disable=SC2016  # expanded inside the container
-      compose "$slug" exec -T ci bash -c 'source /usr/local/bin/adlc-lib.sh
+      compose "$slug" exec -T "$r" bash -c 'source /usr/local/bin/adlc-lib.sh
         ADLC_BUILT_IMAGE_MAX_IDLE_H=1 ADLC_IMAGE_MAX_IDLE_H=${ADLC_CI_IMAGE_MAX_IDLE_H:-24} \
           prune_finished_runs "adlc/ci-runner:local ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}"
         docker image prune -f; prune_build_cache "${ADLC_CI_BUILD_CACHE_KEEP:-4GB}"' >/dev/null 2>&1 \
-        && ok "$slug: CI engine: job images and idle images removed, build cache capped" || warn "$slug: CI engine not reachable; skipped"
-    fi
+        && ok "$slug: CI engine ($r): job images and idle images removed, build cache capped" || warn "$slug: CI engine ($r) not reachable; skipped"
+    done
   done
   say "Done: $(disk_line)"
 }
@@ -411,7 +417,7 @@ cmd_resume() { need_slug "$1"; rm -f "$ADLC_ROOT/projects/$1/state/paused"; say 
 cmd_status() {
   # adlc status [slug] [--all] [--disk]: --all lists the whole queue; --disk adds per-engine Docker usage
   # (docker system df measures every layer and volume: it can take minutes on a full disk).
-  local f slug st n free a only="" qall="" disk=0
+  local f slug st n free a only="" qall="" disk=0 r
   for a in "$@"; do case $a in --all) qall=--all ;; --disk) disk=1 ;; -*) die "unknown option $a" ;; *) only=$a ;; esac; done
   set -- "$only" "$qall"
   free=$(df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }')
@@ -434,7 +440,9 @@ cmd_status() {
     [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
     if [ "$disk" = 1 ]; then
       say "    Docker (agents): $(runner_exec "$slug" timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
-      ci_enabled "$slug" && say "    Docker (CI): $(compose "$slug" exec -T ci-docker timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+      for r in $(ci_registrars "$slug"); do
+        say "    Docker (CI $(ci_role "$r")): $(compose "$slug" exec -T "$(ci_engine "$r")" timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+      done
     else
       [ -s "$st/docker_usage" ] && say "    Docker (agents, at last housekeeping): $(cat "$st/docker_usage")"
     fi
@@ -464,7 +472,8 @@ cmd_logs() {
   case $what in
     poller|deployer|rc) tail -n 100 -f "$d/$what.log" ;;
     egress) tail -n 100 -f "$d/egress/access.log" ;;
-    ci) load_cfg "$slug"; compose "$slug" logs -f --tail 100 ci ;;
+    # shellcheck disable=SC2046  # one service per word
+    ci) load_cfg "$slug"; compose "$slug" logs -f --tail 100 $(ci_registrars "$slug") ;;
     run)
       [ -n "${3:-}" ] || die "usage: adlc logs <slug> run <issue>"
       local latest; latest=$(ls -t "$d/runs/$3"-*.jsonl 2>/dev/null | head -1)

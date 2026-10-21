@@ -1,5 +1,11 @@
-# Hardened CI Docker engine (Sysbox runtime instead of privileged).
+# Hardened CI Docker engines (Sysbox runtime instead of privileged).
 services:
   ci-docker:
+    privileged: false
+    runtime: sysbox-runc
+  ci-docker-publish:
+    privileged: false
+    runtime: sysbox-runc
+  ci-docker-kvm:
     privileged: false
     runtime: sysbox-runc

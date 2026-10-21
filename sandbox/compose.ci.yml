@@ -1,9 +1,48 @@
-# Optional per-project CI runner (added by `adlc up` when the ci_admin_pat secret is set).
+# Optional per-project CI runners (added by `adlc up` when the ci_admin_pat secret is set).
 #
-#   ci         registrar: holds ci_admin_pat, starts one ephemeral JIT runner at a time; runs no job code
-#   ci-docker  separate Docker engine for CI jobs. Agents (runner service) can't reach it, so they
-#              can't inspect a running publish job and read its registry credentials.
-#   network ci internal; the only way out is the egress proxy.
+# One registrar + Docker engine pair per role, so jobs of different roles run in parallel and never
+# share an engine (each engine is wiped before every job; a pull-request job can't touch a running
+# or later publish job):
+#   ci        + ci-docker          test     labels self-hosted,linux,adlc-test     (checks, e2e-web)
+#   ci-publish + ci-docker-publish publish  labels self-hosted,linux,adlc-publish  (image publishing)
+#   ci-kvm    + ci-docker-kvm      kvm      labels self-hosted,linux,adlc-kvm      (e2e-android; profile
+#                                           "kvm", enabled by `adlc up <slug> --ci-kvm on`)
+# A registrar holds ci_admin_pat and starts one ephemeral JIT runner at a time in its engine; it runs no
+# job code. Agents (runner service) can't reach these engines, so they can't inspect a running publish
+# job and read its registry credentials. Network ci is internal; the only way out is the egress proxy.
+
+x-ci-docker: &ci-docker
+  image: ${ADLC_DIND_IMAGE:-docker:29-dind}
+  privileged: true
+  restart: unless-stopped
+
+x-ci-docker-env: &ci-docker-env
+  DOCKER_TLS_CERTDIR: /certs
+  HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+  HTTPS_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+
+x-ci: &ci
+  image: ${ADLC_RUNNER_IMAGE}
+  entrypoint: ["adlc-ci"]
+  init: true
+  secrets: [ci_admin_pat]
+  restart: unless-stopped
+
+x-ci-env: &ci-env
+  ADLC_ROOT: ${ADLC_ROOT}
+  ADLC_SLUG: ${ADLC_SLUG}
+  ADLC_REPO: ${ADLC_REPO}
+  ADLC_REGISTRY_HOST: ${ADLC_REGISTRY_HOST:-}
+  ADLC_CI_BUILD_CACHE_KEEP: ${ADLC_CI_BUILD_CACHE_KEEP:-4GB}
+  ADLC_CI_IMAGE_MAX_IDLE_H: ${ADLC_CI_IMAGE_MAX_IDLE_H:-24}
+  ADLC_CI_CACHE_MAX_GB: ${ADLC_CI_CACHE_MAX_GB:-12}
+  ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
+  ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+  HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+  HTTPS_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+  DOCKER_TLS_VERIFY: "1"
+  DOCKER_CERT_PATH: /certs/client
+
 services:
   egress:
     environment:
@@ -12,53 +51,93 @@ services:
       ci:
         ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.2
 
+  # ── test ───────────────────────────────────────────────────────────────────
   ci-docker:
-    image: ${ADLC_DIND_IMAGE:-docker:29-dind}
+    <<: *ci-docker
     hostname: ci-docker
-    privileged: true
-    environment:
-      DOCKER_TLS_CERTDIR: /certs
-      HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
-      HTTPS_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
-      NO_PROXY: localhost,127.0.0.1,ci-docker,${ADLC_CI_SUBNET_PREFIX}.0/24
+    environment: { <<: *ci-docker-env, NO_PROXY: "localhost,127.0.0.1,ci-docker,${ADLC_CI_SUBNET_PREFIX}.0/24" }
     volumes:
       - ci-certs:/certs
       - ci-data:/var/lib/docker
     networks:
       ci:
         ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.3
-    restart: unless-stopped
 
   ci:
-    image: ${ADLC_RUNNER_IMAGE}
-    entrypoint: ["adlc-ci"]
-    init: true
+    <<: *ci
     depends_on: [egress, ci-docker]
     environment:
-      ADLC_ROOT: ${ADLC_ROOT}
-      ADLC_SLUG: ${ADLC_SLUG}
-      ADLC_REPO: ${ADLC_REPO}
-      ADLC_REGISTRY_HOST: ${ADLC_REGISTRY_HOST:-}
-      ADLC_CI_LABELS: ${ADLC_CI_LABELS:-self-hosted,linux,adlc-publish,adlc-test}
-      ADLC_CI_BUILD_CACHE_KEEP: ${ADLC_CI_BUILD_CACHE_KEEP:-4GB}
-      ADLC_CI_IMAGE_MAX_IDLE_H: ${ADLC_CI_IMAGE_MAX_IDLE_H:-24}
-      ADLC_CI_CACHE_MAX_GB: ${ADLC_CI_CACHE_MAX_GB:-12}
-      ADLC_KEEP_IMAGES: ${ADLC_KEEP_IMAGES:-budtmo/docker-android}
-      ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
-      ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
-      HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
-      HTTPS_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
+      <<: *ci-env
+      ADLC_CI_ROLE: test
+      ADLC_CI_LABELS: self-hosted,linux,adlc-test
+      ADLC_KEEP_IMAGES: ""
       NO_PROXY: localhost,127.0.0.1,ci-docker
       DOCKER_HOST: tcp://ci-docker:2376
-      DOCKER_TLS_VERIFY: "1"
-      DOCKER_CERT_PATH: /certs/client
-    secrets: [ci_admin_pat]
     volumes:
       - ci-certs:/certs:ro
     networks:
       ci:
         ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.4
-    restart: unless-stopped
+
+  # ── publish ────────────────────────────────────────────────────────────────
+  ci-docker-publish:
+    <<: *ci-docker
+    hostname: ci-docker-publish
+    environment: { <<: *ci-docker-env, NO_PROXY: "localhost,127.0.0.1,ci-docker-publish,${ADLC_CI_SUBNET_PREFIX}.0/24" }
+    volumes:
+      - ci-certs-publish:/certs
+      - ci-data-publish:/var/lib/docker
+    networks:
+      ci:
+        ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.5
+
+  ci-publish:
+    <<: *ci
+    depends_on: [egress, ci-docker-publish]
+    environment:
+      <<: *ci-env
+      ADLC_CI_ROLE: publish
+      ADLC_CI_LABELS: self-hosted,linux,adlc-publish
+      ADLC_KEEP_IMAGES: ""
+      NO_PROXY: localhost,127.0.0.1,ci-docker-publish
+      DOCKER_HOST: tcp://ci-docker-publish:2376
+    volumes:
+      - ci-certs-publish:/certs:ro
+    networks:
+      ci:
+        ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.6
+
+  # ── kvm (Android emulator; adlc up <slug> --ci-kvm on) ─────────────────────
+  ci-docker-kvm:
+    <<: *ci-docker
+    profiles: [kvm]
+    hostname: ci-docker-kvm
+    devices:
+      - /dev/kvm:/dev/kvm
+    environment: { <<: *ci-docker-env, NO_PROXY: "localhost,127.0.0.1,ci-docker-kvm,${ADLC_CI_SUBNET_PREFIX}.0/24" }
+    volumes:
+      - ci-certs-kvm:/certs
+      - ci-data-kvm:/var/lib/docker
+    networks:
+      ci:
+        ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.7
+
+  ci-kvm:
+    <<: *ci
+    profiles: [kvm]
+    depends_on: [egress, ci-docker-kvm]
+    environment:
+      <<: *ci-env
+      ADLC_CI_ROLE: kvm
+      ADLC_CI_LABELS: self-hosted,linux,adlc-kvm
+      ADLC_KEEP_IMAGES: ${ADLC_KEEP_IMAGES:-budtmo/docker-android}
+      NO_PROXY: localhost,127.0.0.1,ci-docker-kvm
+      DOCKER_HOST: tcp://ci-docker-kvm:2376
+    volumes:
+      - ci-certs-kvm:/certs:ro
+    networks:
+      ci:
+        ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.8
 
 networks:
   ci:
@@ -70,6 +149,10 @@ networks:
 volumes:
   ci-certs: {}
   ci-data: {}
+  ci-certs-publish: {}
+  ci-data-publish: {}
+  ci-certs-kvm: {}
+  ci-data-kvm: {}
 
 secrets:
   ci_admin_pat:
