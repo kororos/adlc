@@ -34,6 +34,7 @@ systemProp.https.proxyHost=$host
 systemProp.https.proxyPort=$port
 systemProp.http.nonProxyHosts=$nonproxy
 PROPS
-  export SDKMANAGER_OPTS="-Dhttp.proxyHost=$host -Dhttp.proxyPort=$port -Dhttps.proxyHost=$host -Dhttps.proxyPort=$port -Dhttp.nonProxyHosts=$nonproxy"
+  # sdkmanager's start script evals this: quote the |-separated list, or the shell reads pipes.
+  export SDKMANAGER_OPTS="-Dhttp.proxyHost=$host -Dhttp.proxyPort=$port -Dhttps.proxyHost=$host -Dhttps.proxyPort=$port -Dhttp.nonProxyHosts='$nonproxy'"
 fi
 exec ./run.sh "$@"
