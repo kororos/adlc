@@ -142,7 +142,7 @@ Consequences that init records for the architect (in setup.md, "Constraints for 
 | key | question | default |
 |---|---|---|
 | adlc.runner_host | Where the runner container runs | dev-server |
-| autonomy.* | Auto-merge tiers, parallel runs, retries; failed checks on agents' PRs go back to the agent (`ci_auto_rework`, `ci_rework_max`) | as in the adlc.yaml template; `ci_auto_rework: true`, `ci_rework_max: 2` |
+| autonomy.* | Auto-merge tiers, parallel runs, retries; failed checks on agents' PRs go back to the agent (`ci_auto_rework`, `ci_rework_max`); green agent PRs behind the base are updated (`keep_prs_current`) | as in the adlc.yaml template; `ci_auto_rework: true`, `ci_rework_max: 2`, `keep_prs_current: true` |
 | network.mode | Egress mode | audit |
 
 Stack packs may add sections. A pack ships `skills/<pack>-setup/SKILL.md` with extra rows in the same table format. Init asks them after the core sections.

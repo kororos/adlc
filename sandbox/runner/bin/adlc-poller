@@ -213,11 +213,31 @@ launch_ready() {
 # ── Failed checks go back to the agent ───────────────────────────────────────
 # An agent's PR (branch adlc/<n>-…, issue labelled adlc:pr-open) whose checks on the head commit have all
 # finished with a failure: comment the failed checks on the PR and relabel the issue adlc:ready, so the
-# delivery run reworks it (see /adlc-core:deliver "Rework of an open PR"). Once per commit, at most
+# delivery run reworks it (see /adlc-core:deliver, "First, rework or not"). Green PRs that fell behind the
+# base branch are brought up to date (keep_current). Once per commit, at most
 # autonomy.ci_rework_max times per PR (default 2); then adlc:needs-human-review. PRs from people, Renovate
 # etc. are left alone. Off with autonomy.ci_auto_rework: false.
 CI_DIR="$STATE_DIR/ci_rework"
 ci_auto() { [ "$(cfg '.autonomy.ci_auto_rework')" != false ]; }
+# A green agent PR that is behind its base branch (branch protection requires up-to-date branches, so any
+# other merge leaves it unmergeable): merge the base into it, so its checks run on the current base and it
+# can merge (auto-merge for low/medium risk, or by you). A merge, not a rebase, keeps the agent's history.
+# Once per head commit; failing PRs are left to the rework path, which merges the base itself.
+keep_current() { # keep_current <pr> <issue> <head sha>
+  local pr=$1 n=$2 sha=$3 base behind f="$CI_DIR/current-$1"
+  [ "$(cfg '.autonomy.keep_prs_current')" != false ] || return 0
+  grep -qx "$sha" "$f" 2>/dev/null && return 0
+  has_label "$n" adlc:pr-open || return 0
+  base=$(gh pr view "$pr" -R "$R" --json baseRefName --jq .baseRefName 2>/dev/null) || return 0
+  behind=$(gh api "repos/$R/compare/$base...$sha" --jq .behind_by 2>/dev/null) || return 0
+  [ "${behind:-0}" -gt 0 ] || return 0
+  if gh pr update-branch "$pr" -R "$R" >/dev/null 2>&1; then
+    echo "$sha" >>"$f"
+    log "#$n: PR #$pr was $behind commit(s) behind $base with green checks; merged $base into it"
+  else
+    log "WARN: #$n: PR #$pr is $behind commit(s) behind $base but could not be updated (retrying next cycle)"
+  fi
+}
 watch_pr_checks() {
   ci_auto || return 0
   local max rows pr branch sha failed n f tried
@@ -234,8 +254,9 @@ watch_pr_checks() {
     failed=$(gh run list -R "$R" --commit "$sha" --event pull_request --limit 50 --json name,status,conclusion,url --jq '
       if length == 0 or any(.[]; .status != "completed") then "PENDING" else
       [.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | "\(.name) <\(.url)>"] | join("; ") end' 2>/dev/null) || continue
-    [ -n "$failed" ] && [ "$failed" != PENDING ] || continue
+    [ "$failed" != PENDING ] || continue
     n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
+    if [ -z "$failed" ]; then keep_current "$pr" "$n" "$sha"; continue; fi
     is_running "$n" && continue
     has_label "$n" adlc:pr-open || continue
     f="$CI_DIR/$pr"
