@@ -26,10 +26,15 @@ The scheduling, selection and flake rules come from the core `testing-contract` 
 - The emulator is a **long-lived service** in the project's Docker sidecar (compose project `adlc-emulator`, template in the `rn-test-env` skill). It is shared by all runs, so **always hold the lock**:
   ```bash
   flock "$ADLC_LOCK_DIR/android-emulator.lock" bash -c '
-    adb connect emulator:5555 >/dev/null && adb -s emulator:5555 wait-for-device &&
+    for _ in $(seq 1 180); do   # adb connect fails silently while the emulator still boots: retry it
+      adb connect emulator:5555 >/dev/null 2>&1
+      [ "$(adb -s emulator:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = 1 ] && break
+      sleep 5
+    done &&
     adb -s emulator:5555 install -r apps/app/android/app/build/outputs/apk/release/app-release.apk &&
     maestro --device emulator:5555 test apps/app/e2e/flows --include-tags smoke'
   ```
+- Build the APK for the emulator's ABI only (`./gradlew assembleRelease -PreactNativeArchitectures=x86_64`): much faster, far less disk. On the shared dev server, don't build while the emulator boots (memory).
 - Install the **release APK** built by `env.start_build`, and uninstall or clear app data before each run (`clearState: true` in flows).
 - Common failures:
   - `device offline`: run `adb reconnect`, then retry once.

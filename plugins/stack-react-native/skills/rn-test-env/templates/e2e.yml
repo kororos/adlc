@@ -50,13 +50,6 @@ jobs:
         with: { fetch-depth: 2 }
       - id: gate                     # globs from adlc.yaml ci.e2e_android_paths (`*` also matches `/`)
         run: bash .github/scripts/adlc-gate.sh 'apps/app/*' 'apps/api/*' 'packages/*'
-      # Self-hosted: boot the emulator container in ci-docker (it has /dev/kvm) while the APK builds.
-      # ci-docker is wiped before every job, so each job gets a fresh emulator.
-      - if: steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
-        run: |
-          docker network create adlc-web 2>/dev/null || true
-          docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d
-          docker network connect adlc-web "$(hostname)"
       - if: steps.gate.outputs.run == 'true'
         uses: pnpm/action-setup@v4
       - if: steps.gate.outputs.run == 'true'
@@ -72,18 +65,44 @@ jobs:
         with: { packages: platform-tools }
       - if: steps.gate.outputs.run == 'true'
         run: pnpm install --frozen-lockfile && curl -Ls https://get.maestro.mobile.dev | bash
+      # x86_64 only: the emulator's ABI (all four ABIs take far longer and can fill a hosted runner's disk).
+      # Self-hosted: stop the Gradle daemon afterwards, so its memory is free before the emulator starts.
       - if: steps.gate.outputs.run == 'true'
-        run: pnpm --filter app exec expo prebuild --platform android --no-install && (cd apps/app/android && ./gradlew assembleRelease)
+        run: |
+          pnpm --filter app exec expo prebuild --platform android --no-install
+          cd apps/app/android && ./gradlew assembleRelease -PreactNativeArchitectures=x86_64
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then ./gradlew --stop >/dev/null 2>&1 || true; fi
+      # Self-hosted: the emulator container runs in the CI engine (it has /dev/kvm), started only after the
+      # build: on a shared host both at once can run out of memory. The CI engine is wiped before every job,
+      # so each job gets a fresh emulator (the image stays cached).
       - if: steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
         run: |
-          for i in $(seq 1 60); do
-            adb connect emulator:5555 >/dev/null
+          docker network create adlc-web 2>/dev/null || true
+          docker network connect adlc-web "$(hostname)" 2>/dev/null || true
+          docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d
+      # adb connect only reports a refused connection as text and the emulator's adb port opens late:
+      # reconnect on every check. A cold boot on nested virtualisation can take several minutes.
+      - if: steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
+        run: |
+          for i in $(seq 1 180); do
+            adb connect emulator:5555 >/dev/null 2>&1 || true
             [ "$(adb -s emulator:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
-            [ "$i" = 60 ] && { echo "::error::the emulator didn't boot within 5 minutes"; exit 1; }
+            [ "$i" = 180 ] && { echo "::error::the emulator didn't boot within 15 minutes"; exit 3; }
             sleep 5
           done
           adb -s emulator:5555 install -r apps/app/android/app/build/outputs/apk/release/app-release.apk
           ~/.maestro/bin/maestro --device emulator:5555 test apps/app/e2e/flows --include-tags smoke
+      # Before the emulator is removed: KVM, memory, the emulator's own log; Maestro's screenshots as artifact.
+      - if: failure() && steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
+        run: |
+          c=$(docker compose -p adlc-emulator -f deploy/compose.emulator.yml ps -q emulator)
+          docker exec "$c" sh -c 'ls -l /dev/kvm; free -m; for f in /home/androidusr/logs/*device*; do echo "== $f"; tail -n 40 "$f"; done' || true
+          docker logs --tail 60 "$c" 2>&1 || true
+      - if: failure() && steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
+        uses: actions/upload-artifact@v4
+        with: { name: maestro-android, path: ~/.maestro/tests, retention-days: 7, if-no-files-found: ignore }
+      - if: always() && steps.gate.outputs.run == 'true' && runner.environment == 'self-hosted'
+        run: docker compose -p adlc-emulator -f deploy/compose.emulator.yml down -v || true
       - if: steps.gate.outputs.run == 'true' && runner.environment != 'self-hosted'
         run: sudo udevadm control --reload-rules || true
       - if: steps.gate.outputs.run == 'true' && runner.environment != 'self-hosted'

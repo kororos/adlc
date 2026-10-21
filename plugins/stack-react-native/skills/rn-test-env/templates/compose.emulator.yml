@@ -9,6 +9,12 @@ services:
     environment:
       EMULATOR_DEVICE: "Samsung Galaxy S10"
       WEB_VNC: "true"
+      # The image's readiness script checks for the home screen 60 times, DEVICE_INTERVAL_WAITING seconds
+      # apart (default 2), then stops the device. With nested virtualisation and software rendering the
+      # launcher takes longer than 2 minutes: allow ~10.
+      DEVICE_INTERVAL_WAITING: "10"
+      EMULATOR_ADDITIONAL_ARGS: "-no-boot-anim -no-audio"
+      USER_BEHAVIOR_ANALYTICS: "false"
       NO_PROXY: "*"
       no_proxy: "*"
     networks: [adlc-web]

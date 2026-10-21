@@ -164,7 +164,16 @@ Where jobs run (repository variables, JSON; `provision.sh` sets them from `adlc.
 | `ADLC_ANDROID_RUNS_ON` | e2e-android | `"ubuntu-latest"` (has KVM) | `["self-hosted","adlc-kvm"]` after `adlc up <slug> --ci-kvm on` (host needs `/dev/kvm`) |
 | `ADLC_PUBLISH_RUNS_ON` | publish | `["self-hosted","adlc-publish"]` | |
 
-On your host, `e2e-android` starts the stack's emulator container (`deploy/compose.emulator.yml`) in `ci-docker`, which gets `/dev/kvm`. The runner takes one job at a time, so checks queue behind each other; an Android build plus emulator wants 8+ cores and 16 GB+ RAM. Switching back is one command: `gh variable delete ADLC_ANDROID_RUNS_ON -R <owner/repo>`.
+On your host, `e2e-android` builds the APK first and then starts the stack's emulator container (`deploy/compose.emulator.yml`) in `ci-docker`, which gets `/dev/kvm`. Switching back is one command: `gh variable delete ADLC_ANDROID_RUNS_ON -R <owner/repo>`.
+- **Host requirements:**
+  - **24 GB RAM** for the dev server. With 15 GB, Gradle or the emulator were killed for lack of memory next to the agents' stacks.
+  - `/dev/kvm`. On a VM, enable nested virtualisation: vSphere "Expose hardware assisted virtualization to the guest OS".
+  - On a VM, ideally a memory reservation, because nested virtualisation degrades badly under host ballooning.
+  - 4 vCPUs is enough. Don't overcommit physical cores.
+- **Timings measured on a 4-vCPU / 24 GB VM:**
+  - About 28 minutes per job on GitHub-hosted.
+  - On the dev server, about 20 minutes with a cold build cache, and about **10 minutes warm**: the APK build drops from 14½ to 4½ minutes thanks to the CI caches, plus about 2½ minutes for boot and flows.
+- **The runner takes one job at a time,** so other checks queue behind an Android job.
 
 ### Using Harbor (or another private registry)
 ```bash
