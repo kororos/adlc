@@ -22,7 +22,7 @@
 #                                    session in delivery run #n's worktree (--takeover stops the unattended run)
 #   adlc shell <slug>                bash inside the runner (gh authenticated)
 #   adlc attach <slug>               attach to the runner's tmux (rc / poller / deployer / shell / sessions)
-#   adlc status [slug] [--all]       runners, active runs, pause state, open work in order of precedence
+#   adlc status [slug] [--all] [--disk]  runners, active runs, pause state, open work in order of precedence; --disk: Docker usage per engine (slow)
 #   adlc pause|resume <slug>         stop/start launching new delivery runs
 #   adlc logs <slug> [poller|deployer|rc|egress|ci|run <issue>]
 #   adlc audit <slug>                egress domains seen (to build the allowlist)
@@ -409,12 +409,16 @@ cmd_pause()  { need_slug "$1"; touch "$ADLC_ROOT/projects/$1/state/paused"; say 
 cmd_resume() { need_slug "$1"; rm -f "$ADLC_ROOT/projects/$1/state/paused"; say "resumed"; }
 
 cmd_status() {
-  local f slug st n free
+  # adlc status [slug] [--all] [--disk]: --all lists the whole queue; --disk adds per-engine Docker usage
+  # (docker system df measures every layer and volume: it can take minutes on a full disk).
+  local f slug st n free a only="" qall="" disk=0
+  for a in "$@"; do case $a in --all) qall=--all ;; --disk) disk=1 ;; -*) die "unknown option $a" ;; *) only=$a ;; esac; done
+  set -- "$only" "$qall"
   free=$(df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }')
   if [ "${free:-0}" -lt "${ADLC_MIN_FREE_GB:-15}" ]; then warn "disk: $(disk_line). Below ${ADLC_MIN_FREE_GB:-15}GB no new runs start: adlc prune"
   elif [ "$(disk_used_pct)" -ge "${ADLC_DISK_WARN_PCT:-75}" ]; then warn "disk: $(disk_line), above ${ADLC_DISK_WARN_PCT:-75}%. Free space: adlc prune"
   else say "disk: $(disk_line)"; fi
-  say "  host Docker: $(docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+  [ "$disk" = 1 ] && say "  host Docker: $(timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
   for f in "$ADLC_ROOT"/config/*.env; do
     [ -e "$f" ] || { say "no projects"; return; }
     slug=$(basename "$f" .env)
@@ -428,8 +432,12 @@ cmd_status() {
     n=$(find "$st/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
     say "    active runs: ${n:-none}"
     [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
-    say "    Docker (agents): $(runner_exec "$slug" docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
-    ci_enabled "$slug" && say "    Docker (CI): $(compose "$slug" exec -T ci-docker docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+    if [ "$disk" = 1 ]; then
+      say "    Docker (agents): $(runner_exec "$slug" timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+      ci_enabled "$slug" && say "    Docker (CI): $(compose "$slug" exec -T ci-docker timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+    else
+      [ -s "$st/docker_usage" ] && say "    Docker (agents, at last housekeeping): $(cat "$st/docker_usage")"
+    fi
     [ -e "$st/logged_in" ] || say "    not logged in (adlc login $slug)"
     n=$(runner_exec "$slug" adlc-gh-token --identity 2>/dev/null | cut -f1) || n=""
     if [ -z "${ADLC_GH_APP_ID:-}" ]; then
@@ -502,7 +510,7 @@ main() {
     attach) cmd_attach "${1:-}" ;;
     session) cmd_session "$@" ;;
     shell) cmd_shell "${1:-}" ;;
-    status) cmd_status "${1:-}" "${2:-}" ;;
+    status) cmd_status "$@" ;;
     pause) cmd_pause "${1:-}" ;;
     resume) cmd_resume "${1:-}" ;;
     logs) cmd_logs "$@" ;;

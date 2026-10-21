@@ -104,8 +104,8 @@ prune_finished_runs() {
   done
 }
 # One line per Docker engine for status output: images, build cache, volumes (size / reclaimable).
-engine_usage() {
-  docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}' 2>/dev/null \
+engine_usage() { # docker system df measures every layer: bounded, it can take minutes on a full disk
+  timeout 120 docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}' 2>/dev/null \
     | awk -F'|' '$1 != "Containers" { sub(/ .*/, "", $3); printf "%s%s %s (%s reclaimable)", sep, tolower($1), $2, $3; sep=" · " } END { print "" }'
 }
 free_gb() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }'; }
