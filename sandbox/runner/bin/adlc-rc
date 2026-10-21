@@ -74,10 +74,23 @@ while :; do
   prepare_rc_worktree || { log "could not prepare $RC_DIR; retrying in 30s"; sleep 30; continue; }
   cd "$RC_DIR" || { sleep 30; continue; }
   log "starting remote-control in $RC_DIR, spawn mode $SPAWN (first start asks 'Enable Remote Control?' here; answer y)"
+  out=$(mktemp)
   claude remote-control \
     --name "adlc-$ADLC_SLUG" \
     --spawn "$SPAWN" \
-    --permission-mode "${ADLC_RC_PERMISSION_MODE:-acceptEdits}" || true
+    --permission-mode "${ADLC_RC_PERMISSION_MODE:-acceptEdits}" 2> >(tee "$out" >&2) || true
+  # The claude.ai login expired or was lost (delivery runs keep working: they use the setup token).
+  # Say so where people look (adlc status, the dashboard's Health tab), and wait for a new login
+  # instead of retrying every 15 seconds.
+  if grep -qiE "must be logged in|auth login" "$out"; then
+    rm -f "$STATE_DIR/logged_in"
+    log "ERROR: the Claude login in the runner has expired. Remote Control is off until you run 'adlc login $ADLC_SLUG' on the host"
+    rm -f "$out"
+    until [ -f "$STATE_DIR/logged_in" ]; do sleep 30; done
+    log "logged in again; starting Remote Control"
+    continue
+  fi
+  rm -f "$out"
   log "remote-control exited; restarting in 15s"
   sleep 15
 done
