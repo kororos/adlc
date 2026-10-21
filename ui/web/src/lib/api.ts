@@ -33,6 +33,38 @@ export type PullRequest = {
   checks: "SUCCESS" | "FAILURE" | "PENDING" | "ERROR" | "EXPECTED" | null
 }
 
+export type CiRole = "test" | "publish" | "kvm" | "self-hosted" | "github"
+
+export type CiJob = {
+  name: string
+  status: "queued" | "in_progress" | "completed" | "waiting" | "pending" | "requested"
+  conclusion: string | null
+  url: string
+  queuedAt: string | null
+  startedAt: string | null
+  completedAt: string | null
+  runner: string | null
+  role: CiRole | null
+  labels: string[]
+}
+
+export type CiRun = {
+  id: number
+  workflow: string
+  title: string
+  branch: string
+  event: string
+  sha: string
+  pr: number | null
+  url: string
+  status: string
+  conclusion: string | null
+  createdAt: string
+  startedAt: string | null
+  updatedAt: string
+  jobs: CiJob[]
+}
+
 export type Snapshot = {
   generatedAt: string
   repo: string
@@ -41,6 +73,7 @@ export type Snapshot = {
   cyclic: number[]
   attention: AttentionItem[]
   pullRequests: PullRequest[]
+  actions?: { generatedAt: string; runs: CiRun[]; error?: string }
 }
 
 export type RunResult = {
@@ -71,9 +104,10 @@ export type ProjectSummary = {
   snapshotAt: string | null
   attention: number
   reviews: number
+  ciRunning: number
 }
 
-export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention" | "reviews"> & {
+export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention" | "reviews" | "ciRunning"> & {
   baseDomain: string
   loggedIn: boolean
   devDeployed: string | null

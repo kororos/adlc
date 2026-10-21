@@ -3,7 +3,7 @@ import { Fragment } from "react"
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 
-const TAB_LABEL: Record<string, string> = { now: "Now", queue: "Queue", attention: "Needs you", history: "History", health: "Health" }
+const TAB_LABEL: Record<string, string> = { now: "Now", queue: "Queue", attention: "Needs you", ci: "CI", history: "History", health: "Health" }
 
 export function TopBar() {
   const crumbs = useRouterState({

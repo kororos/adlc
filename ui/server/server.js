@@ -175,7 +175,8 @@ app.get("/api/projects", async () => projects().map((p) => {
   return { slug: s.slug, repo: s.repo, paused: s.paused, backoffUntil: s.backoffUntil, pending: s.pending,
     active: s.active, counts: s.snapshot?.counts ?? null, snapshotAt: s.snapshot?.generatedAt ?? null,
     attention: s.snapshot?.attention?.length ?? 0,
-    reviews: (s.snapshot?.pullRequests ?? []).filter((pr) => pr.labels.includes("adlc:needs-human-review")).length }
+    reviews: (s.snapshot?.pullRequests ?? []).filter((pr) => pr.labels.includes("adlc:needs-human-review")).length,
+    ciRunning: (s.snapshot?.actions?.runs ?? []).flatMap((r) => r.jobs ?? []).filter((j) => j.status === "in_progress").length }
 }))
 
 app.get("/api/projects/:slug", async (req, reply) => {

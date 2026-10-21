@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
+import { CiTab } from "@/components/ci"
 import { ComponentLog, RunLog } from "@/components/logs"
 import { Freshness, PauseControl, PipelineBadge, StateBadge } from "@/components/status"
 import { Badge } from "@/components/ui/badge"
@@ -19,7 +20,7 @@ import { ago, dateTime, duration, usd } from "@/lib/format"
 import { currentPhaseLabel } from "@/lib/phases"
 import { cn } from "@/lib/utils"
 
-export type ProjectTab = "now" | "queue" | "attention" | "history" | "health"
+export type ProjectTab = "now" | "queue" | "attention" | "ci" | "history" | "health"
 
 export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
   const navigate = useNavigate()
@@ -33,6 +34,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
   const reviews = s?.pullRequests.filter((pr) => pr.labels.includes("adlc:needs-human-review")) ?? []
   const needYou = (s?.attention.length ?? 0) + reviews.length
   const run = p.active[0]
+  const ciRunning = (s?.actions?.runs ?? []).flatMap((r) => r.jobs).filter((j) => j.status === "in_progress").length
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -59,12 +61,14 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
           <TabsTrigger value="now"><Radio />Now{p.active.length ? ` (${p.active.length})` : ""}</TabsTrigger>
           <TabsTrigger value="queue"><ListOrdered />Queue</TabsTrigger>
           <TabsTrigger value="attention"><Inbox />Needs you{needYou ? ` (${needYou})` : ""}</TabsTrigger>
+          <TabsTrigger value="ci"><Workflow />CI{ciRunning ? ` (${ciRunning})` : ""}</TabsTrigger>
           <TabsTrigger value="history"><History />History</TabsTrigger>
           <TabsTrigger value="health"><HeartPulse />Health</TabsTrigger>
         </TabsList>
         <TabsContent value="now" className="mt-2"><NowTab p={p} /></TabsContent>
         <TabsContent value="queue" className="mt-2"><QueueTab items={s?.queue ?? []} /></TabsContent>
         <TabsContent value="attention" className="mt-2"><AttentionTab p={p} /></TabsContent>
+        <TabsContent value="ci" className="mt-2"><CiTab p={p} /></TabsContent>
         <TabsContent value="history" className="mt-2"><HistoryTab slug={slug} /></TabsContent>
         <TabsContent value="health" className="mt-2"><HealthTab p={p} /></TabsContent>
       </Tabs>

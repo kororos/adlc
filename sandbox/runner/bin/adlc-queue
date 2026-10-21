@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --no-warnings
 // adlc-queue [--all] [--limit N]: the project's open work in order of precedence.
-// adlc-queue --snapshot <file>: the same plus open PRs and the issues waiting for a person, as
+// adlc-queue --snapshot <file>: the same plus open PRs, the issues waiting for a person and the GitHub
+//   Actions runs (active and recent, with jobs and runners), as
 //   JSON for the ADLC dashboard (written atomically; the poller refreshes it every minute).
 //
 // Mirrors the poller: an issue can start when all its "blocked by" issues are closed; among
@@ -103,6 +104,42 @@ if (snapshot) {
       labels: p.labels.nodes.map((l) => l.name), closes: p.closingIssuesReferences.nodes.map((c) => c.number),
       checks: p.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null,
     })),
+  }
+  // GitHub Actions: runs that are queued or running, plus the most recent finished ones (last 6 h), each
+  // with its jobs and the runner that took them (the ADLC runner's role is in its name:
+  // adlc-<slug>-<test|publish|kvm>-<time>). Best effort: the rest of the snapshot doesn't depend on it.
+  try {
+    const gh = (path) => JSON.parse(execFileSync("gh", ["api", path], { encoding: "utf8", maxBuffer: 64 << 20 }))
+    const since = Date.now() - 6 * 3600_000
+    const runs = gh(`repos/${owner}/${name}/actions/runs?per_page=50`).workflow_runs
+    const active = runs.filter((r) => r.status !== "completed")
+    const recent = runs.filter((r) => r.status === "completed" && new Date(r.updated_at).getTime() > since).slice(0, 10)
+    const role = (runner) => {
+      if (!runner) return null
+      const m = runner.match(/^adlc-.+-(test|publish|kvm)-\d+$/)
+      return m ? m[1] : runner.startsWith("adlc-") ? "self-hosted" : "github"
+    }
+    data.actions = {
+      generatedAt: new Date().toISOString(),
+      runs: [...active, ...recent].map((r) => {
+        let jobs = []
+        try {
+          jobs = gh(`repos/${owner}/${name}/actions/runs/${r.id}/jobs?per_page=50`).jobs.map((j) => ({
+            name: j.name, status: j.status, conclusion: j.conclusion, url: j.html_url,
+            queuedAt: j.created_at, startedAt: j.started_at, completedAt: j.completed_at,
+            runner: j.runner_name || null, role: role(j.runner_name), labels: j.labels,
+          }))
+        } catch { /* keep the run without its jobs */ }
+        return {
+          id: r.id, workflow: r.name, title: r.display_title, branch: r.head_branch, event: r.event,
+          sha: r.head_sha.slice(0, 7), pr: r.pull_requests?.[0]?.number ?? null, url: r.html_url,
+          status: r.status, conclusion: r.conclusion, createdAt: r.created_at, startedAt: r.run_started_at,
+          updatedAt: r.updated_at, jobs,
+        }
+      }),
+    }
+  } catch (e) {
+    data.actions = { generatedAt: new Date().toISOString(), runs: [], error: String(e.message || e).slice(0, 300) }
   }
   const tmp = `${snapshot}.tmp`
   fs.writeFileSync(tmp, JSON.stringify(data))
