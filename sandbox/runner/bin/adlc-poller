@@ -151,13 +151,19 @@ post_run() { # post_run <n> <exit-code> <jsonl> <stderr>
 }
 
 launch() { # launch <n> <title>
-  local n=$1 title=$2 wt ts out err protected
+  local n=$1 title=$2 wt ts out err protected mode
   wt=$(prepare_worktree "$n" "$title") || { log "#$n: could not create worktree"; return 1; }
   ts=$(date -u +%Y%m%dT%H%M%SZ)
   out="$LOG_DIR/runs/$n-$ts.jsonl"; err="$LOG_DIR/runs/$n-$ts.stderr"
   protected=$(cfg '.repo.protected_branches | join("|")')
+  # An open PR from this issue's branch means a rework (failed checks or a person's request): say so
+  # explicitly, so the run never just resumes its recorded phase.
+  mode=""
+  if [ -n "$(gh pr list -R "$R" --state open --json headRefName --jq ".[] | select(.headRefName | startswith(\"adlc/$n-\")) | .headRefName" 2>/dev/null)" ]; then
+    mode=" --rework"
+  fi
   label "$n" adlc:ready adlc:in-progress
-  log "#$n: starting delivery in $wt"
+  log "#$n: starting delivery${mode:+ (rework of its open PR)} in $wt"
   (
     cd "$wt" || exit 1
     ADLC_MODE=unattended ADLC_RUN=$n \
@@ -168,7 +174,7 @@ launch() { # launch <n> <title>
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
       timeout --kill-after=60 "$RUN_TIMEOUT" \
-      claude -p "/adlc-core:deliver $n" \
+      claude -p "/adlc-core:deliver $n$mode" \
         --permission-mode bypassPermissions \
         --model "$LEAD_MODEL" \
         --output-format stream-json --verbose \
