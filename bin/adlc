@@ -12,7 +12,10 @@
 #       --registry-user <user>       registry pull user (Harbor: robot$<project>+<name>)
 #       --registry-ca <file>         CA certificate for a registry with a private CA
 #       --edge-port <port>           host port for preview URLs (default 80; stored for all projects)
-#       --ci-kvm on|off              add the kvm CI runner (ci-kvm, /dev/kvm, label adlc-kvm): Android e2e on this host
+#       --ci-kvm on|off              add/remove the kvm CI runner (ci-kvm, /dev/kvm, label adlc-kvm): Android e2e on this host
+#       --ci-roles <a,b|none>        CI runner roles on this host: test, publish, kvm (default test,publish)
+#       --ci-only                    this host only runs CI runners for the project (a second machine; see README)
+#       --ci-host <name>             CI-only host's short name in its runner names (default: hostname)
 #       --force                      update even while a delivery run is active (it may be stopped)
 #   adlc app <slug> --id <app-id> --key <private-key.pem>
 #                                    agents act as the ADLC GitHub App (recommended over gh_pat)
@@ -70,23 +73,55 @@ has_sysbox() { docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q s
 compose() { # compose <slug> <args...>
   local slug=$1; shift
   local f; f=$(cfg_file "$slug")
-  local files=(-f "$SANDBOX/compose.project.yml" -f "$SANDBOX/compose.dind-${ADLC_DIND_MODE:-privileged}.yml")
-  [ -e /dev/kvm ] && files+=(-f "$SANDBOX/compose.kvm.yml")
-  [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.registry-ca.yml")
+  local files
+  if ci_only; then
+    files=(-f "$SANDBOX/compose.ci-host.yml")
+  else
+    files=(-f "$SANDBOX/compose.project.yml" -f "$SANDBOX/compose.dind-${ADLC_DIND_MODE:-privileged}.yml")
+    [ -e /dev/kvm ] && files+=(-f "$SANDBOX/compose.kvm.yml")
+    [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.registry-ca.yml")
+  fi
   if ci_enabled "$slug"; then
     files+=(-f "$SANDBOX/compose.ci.yml")
     [ "${ADLC_DIND_MODE:-}" = sysbox ] && files+=(-f "$SANDBOX/compose.ci-sysbox.yml")
     [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.ci-registry-ca.yml")
   fi
-  # The kvm CI runner (ci-kvm + ci-docker-kvm) is the compose profile "kvm".
-  COMPOSE_PROFILES=$(ci_kvm "$slug" && echo kvm) docker compose --env-file "$f" "${files[@]}" "$@"
+  # Each CI role (registrar + engine) is a compose profile: test, publish, kvm.
+  COMPOSE_PROFILES=$(ci_roles "$slug" | paste -sd, -) docker compose --env-file "$f" "${files[@]}" "$@"
 }
-ci_kvm() { ci_enabled "$1" && [ "${ADLC_CI_KVM:-0}" = 1 ] && [ -e /dev/kvm ]; }
+ci_only() { [ "${ADLC_CI_ONLY:-0}" = 1 ]; }
+# The CI roles this host runs for a project (after load_cfg): ADLC_CI_ROLES, else test,publish plus kvm
+# with ADLC_CI_KVM=1 (older configs). kvm only where /dev/kvm exists.
+ci_roles() {
+  ci_enabled "$1" || return 0
+  local r=${ADLC_CI_ROLES:-test,publish$([ "${ADLC_CI_KVM:-0}" = 1 ] && echo ,kvm)} x
+  for x in ${r//,/ }; do
+    case $x in test|publish) echo "$x" ;; kvm) [ -e /dev/kvm ] && echo kvm ;; esac
+  done
+}
+ci_kvm() { ci_roles "$1" | grep -qx kvm; }
+ci_service() { case $1 in test) echo ci ;; *) echo "ci-$1" ;; esac; }
 # The CI registrars of a project and their Docker engines (one pair per role, see compose.ci.yml).
-ci_registrars() { ci_enabled "$1" || return 0; echo ci ci-publish; ci_kvm "$1" && echo ci-kvm; }
+ci_registrars() { local r; for r in $(ci_roles "$1"); do ci_service "$r"; done; }
 ci_engine() { case $1 in ci) echo ci-docker ;; *) echo "ci-docker-${1#ci-}" ;; esac; }
 ci_role() { case $1 in ci) echo test ;; *) echo "${1#ci-}" ;; esac; }
-runner_exec() { local slug=$1; shift; compose "$slug" exec runner "$@"; }
+runner_exec() {
+  local slug=$1; shift
+  ! ci_only || die "'$slug' is a CI-only host here: run this on the main ADLC host"
+  compose "$slug" exec runner "$@"
+}
+# Remove the registrar and engine of CI roles this host no longer runs (compose leaves services of
+# inactive profiles running). A job running there is stopped; GitHub fails it.
+drop_disabled_ci() {
+  local slug=$1 r c
+  for r in test publish kvm; do
+    ci_roles "$slug" | grep -qx "$r" && continue
+    for c in "$(ci_service "$r")" "$(ci_engine "$(ci_service "$r")")"; do
+      docker rm -f "adlc-$slug-$c-1" >/dev/null 2>&1 && ok "CI role $r is off on this host: removed $c"
+    done
+  done
+  return 0
+}
 ci_enabled() { [ -s "$ADLC_ROOT/secrets/$1/ci_admin_pat" ]; }
 
 default_domain() {
@@ -124,6 +159,11 @@ cmd_doctor() {
   for f in "$ADLC_ROOT"/config/*.env; do
     [ -e "$f" ] || continue
     slug=$(basename "$f" .env)
+    if grep -qs '^ADLC_CI_ONLY=1$' "$f"; then
+      ci_enabled "$slug" && ok "$slug: CI-only host (roles: $(grep '^ADLC_CI_ROLES=' "$f" | cut -d= -f2))" \
+        || bad "$slug: CI-only host without ci_admin_pat (adlc secrets $slug)"
+      continue
+    fi
     if [ -s "$ADLC_ROOT/secrets/$slug/gh_app_key" ]; then ok "$slug: agents act as the ADLC GitHub App"
     elif [ -s "$ADLC_ROOT/secrets/$slug/gh_pat" ]; then warn "$slug: agents act as your account via gh_pat (prefer: adlc app $slug …)"
     else bad "$slug: no GitHub credentials for agents (adlc app $slug … or adlc secrets $slug)"; fi
@@ -141,6 +181,7 @@ cmd_secrets() {
   say "  claude_oauth_token: output of 'claude setup-token' (unattended runs). One string starting with sk-ant-oat"
   say "  ci_admin_pat:       FINE-GRAINED token, only this repo, Administration: read/write (registers ephemeral CI"
   say "                      runners; held only by the CI registrar, never by agents or jobs). Optional: empty = no CI runner"
+  say "                      On a CI-only host also Contents: read (the egress proxy's adlc.yaml); the other secrets stay empty there"
   say "  registry_token:     PULL credential for the dev deployer: Harbor robot secret (pull only), or a classic"
   say "                      GitHub token with read:packages for GHCR. Optional until CI publishes images"
   say "  Long tokens may wrap when copied: whitespace is removed automatically."
@@ -157,7 +198,7 @@ cmd_secrets() {
 
 cmd_up() {
   local slug=$1; shift; need_slug "$slug"
-  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca="" edge_port="" ci_kvm="" force=0 runs
+  local repo="" domain="" stacks="" dind="" reg="" reg_user="" reg_ca="" edge_port="" ci_kvm="" ci_roles_opt="" ci_host="" only=0 force=0 runs
   while [ $# -gt 0 ]; do
     case $1 in
       --force) force=1; shift ;;
@@ -170,6 +211,9 @@ cmd_up() {
       --registry-ca) reg_ca=$2; shift 2 ;;
       --edge-port) edge_port=$2; shift 2 ;;
       --ci-kvm) ci_kvm=$2; shift 2 ;;
+      --ci-roles) ci_roles_opt=$2; shift 2 ;;
+      --ci-only) only=1; shift ;;
+      --ci-host) ci_host=$2; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -179,9 +223,15 @@ cmd_up() {
     die "delivery runs in progress: $runs(updating may restart the runner and stop them). Wait, or: adlc pause $slug, then retry; --force updates anyway"
   fi
   [ "$(id -u)" != 0 ] || die "run as the non-root owner of $ADLC_ROOT"
+  local f; f=$(cfg_file "$slug")
+  if [ "$only" = 1 ] || grep -qs '^ADLC_CI_ONLY=1$' "$f"; then
+    [ -f "$f" ] && ! grep -qs '^ADLC_CI_ONLY=1$' "$f" && die "'$slug' already runs here as a full project; --ci-only is for a second machine"
+    up_ci_only "$slug" "$repo" "$ci_roles_opt" "$ci_host" "$dind" "$reg" "$reg_ca" "$ci_kvm"
+    return
+  fi
+  [ -z "$ci_host" ] || die "--ci-host is only for a CI-only host (--ci-only)"
   mkdir -p "$ADLC_ROOT"/{config,cache,edge/dynamic} "$ADLC_ROOT/projects/$slug"/{repo,runs,state,sessions,logs/egress} \
            "$ADLC_ROOT/ui/requests/$slug"
-  local f; f=$(cfg_file "$slug")
   if [ ! -f "$f" ]; then
     [ -n "$repo" ] || die "first start needs --repo owner/name"
     set_cfg "$f" ADLC_SLUG "$slug"
@@ -204,13 +254,7 @@ cmd_up() {
   [ -n "$domain" ] && set_cfg "$f" ADLC_BASE_DOMAIN "$domain"
   if [ -n "$dind" ]; then set_cfg "$f" ADLC_DIND_MODE "$dind"
   elif ! grep -q '^ADLC_DIND_MODE=' "$f"; then has_sysbox && set_cfg "$f" ADLC_DIND_MODE sysbox || set_cfg "$f" ADLC_DIND_MODE privileged; fi
-  case $ci_kvm in
-    "") ;;
-    on) [ -e /dev/kvm ] || die "--ci-kvm on: /dev/kvm doesn't exist on this host"
-        set_cfg "$f" ADLC_CI_KVM 1 ;;
-    off) set_cfg "$f" ADLC_CI_KVM 0 ;;
-    *) die "--ci-kvm takes on or off" ;;
-  esac
+  set_ci_roles "$f" "$ci_roles_opt" "$ci_kvm"
   set_cfg "$f" ADLC_ROOT "$ADLC_ROOT"
   set_cfg "$f" ADLC_HOME "$ADLC_HOME"
   set_cfg "$f" ADLC_RUNNER_IMAGE "adlc/runner-$slug:local"
@@ -265,6 +309,7 @@ http:
 EOF
 
   compose "$slug" up -d --build --remove-orphans
+  drop_disabled_ci "$slug"
   host_housekeep
   say ""
   say "Runner for '$slug' is starting. Next:"
@@ -273,6 +318,81 @@ EOF
   local suffix=""; [ "$eport" = 80 ] || suffix=":$eport"
   say "  (the runner is only recreated when its image or settings change; to load plugin updates: adlc restart $slug)"
   say "  adlc status $slug       ·  previews: http://<run>.app.$slug.$ADLC_BASE_DOMAIN$suffix"
+}
+
+# --ci-roles <a,b|none> and --ci-kvm on|off → ADLC_CI_ROLES (and ADLC_CI_KVM, read by older code paths).
+set_ci_roles() { # set_ci_roles <cfg file> <roles option> <kvm option>
+  local f=$1 opt=$2 kvm=$3 cur x out=""
+  # shellcheck disable=SC1090
+  cur=$( (set -a; source "$f"; set +a; echo "${ADLC_CI_ROLES:-test,publish$([ "${ADLC_CI_KVM:-0}" = 1 ] && echo ,kvm)}") )
+  if [ -n "$opt" ]; then
+    [ "$opt" = none ] && opt=""
+    for x in ${opt//,/ }; do
+      case $x in test|publish) ;; kvm) [ -e /dev/kvm ] || die "--ci-roles kvm: /dev/kvm doesn't exist on this host" ;;
+        *) die "--ci-roles takes test, publish, kvm (comma-separated) or none" ;; esac
+    done
+    cur=$opt
+  fi
+  case $kvm in
+    "") ;;
+    on) [ -e /dev/kvm ] || die "--ci-kvm on: /dev/kvm doesn't exist on this host"; cur="$cur,kvm" ;;
+    off) cur=${cur//kvm/} ;;
+    *) die "--ci-kvm takes on or off" ;;
+  esac
+  for x in test publish kvm; do [[ ",$cur," == *",$x,"* ]] && out="$out${out:+,}$x"; done
+  set_cfg "$f" ADLC_CI_ROLES "${out:-none}"
+  set_cfg "$f" ADLC_CI_KVM "$([[ ",$out," == *",kvm,"* ]] && echo 1 || echo 0)"
+}
+
+# A second machine that only runs CI runners for the project (compose.ci-host.yml): registrars, their
+# engines and an egress proxy. Agents, deployer, edge proxy and dashboard stay on the main host.
+up_ci_only() { # up_ci_only <slug> <repo> <roles> <host> <dind> <registry> <registry ca> <kvm option>
+  local slug=$1 repo=$2 roles=$3 host=$4 dind=$5 reg=$6 reg_ca=$7 kvm=$8 f
+  f=$(cfg_file "$slug")
+  mkdir -p "$ADLC_ROOT"/{config,cache} "$ADLC_ROOT/projects/$slug"/{repo,logs/egress}
+  if [ ! -f "$f" ]; then
+    [ -n "$repo" ] || die "first start needs --repo owner/name"
+    [ -n "$roles" ] || die "first start needs --ci-roles (e.g. kvm, or test,kvm): the roles this host takes over"
+    set_cfg "$f" ADLC_SLUG "$slug"
+    set_cfg "$f" ADLC_CI_ONLY 1
+    set_cfg "$f" ADLC_SUBNET_PREFIX "$(next_subnet)"
+  fi
+  grep -q '^ADLC_CI_SUBNET_PREFIX=' "$f" \
+    || set_cfg "$f" ADLC_CI_SUBNET_PREFIX "$(grep '^ADLC_SUBNET_PREFIX=' "$f" | cut -d= -f2 | sed 's/^172\.31\./172.30./')"
+  [ -n "$repo" ] && set_cfg "$f" ADLC_REPO "$repo"
+  if [ -n "$host" ] || ! grep -q '^ADLC_CI_HOST=' "$f"; then
+    host=${host:-$(hostname -s | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9' | cut -c1-12)}
+    [[ "$host" =~ ^[a-z0-9]{1,12}$ ]] || die "--ci-host: 1-12 lowercase letters or digits"
+    case $host in test|publish|kvm) die "--ci-host can't be a role name" ;; esac
+    set_cfg "$f" ADLC_CI_HOST "$host"
+  fi
+  [ -n "$reg" ] && set_cfg "$f" ADLC_REGISTRY_HOST "$reg"
+  if [ -n "$reg_ca" ]; then
+    [ -f "$reg_ca" ] || die "CA file '$reg_ca' not found"
+    cp "$reg_ca" "$ADLC_ROOT/config/$slug-registry-ca.crt"
+    set_cfg "$f" ADLC_REGISTRY_CA "$ADLC_ROOT/config/$slug-registry-ca.crt"
+  fi
+  if [ -n "$dind" ]; then set_cfg "$f" ADLC_DIND_MODE "$dind"
+  elif ! grep -q '^ADLC_DIND_MODE=' "$f"; then has_sysbox && set_cfg "$f" ADLC_DIND_MODE sysbox || set_cfg "$f" ADLC_DIND_MODE privileged; fi
+  set_ci_roles "$f" "$roles" "$kvm"
+  set_cfg "$f" ADLC_ROOT "$ADLC_ROOT"
+  set_cfg "$f" ADLC_HOME "$ADLC_HOME"
+  # The registrars run in the plain base image (no stack layers: they run no project code).
+  set_cfg "$f" ADLC_RUNNER_IMAGE adlc/runner-base:local
+  load_cfg "$slug"
+  ci_enabled "$slug" || die "secret ci_admin_pat missing: run 'adlc secrets $slug' (only ci_admin_pat is needed on a CI-only host; leave the others empty)"
+  [ -n "$(ci_roles "$slug")" ] || warn "no CI roles on this host (--ci-roles none): nothing runs here"
+
+  say "Building the registrar image…"
+  docker build -q -t adlc/runner-base:local \
+    --build-arg ADLC_UID="$(id -u)" --build-arg ADLC_GID="$(id -g)" "$SANDBOX/runner" >/dev/null
+  compose "$slug" up -d --build --remove-orphans
+  drop_disabled_ci "$slug"
+  host_housekeep
+  say ""
+  say "CI-only host '$ADLC_CI_HOST' for '$slug' ($ADLC_REPO): roles $(ci_roles "$slug" | paste -sd, -). Next:"
+  say "  adlc logs $slug ci       registrars: each says 'runner … waiting for a job'"
+  say "  on the main ADLC host: adlc up $slug --ci-roles <the roles it keeps>   (e.g. test,publish without kvm)"
 }
 
 cmd_app() {
@@ -292,6 +412,11 @@ cmd_app() {
 
 cmd_restart() {
   local slug=${1:-}; need_slug "$slug"; load_cfg "$slug"
+  if ci_only; then
+    # shellcheck disable=SC2046  # one service per word
+    compose "$slug" restart $(ci_registrars "$slug"); ok "CI registrars restarted (an idle runner is replaced; running jobs continue)"
+    return
+  fi
   local runs; runs=$(find "$ADLC_ROOT/projects/$slug/state/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
   if [ -n "$runs" ] && [ "${2:-}" != --force ]; then
     die "delivery runs in progress: $runs(a restart stops them). Wait, or: adlc pause $slug, then retry; --force restarts anyway"
@@ -333,7 +458,8 @@ cmd_prune() {
     slug=$(basename "$f" .env)
     [ -n "${1:-}" ] && [ "$1" != "$slug" ] && continue
     load_cfg "$slug"
-    if runner_exec "$slug" adlc-housekeep >/dev/null 2>&1; then ok "$slug: finished runs' images, untagged images and build cache pruned"
+    if ci_only; then :
+    elif runner_exec "$slug" adlc-housekeep >/dev/null 2>&1; then ok "$slug: finished runs' images, untagged images and build cache pruned"
     else warn "$slug: runner not reachable; skipped its Docker sidecar"; fi
     # Each CI engine, with the same rule as its registrar's after-job cleanup, run from the registrar
     # (it has adlc-lib and the engine's address): compose-built images idle 1h+ (not one a running job
@@ -446,6 +572,16 @@ cmd_status() {
     slug=$(basename "$f" .env)
     [ -n "${1:-}" ] && [ "$1" != "$slug" ] && continue
     load_cfg "$slug"
+    if ci_only; then
+      say "■ $slug  ($ADLC_REPO) · CI-only host '$ADLC_CI_HOST', roles: $(ci_roles "$slug" | paste -sd, -)"
+      compose "$slug" ps --format '    {{.Service}}: {{.State}} {{.Status}}' 2>/dev/null || true
+      if [ "$disk" = 1 ]; then
+        for r in $(ci_registrars "$slug"); do
+          say "    Docker (CI $(ci_role "$r")): $(compose "$slug" exec -T "$(ci_engine "$r")" timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
+        done
+      fi
+      continue
+    fi
     st="$ADLC_ROOT/projects/$slug/state"
     say "■ $slug  ($ADLC_REPO)"
     compose "$slug" ps --format '    {{.Service}}: {{.State}} {{.Status}}' 2>/dev/null || true
@@ -549,7 +685,7 @@ main() {
     resume) cmd_resume "${1:-}" ;;
     logs) cmd_logs "$@" ;;
     audit) cmd_audit "${1:-}" ;;
-    help|-h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    help|-h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
     *) die "unknown command '$c' (adlc help)" ;;
   esac
 }

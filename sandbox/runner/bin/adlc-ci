@@ -24,6 +24,9 @@ INTERVAL=${ADLC_CI_INTERVAL:-15}
 # The real gh, not the wrapper on PATH: the wrapper always swaps in the agents' token, and this
 # container must use ci_admin_pat (the only credential that can register runners).
 GH=/usr/bin/gh
+# Set on a CI-only host (adlc up <slug> --ci-only): part of the runner names, so each host counts only its
+# own busy runners against its CI capacity. Empty on the main ADLC host.
+HOST=${ADLC_CI_HOST:-}
 
 mkdir -p ~/.docker
 cat >~/.docker/config.json <<EOF
@@ -147,7 +150,7 @@ ensure_image() {
 start_runner() {
   local token name jit gid start label_args=() l
   token=$(secret ci_admin_pat)
-  name="adlc-$ADLC_SLUG-$ROLE-$(date +%s)"
+  name="adlc-$ADLC_SLUG${HOST:+-$HOST}-$ROLE-$(date +%s)"
   for l in ${LABELS//,/ }; do label_args+=(-f "labels[]=$l"); done
   jit=$(GH_TOKEN=$token $GH api -X POST "repos/$R/actions/runners/generate-jitconfig" \
           -f name="$name" -F runner_group_id=1 -f work_folder=_work "${label_args[@]}" \
@@ -203,22 +206,27 @@ prune_engine() {
 # ── Shared CI capacity ───────────────────────────────────────────────────────
 # The roles' runners share the dev server's CPU. Capacity is ADLC_CI_SLOTS (default 2); a job of this
 # role takes ADLC_CI_WEIGHT (test and publish 1, kvm 2: an Android build plus emulator runs alone).
-# GitHub's runner list (same token for all registrars) says which runners are busy; the role is in the
-# name (adlc-<slug>-<role>-<time>). A registrar starts a runner only if its job fits next to the other
-# roles' busy jobs, and removes its idle runner when it no longer fits. Best effort: two idle runners
-# can still get jobs in the same second.
+# GitHub's runner list (same token for all registrars) says which runners are busy; host and role are in
+# the name (adlc-<slug>[-<host>]-<role>-<time>). Capacity is per host: only this host's runners count. A
+# registrar starts a runner only if its job fits next to the other roles' busy jobs, and removes its
+# idle runner when it no longer fits. Best effort: two idle runners can still get jobs in the same second.
 SLOTS=${ADLC_CI_SLOTS:-2}
 WEIGHT=${ADLC_CI_WEIGHT:-$([ "$ROLE" = kvm ] && echo 2 || echo 1)}
 role_weight() { case $1 in kvm) echo "${ADLC_CI_WEIGHT_KVM:-2}" ;; *) echo 1 ;; esac; }
 # Weight of the other roles' busy runners; "?" when GitHub can't be asked (then don't block).
 others_busy() {
-  local names n r sum=0
+  local names n r h sum=0
   names=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
             --jq ".runners[] | select(.busy) | .name" 2>/dev/null) || { echo "?"; return; }
   for n in $names; do
-    r=$(sed -nE "s/^adlc-$ADLC_SLUG-(test|publish|kvm)-[0-9]+$/\\1/p" <<<"$n")
-    [ "$r" = "$ROLE" ] && continue
-    [ -n "$r" ] || r=other
+    if [[ "$n" =~ ^adlc-$ADLC_SLUG-(([a-z0-9]+)-)?(test|publish|kvm)-[0-9]+$ ]]; then
+      h=${BASH_REMATCH[2]} r=${BASH_REMATCH[3]}
+      [ "$h" = "$HOST" ] || continue                     # another host's runner: its own capacity
+      [ "$r" = "$ROLE" ] && continue
+    else
+      [ -z "$HOST" ] || continue                         # unknown runners count on the main host only
+      r=other
+    fi
     sum=$((sum + $(role_weight "$r")))
   done
   echo "$sum"
@@ -288,13 +296,37 @@ watch_job_time() {
   job_runner=""
 }
 
-log "registrar ($ROLE) started: one runner at a time with labels $LABELS, image $IMAGE; CI capacity $SLOTS slot(s), this role takes $WEIGHT; job limit ${JOB_MAX_MIN} min"
+# ── Network policy (CI-only host) ────────────────────────────────────────────
+# The egress proxy reads adlc.yaml; on the main host the poller keeps a clone. On a CI-only host the
+# registrars fetch it from the default branch into ADLC_CI_POLICY_DIR every 10 minutes (written only when
+# it changed, so the proxy reloads only then). Needs Contents: read on ci_admin_pat; without it the
+# proxy keeps ADLC_NETWORK_MODE (default audit), and in allowlist mode would lack the project's domains.
+POLICY_DIR=${ADLC_CI_POLICY_DIR:-}
+last_policy=0 policy_warned=0
+sync_policy() {
+  [ -n "$POLICY_DIR" ] || return 0
+  local now out
+  now=$(date +%s); [ $((now - last_policy)) -ge 600 ] || return 0; last_policy=$now
+  if out=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/contents/adlc.yaml" --jq .content 2>/dev/null | base64 -d 2>/dev/null) \
+     && [ -n "$out" ]; then
+    cmp -s <(printf '%s\n' "$out") "$POLICY_DIR/adlc.yaml" && return 0
+    printf '%s\n' "$out" >"$POLICY_DIR/.adlc.yaml.$ROLE" && mv -f "$POLICY_DIR/.adlc.yaml.$ROLE" "$POLICY_DIR/adlc.yaml" \
+      && log "network policy: adlc.yaml updated from $R"
+    policy_warned=0
+  elif [ "$policy_warned" = 0 ]; then
+    policy_warned=1
+    log "WARN: cannot read adlc.yaml from $R (ci_admin_pat needs Contents: read); the egress proxy keeps ${ADLC_NETWORK_MODE:-audit} mode"
+  fi
+}
+
+log "registrar ($ROLE${HOST:+ on $HOST}) started: one runner at a time with labels $LABELS, image $IMAGE; CI capacity $SLOTS slot(s), this role takes $WEIGHT; job limit ${JOB_MAX_MIN} min"
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
     log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue
   fi
   # Image first (cheap when current), then retire idle runners that are outdated, then make sure
   # one runner waits for the next job.
+  sync_policy
   ensure_image
   replace_stale_runners
   if runner_running; then

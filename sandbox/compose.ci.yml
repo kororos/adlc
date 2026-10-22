@@ -5,8 +5,10 @@
 # or later publish job):
 #   ci        + ci-docker          test     labels self-hosted,linux,adlc-test     (checks, e2e-web)
 #   ci-publish + ci-docker-publish publish  labels self-hosted,linux,adlc-publish  (image publishing)
-#   ci-kvm    + ci-docker-kvm      kvm      labels self-hosted,linux,adlc-kvm      (e2e-android; profile
-#                                           "kvm", enabled by `adlc up <slug> --ci-kvm on`)
+#   ci-kvm    + ci-docker-kvm      kvm      labels self-hosted,linux,adlc-kvm      (e2e-android)
+# Each role is a compose profile (test, publish, kvm); `adlc up <slug> --ci-roles …` picks the roles this host
+# runs (default test,publish; --ci-kvm on adds kvm). A CI-only host (adlc up <slug> --ci-only, see
+# compose.ci-host.yml) runs the roles it is given, e.g. only kvm; its runners carry ADLC_CI_HOST in their names.
 # A registrar holds ci_admin_pat and starts one ephemeral JIT runner at a time in its engine; it runs no
 # job code. Agents (runner service) can't reach these engines, so they can't inspect a running publish
 # job and read its registry credentials. Network ci is internal; the only way out is the egress proxy.
@@ -38,6 +40,7 @@ x-ci-env: &ci-env
   ADLC_CI_CACHE_MAX_GB: ${ADLC_CI_CACHE_MAX_GB:-12}
   ADLC_CI_SLOTS: ${ADLC_CI_SLOTS:-2}               # shared CI capacity: test/publish take 1, kvm 2
   ADLC_CI_WEIGHT_KVM: ${ADLC_CI_WEIGHT_KVM:-2}
+  ADLC_CI_HOST: ${ADLC_CI_HOST:-}                 # runner names adlc-<slug>[-<host>]-<role>-<time>; capacity is per host
   ADLC_CI_JOB_MAX_MIN: ${ADLC_CI_JOB_MAX_MIN:-60}   # stop a runner whose job runs longer (0 = off)
   ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
   ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
@@ -57,6 +60,7 @@ services:
   # ── test ───────────────────────────────────────────────────────────────────
   ci-docker:
     <<: *ci-docker
+    profiles: [test]
     hostname: ci-docker
     environment: { <<: *ci-docker-env, NO_PROXY: "localhost,127.0.0.1,ci-docker,${ADLC_CI_SUBNET_PREFIX}.0/24" }
     volumes:
@@ -68,6 +72,7 @@ services:
 
   ci:
     <<: *ci
+    profiles: [test]
     depends_on: [egress, ci-docker]
     environment:
       <<: *ci-env
@@ -85,6 +90,7 @@ services:
   # ── publish ────────────────────────────────────────────────────────────────
   ci-docker-publish:
     <<: *ci-docker
+    profiles: [publish]
     hostname: ci-docker-publish
     environment: { <<: *ci-docker-env, NO_PROXY: "localhost,127.0.0.1,ci-docker-publish,${ADLC_CI_SUBNET_PREFIX}.0/24" }
     volumes:
@@ -96,6 +102,7 @@ services:
 
   ci-publish:
     <<: *ci
+    profiles: [publish]
     depends_on: [egress, ci-docker-publish]
     environment:
       <<: *ci-env
@@ -110,7 +117,7 @@ services:
       ci:
         ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.6
 
-  # ── kvm (Android emulator; adlc up <slug> --ci-kvm on) ─────────────────────
+  # ── kvm (Android emulator; needs /dev/kvm) ────────────────────────────────────
   ci-docker-kvm:
     <<: *ci-docker
     profiles: [kvm]

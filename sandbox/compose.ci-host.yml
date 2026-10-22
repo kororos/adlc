@@ -1,0 +1,35 @@
+# A CI-only host: `adlc up <slug> --ci-only` on a second machine. It runs only CI runners for the project
+# (compose.ci.yml, the roles in ADLC_CI_ROLES) and their egress proxy: no agent runner, no Docker sidecar
+# for agents, no edge proxy, no dev deployer. The main ADLC host keeps everything else.
+#
+# The proxy reads the project's network policy from adlc.yaml like on the main host. There is no poller
+# keeping a clone here, so the registrars fetch adlc.yaml from the default branch (ADLC_CI_POLICY_DIR,
+# every 10 minutes; needs Contents: read on ci_admin_pat, else the proxy uses ADLC_NETWORK_MODE).
+name: adlc-${ADLC_SLUG}
+
+x-policy: &policy
+  volumes:
+    - ${ADLC_ROOT}/projects/${ADLC_SLUG}/repo:/policy
+  environment:
+    ADLC_CI_POLICY_DIR: /policy
+
+services:
+  egress:
+    build: ./egress
+    image: adlc/egress:local
+    environment:
+      ADLC_NETWORK_MODE: ${ADLC_NETWORK_MODE:-audit}
+      ADLC_EGRESS_LOG_MAX_MB: ${ADLC_EGRESS_LOG_MAX_MB:-50}
+    volumes:
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/repo:/project:ro
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/logs/egress:/var/log/squid
+    networks:
+      outbound: {}
+    restart: unless-stopped
+
+  ci: *policy
+  ci-publish: *policy
+  ci-kvm: *policy
+
+networks:
+  outbound: {}

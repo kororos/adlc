@@ -156,7 +156,7 @@ Jobs run on GitHub-hosted runners unless a repository variable sends them to the
 |---|---|---|---|
 | test | `ci` + `ci-docker` | `self-hosted,linux,adlc-test` | lint, typecheck, arch-check, test, e2e-web |
 | publish | `ci-publish` + `ci-docker-publish` | `self-hosted,linux,adlc-publish` | publish |
-| kvm | `ci-kvm` + `ci-docker-kvm` (only with `adlc up <slug> --ci-kvm on`) | `self-hosted,linux,adlc-kvm` | e2e-android |
+| kvm | `ci-kvm` + `ci-docker-kvm` (only with `adlc up <slug> --ci-kvm on` or `--ci-roles …,kvm`) | `self-hosted,linux,adlc-kvm` | e2e-android |
 
 - Each **registrar** holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time** in its own engine. It never runs workflow code.
 - Each role has its **own Docker engine**, which agents can't reach, behind the same egress proxy. Before each new job, everything the previous job in that engine left behind is removed. Jobs that run at the same time never share an engine, so a pull-request job can't reach a running publish job or leave anything behind for it.
@@ -176,7 +176,7 @@ Where jobs run (repository variables, JSON; `provision.sh` sets them from `adlc.
 | Variable | Jobs | Default | On your host |
 |---|---|---|---|
 | `ADLC_TEST_RUNS_ON` | lint, typecheck, arch-check, test, e2e-web | `"ubuntu-latest"` | `["self-hosted","adlc-test"]` |
-| `ADLC_ANDROID_RUNS_ON` | e2e-android | `"ubuntu-latest"` (has KVM) | `["self-hosted","adlc-kvm"]` after `adlc up <slug> --ci-kvm on` (host needs `/dev/kvm`) |
+| `ADLC_ANDROID_RUNS_ON` | e2e-android | `"ubuntu-latest"` (has KVM) | `["self-hosted","adlc-kvm"]` after `adlc up <slug> --ci-kvm on` (host needs `/dev/kvm`), or on a [CI-only host](#a-second-machine-for-ci-ci-only-host) |
 | `ADLC_PUBLISH_RUNS_ON` | publish | `["self-hosted","adlc-publish"]` | |
 
 On your host, `e2e-android` builds the APK first and then starts the stack's emulator container (`deploy/compose.emulator.yml`) in `ci-docker-kvm`, the only engine with `/dev/kvm`. Switching back is one command: `gh variable delete ADLC_ANDROID_RUNS_ON -R <owner/repo>`.
@@ -189,6 +189,42 @@ On your host, `e2e-android` builds the APK first and then starts the stack's emu
   - About 28 minutes per job on GitHub-hosted.
   - On the dev server, about 20 minutes with a cold build cache, and about **10 minutes warm**: the APK build drops from 14½ to 4½ minutes thanks to the CI caches, plus about 2½ minutes for boot and flows.
 - Android jobs have their own runner, so other checks don't queue behind them.
+
+### A second machine for CI (CI-only host)
+CI jobs and the agents share the dev server's CPU. A second VM, **on a different physical host**, can take over CI roles: `adlc up <slug> --ci-only` runs only the CI registrars, their Docker engines and an egress proxy for the project. Agents, the dev deployer, the edge proxy and the dashboard stay on the main host.
+- **Runners are pulled, not pushed.** GitHub hands a job to any idle runner with the right labels, so nothing on the second machine has to be reachable from outside. A role can run on both hosts: its jobs then run on whichever has an idle runner.
+- **Runner names include the host** (`adlc-<slug>-<host>-<role>-<time>`; none on the main host), and the CI tab shows it. **CI capacity (`ADLC_CI_SLOTS`) is per host**: each host counts only its own busy runners.
+- **Network policy:** the proxy reads `adlc.yaml` like on the main host. With no poller clone there, the registrars fetch it from the default branch every 10 minutes. This needs **Contents: read** on `ci_admin_pat`; without it the proxy stays in `ADLC_NETWORK_MODE` (default `audit`), which is enough unless the project uses `allowlist`.
+- **Not on a CI-only host:** `login`, `session`, `shell`, `attach`, `train`, `logs <slug> poller`. Run those on the main host.
+
+**Suggested VM** for the kvm and test roles (an Android job and a test job side by side):
+
+| | Size | Why |
+|---|---|---|
+| vCPU | **8** (6 if the host has 8 cores or fewer) | Never more than the host's physical cores minus 2: watch CPU Ready below 5% and Co-stop below 3% |
+| RAM | **24 GB**, fully reserved | Android build (Gradle + Kotlin) ~8 GB peak, emulator ~4–6 GB, a test job's stack 4–6 GB. Nested virtualisation degrades badly under ballooning |
+| Disk | **150 GB** SSD | One engine per role: kvm ~40 GB (emulator image, Gradle and SDK caches up to 12 GB), test ~30 GB, images and logs |
+| CPU option | vSphere "Expose hardware assisted virtualization to the guest OS" | `/dev/kvm` for the emulator |
+| OS | Ubuntu 24.04 LTS, Docker CE with the compose plugin | Sysbox optional, as on the main host |
+| Network | Outbound internet; Harbor if it runs `publish` | No inbound ports |
+
+**Setup:**
+```bash
+# on the new VM
+sudo mkdir -p /srv/adlc && sudo chown "$USER": /srv/adlc
+git clone https://github.com/kororos/adlc ~/adlc && sudo ln -s ~/adlc/bin/adlc /usr/local/bin/adlc
+adlc doctor                                   # docker, /dev/kvm, disk
+adlc secrets <slug>                           # only ci_admin_pat (add Contents: read to it); Enter for the others
+adlc up <slug> --ci-only --repo <owner/name> --ci-roles test,kvm [--ci-host ci2] \
+               [--registry harbor.example.com --registry-ca /path/ca.crt]   # same registry flags as the main host
+echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>   # Android (2) + one test job (1)
+adlc logs <slug> ci                           # each registrar: "runner … waiting for a job"
+
+# on the main host, once no Android job runs: drop kvm there (test stays on both hosts)
+adlc up <slug> --ci-roles test,publish
+docker volume rm adlc-<slug>_ci-data-kvm adlc-<slug>_ci-certs-kvm   # frees the old kvm engine's disk
+```
+Turning a role off on a host stops its registrar and engine; a job running there fails. Updating: `git pull && adlc up <slug>` on each machine.
 
 ### Using Harbor (or another private registry)
 ```bash

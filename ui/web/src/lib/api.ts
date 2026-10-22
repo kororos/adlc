@@ -45,6 +45,7 @@ export type CiJob = {
   completedAt: string | null
   runner: string | null
   role: CiRole | null
+  host: string | null   // CI-only host that ran it (null: the main ADLC host)
   labels: string[]
 }
 

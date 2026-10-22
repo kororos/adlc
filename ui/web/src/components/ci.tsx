@@ -47,6 +47,7 @@ function JobRow({ run, job, now, waiting }: { run: CiRun; job: CiJob; now: numbe
       {waiting ? <CircleDashed className="size-4 text-amber-500" /> : <LoaderCircle className="size-4 animate-spin text-primary" />}
       <a href={job.url} target="_blank" rel="noreferrer" className="font-medium hover:text-primary">{run.workflow} / {job.name}</a>
       <RoleBadge role={waiting ? wantedRole(job) : job.role} />
+      {!waiting && job.host && <span className="text-xs text-muted-foreground">on {job.host}</span>}
       <span className="text-sm text-muted-foreground"><Context run={run} /></span>
       <span className="ml-auto inline-flex items-center gap-1 text-sm text-muted-foreground tabular-nums">
         <Clock className="size-3.5" />{waiting ? `waiting ${since(job.queuedAt, now)}` : `running ${since(job.startedAt, now)}`}
