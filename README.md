@@ -580,6 +580,10 @@ Conflicts and failed checks take the rework path above.
 `adlc status` and the dashboard's **Needs you** tab show the train and anything waiting for your re-approval.
 - Switch it off with `autonomy.ci_auto_rework: false` in `adlc.yaml`.
 
+**Finishing open PRs before starting new ones.** Every merge can make the other open agent PRs conflict, and each conflict costs a delivery run. Two switches (dashboard → Health → Automation, or `adlc.yaml → autonomy`) keep the pile from growing:
+- `rework_first` (default on): issues whose PR needs work (conflicts, failed checks, your review) run before new issues. The Queue tab marks them "rework".
+- `max_open_prs` (default off; e.g. 3): no new issue starts while that many agent PRs are open, waiting for your review, a merge or a rework. Reworks still run. The Queue tab and `adlc status` say when new issues are held back.
+
 ### Risk tiers and merging
 | Risk | Typical changes | Review | Merge |
 |---|---|---|---|

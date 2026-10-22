@@ -13,6 +13,7 @@ export type QueueItem = {
   blockers: { number: number; owner: boolean }[]
   unblocks: number
   priority?: boolean   // "run next" (label adlc:priority): first in line once a run slot is free
+  rework?: boolean     // has an open agent PR: a run is a rework (conflicts, failed checks, review)
   assignees: string[]
 }
 
@@ -67,7 +68,7 @@ export type CiRun = {
   jobs: CiJob[]
 }
 
-export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current"
+export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current" | "rework_first" | "max_open_prs"
 export type Setting = { key: SettingKey; value: string; source: "dashboard" | "env" | "adlc.yaml" | "default"; project: string; allowed: string[] }
 export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}` | `prioritize:${number}` | `deprioritize:${number}`
 
@@ -85,6 +86,7 @@ export type Snapshot = {
   repo: string
   counts: Partial<Record<QueueState, number>>
   queue: QueueItem[]
+  wip?: { openPrs: number; max: number | null; held: boolean }   // new issues wait while held
   cyclic: number[]
   attention: AttentionItem[]
   pullRequests: PullRequest[]

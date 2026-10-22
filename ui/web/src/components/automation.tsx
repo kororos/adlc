@@ -20,6 +20,16 @@ const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<st
     what: "An agent PR with green checks that fell behind main gets main merged in, so it stays mergeable.",
     values: { on: "on", off: "off" },
   },
+  rework_first: {
+    title: "Rework before new work",
+    what: "Issues whose PR needs work (conflicts, failed checks, your review) run before new issues, so open PRs get finished first.",
+    values: { on: "on", off: "off" },
+  },
+  max_open_prs: {
+    title: "Limit open PRs",
+    what: "No new issue starts while this many agent PRs are open (waiting for your review, a merge or a rework). Reworks still run.",
+    values: { off: "no limit" },
+  },
 }
 const SOURCE: Record<Setting["source"], string> = {
   dashboard: "set here", env: "set on the dev server", "adlc.yaml": "from adlc.yaml", default: "default",

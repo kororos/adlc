@@ -67,7 +67,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
           <TabsTrigger value="health"><HeartPulse />Health</TabsTrigger>
         </TabsList>
         <TabsContent value="now" className="mt-2"><NowTab p={p} /></TabsContent>
-        <TabsContent value="queue" className="mt-2"><QueueTab p={p} items={s?.queue ?? []} /></TabsContent>
+        <TabsContent value="queue" className="mt-2"><QueueTab p={p} items={s?.queue ?? []} wip={s?.wip} /></TabsContent>
         <TabsContent value="attention" className="mt-2"><AttentionTab p={p} /></TabsContent>
         <TabsContent value="ci" className="mt-2"><CiTab p={p} /></TabsContent>
         <TabsContent value="history" className="mt-2"><HistoryTab slug={slug} /></TabsContent>
@@ -157,7 +157,7 @@ function RunNext({ p, item }: { p: Project; item: QueueItem }) {
   )
 }
 
-function QueueTab({ p, items }: { p: Project; items: QueueItem[] }) {
+function QueueTab({ p, items, wip }: { p: Project; items: QueueItem[]; wip?: { openPrs: number; max: number | null; held: boolean } }) {
   if (!items.length) return <EmptyState icon={ListOrdered} title="No queue data yet">The runner writes it within a minute.</EmptyState>
   const groups: { milestone: string; items: QueueItem[] }[] = []
   for (const i of items) {
@@ -167,6 +167,11 @@ function QueueTab({ p, items }: { p: Project; items: QueueItem[] }) {
   }
   return (
     <div className="grid gap-4">
+      {wip?.held && (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm">
+          New issues wait: {wip.openPrs} agent PRs are open (limit {wip.max}). Reworks still run; review, merge or close PRs to make room.
+        </p>
+      )}
       {groups.map((g, gi) => (
         <Card key={`${g.milestone}-${gi}`} className="gap-0 py-0">
           <div className="flex items-center justify-between border-b px-4 py-2.5">
@@ -184,6 +189,7 @@ function QueueTab({ p, items }: { p: Project; items: QueueItem[] }) {
                   <TableCell className="pl-4 font-mono text-xs text-muted-foreground">{i.rank}</TableCell>
                   <TableCell className="max-w-[34rem] whitespace-normal">
                     <IssueLink item={i} />
+                    {i.rework && i.state === "ready" && <Badge variant="outline" className="ml-1.5 align-middle text-xs">rework</Badge>}
                     {i.state === "owner" && i.unblocks ? <span className="ml-1.5 text-xs text-muted-foreground">unblocks {i.unblocks}</span> : null}
                   </TableCell>
                   <TableCell><StateBadge state={i.state} /></TableCell>

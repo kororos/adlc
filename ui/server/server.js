@@ -22,7 +22,10 @@ const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
 const EXTRA_HOSTS = (process.env.ADLC_UI_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean)
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "public")
 // Pause/resume, and the automation switches (applied by the poller; "default" = back to adlc.yaml).
-const SWITCHES = { merge_train: ["on", "dry-run", "off"], ci_auto_rework: ["on", "off"], keep_prs_current: ["on", "off"] }
+const SWITCHES = {
+  merge_train: ["on", "dry-run", "off"], ci_auto_rework: ["on", "off"], keep_prs_current: ["on", "off"],
+  rework_first: ["on", "off"], max_open_prs: ["off", "2", "3", "4", "5", "6", "8"],
+}
 const ACTIONS = new Set(["pause", "resume",
   ...Object.entries(SWITCHES).flatMap(([k, vs]) => [...vs, "default"].map((v) => `${k}:${v}`))])
 
