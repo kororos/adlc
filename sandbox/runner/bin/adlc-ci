@@ -240,15 +240,78 @@ my_idle_runner() {
   GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
     --jq ".runners[] | select(.name == \"$c\") | select(.busy | not) | \"$c \\(.id)\"" 2>/dev/null
 }
-waiting_logged=0
-yield_capacity() { # remove our idle runner while other roles' jobs fill the capacity
-  local idle c id
+# ── Role priority on this host ───────────────────────────────────────────────
+# Roles in ADLC_CI_PRIORITY order (default kvm,publish,test: the slowest required check and the one that
+# needs most slots first, then publish, which the dev deploy waits for, then the short test jobs).
+# While a job of a higher-priority role that this host also runs (ADLC_CI_HOST_ROLES, from adlc up
+# --ci-roles) waits on GitHub for a runner, and it wouldn't fit next to a new job of this role, this
+# registrar starts no runner and removes its idle one: running jobs finish, then the waiting job fits.
+# Nothing names a host: each registrar only looks at its own host's roles and busy runners.
+PRIORITY=${ADLC_CI_PRIORITY:-kvm,publish,test}
+HOST_ROLES=${ADLC_CI_HOST_ROLES:-$ROLE}
+HIGHER=""
+for _r in ${PRIORITY//,/ }; do
+  [ "$_r" = "$ROLE" ] && break
+  [[ ",$HOST_ROLES," == *",$_r,"* ]] && HIGHER="$HIGHER $_r"
+done
+HIGHER=${HIGHER# }
+# Roles with a job waiting for a runner on GitHub (status queued), one per line. Cached for a minute:
+# the queued and in-progress runs (a running workflow can have queued jobs) and their jobs' labels.
+waiting_at=0 waiting_cache=""
+waiting_roles() {
+  local now token id
+  now=$(date +%s)
+  if [ $((now - waiting_at)) -ge 60 ]; then
+    token=$(secret ci_admin_pat)
+    waiting_cache=$(
+      for id in $( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=50" --jq '.workflow_runs[].id'
+                     GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[].id'; } 2>/dev/null | sort -u); do
+        GH_TOKEN=$token $GH api "repos/$R/actions/runs/$id/jobs?filter=latest&per_page=100" \
+          --jq '.jobs[] | select(.status == "queued") | .labels[]' 2>/dev/null
+      done | sed -nE 's/^adlc-(test|publish|kvm)$/\1/p' | sort -u)
+    waiting_at=$now
+  fi
+  printf '%s\n' "$waiting_cache"
+}
+# Roles of this host's busy runners, one per line (fails when GitHub can't be asked).
+busy_here() {
+  local names n
+  names=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
+            --jq ".runners[] | select(.busy) | .name" 2>/dev/null) || return 1
+  for n in $names; do
+    [[ "$n" =~ ^adlc-$ADLC_SLUG-(([a-z0-9]+)-)?(test|publish|kvm)-[0-9]+$ ]] || continue
+    [ "${BASH_REMATCH[2]}" = "$HOST" ] && echo "${BASH_REMATCH[3]}"
+  done
+  return 0
+}
+# The higher-priority role this registrar makes room for, if any: it has a waiting job, no busy runner on
+# this host (else that job waits for its own runner anyway), and wouldn't fit next to a new job of ours.
+yield_to() {
+  [ -n "$HIGHER" ] || return 1
+  local w busy r b load=0
+  w=$(waiting_roles); [ -n "$w" ] || return 1
+  busy=$(busy_here) || return 1
+  for b in $busy; do load=$((load + $(role_weight "$b"))); done
+  for r in $HIGHER; do
+    grep -qx "$r" <<<"$w" || continue
+    grep -qx "$r" <<<"$busy" && continue
+    [ $((load + WEIGHT + $(role_weight "$r"))) -gt "$SLOTS" ] || continue
+    echo "$r"; return 0
+  done
+  return 1
+}
+
+waiting_logged=0 held_for=""
+yield_capacity() { # remove our idle runner when other roles' jobs fill the capacity or one goes first
+  local idle c id r why
   idle=$(my_idle_runner) || return 0; [ -n "$idle" ] || return 0
-  capacity_ok && return 0
+  if r=$(yield_to); then why="a $r job is waiting and goes first on this host ($PRIORITY)"
+  elif ! capacity_ok; then why="other CI jobs use the capacity ($SLOTS slots)"
+  else return 0; fi
   c=${idle%% *}; id=${idle##* }
   docker rm -f "$c" >/dev/null 2>&1
   GH_TOKEN=$(secret ci_admin_pat) $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
-  log "removed idle runner $c: other CI jobs use the capacity ($SLOTS slots); a new one starts when they finish"
+  log "removed idle runner $c: $why; a new one starts when there is room"
 }
 
 # ── Job time limit ───────────────────────────────────────────────────────────
@@ -319,7 +382,7 @@ sync_policy() {
   fi
 }
 
-log "registrar ($ROLE${HOST:+ on $HOST}) started: one runner at a time with labels $LABELS, image $IMAGE; CI capacity $SLOTS slot(s), this role takes $WEIGHT; job limit ${JOB_MAX_MIN} min"
+log "registrar ($ROLE${HOST:+ on $HOST}) started: one runner at a time with labels $LABELS, image $IMAGE; CI capacity $SLOTS slot(s), this role takes $WEIGHT${HIGHER:+, makes room for: $HIGHER}; job limit ${JOB_MAX_MIN} min"
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
     log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue
@@ -332,9 +395,12 @@ while :; do
   if runner_running; then
     watch_job_time
     yield_capacity
+  elif r=$(yield_to); then
+    [ "$held_for" = "$r" ] || log "holding: a $r job is waiting and goes first on this host ($PRIORITY)"
+    held_for=$r
   elif capacity_ok; then
-    [ "$waiting_logged" = 0 ] || log "CI capacity free again"
-    waiting_logged=0
+    [ "$waiting_logged" = 0 ] && [ -z "$held_for" ] || log "CI capacity free again"
+    waiting_logged=0 held_for=""
     reset_engine
     prune_engine
     start_runner || sleep 60
