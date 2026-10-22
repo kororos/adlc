@@ -8,6 +8,7 @@ concurrency: { group: publish, cancel-in-progress: false }
 jobs:
   publish:
     runs-on: ${{ fromJSON(vars.ADLC_PUBLISH_RUNS_ON || '["self-hosted","adlc-publish"]') }}
+    timeout-minutes: 30
     environment: publish                     # push credentials exist only here (main only)
     steps:
       - uses: actions/checkout@v4

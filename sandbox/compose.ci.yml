@@ -38,6 +38,7 @@ x-ci-env: &ci-env
   ADLC_CI_CACHE_MAX_GB: ${ADLC_CI_CACHE_MAX_GB:-12}
   ADLC_CI_SLOTS: ${ADLC_CI_SLOTS:-2}               # shared CI capacity: test/publish take 1, kvm 2
   ADLC_CI_WEIGHT_KVM: ${ADLC_CI_WEIGHT_KVM:-2}
+  ADLC_CI_JOB_MAX_MIN: ${ADLC_CI_JOB_MAX_MIN:-60}   # stop a runner whose job runs longer (0 = off)
   ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
   ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
   HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128

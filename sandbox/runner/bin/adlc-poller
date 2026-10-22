@@ -317,10 +317,14 @@ watch_pr_checks() {
       continue
     fi
     # "PENDING" while any run for the commit is unfinished (or none started yet); else the failed
-    # workflows as "name <url>" joined by "; " (empty = all green). Superseded runs (cancelled) don't count.
-    failed=$(gh run list -R "$R" --commit "$sha" --event pull_request --limit 50 --json name,status,conclusion,url --jq '
+    # workflows as "name <url>" joined by "; " (empty = all green). Only each workflow's latest run counts:
+    # one superseded by a newer run for the same commit doesn't. A latest run that was cancelled (by hand,
+    # or the CI registrar's job time limit) counts as failed: its required check never passes otherwise.
+    failed=$(gh run list -R "$R" --commit "$sha" --event pull_request --limit 50 --json name,status,conclusion,url,createdAt --jq '
       if length == 0 or any(.[]; .status != "completed") then "PENDING" else
-      [.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | "\(.name) <\(.url)>"] | join("; ") end' 2>/dev/null) || continue
+      [group_by(.name)[] | max_by(.createdAt)
+       | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure" or .conclusion == "cancelled")
+       | "\(.name) <\(.url)>\(if .conclusion == "cancelled" then " (cancelled)" else "" end)"] | join("; ") end' 2>/dev/null) || continue
     [ "$failed" != PENDING ] || continue
     if [ -z "$failed" ]; then keep_current "$pr" "$n" "$sha"; continue; fi
     request_rework "$pr" "$n" "$sha" "checks failed" "ADLC: required checks failed on \`${sha:0:7}\`: ${failed}

@@ -165,6 +165,9 @@ Jobs run on GitHub-hosted runners unless a repository variable sends them to the
   - This is best effort: two idle runners can get jobs in the same second.
   - On a bigger host, raise the slots in `/srv/adlc/config/<slug>.env`. With `ADLC_CI_SLOTS=4`, everything runs in parallel.
   - Why: on a 4-vCPU dev server, three jobs at once plus the agents pushed tests with fixed time limits over them.
+- **Job time limit:** a registrar stops its runner when a job has run longer than `ADLC_CI_JOB_MAX_MIN` minutes (default 60; `0` turns it off). GitHub then ends the job, the poller treats it as a failed check, and the next job gets a cleaned engine.
+  - Why: a job without `timeout-minutes` gets GitHub's 6 hours, so one hung step blocks every later job of that role. (2026-10-22: an Android diagnostics step hung for 2 hours.)
+  - The workflow templates set their own, tighter `timeout-minutes`; this is the backstop. Raise it in `/srv/adlc/config/<slug>.env` if a legitimate job takes longer.
 - Because agents can edit workflows, two GitHub-side rules (set by `provision.sh`) complete the picture: `.github/` changes need **your review** (CODEOWNERS + "Require review from Code Owners"), and registry **push credentials live in the `publish` environment, limited to `main`**, so PR-branch workflows can't read them.
 
 `adlc logs <slug> ci` shows the registrars. Runners appear under the repo's Settings → Actions → Runners while waiting for a job.

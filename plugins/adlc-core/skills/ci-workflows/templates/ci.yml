@@ -16,6 +16,7 @@ env:
 jobs:
   lint:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
@@ -32,6 +33,7 @@ jobs:
         run: eval "$(yq '.commands.lint' adlc.build.yaml)"
   typecheck:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
@@ -48,6 +50,7 @@ jobs:
         run: eval "$(yq '.commands.typecheck' adlc.build.yaml)"
   arch-check:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
@@ -64,6 +67,7 @@ jobs:
         run: eval "$(yq '.commands.arch_check' adlc.build.yaml)"
   test:
     runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
