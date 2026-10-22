@@ -199,8 +199,8 @@ function MergeTrainSection({ train, pulls }: { train: MergeTrain; pulls: PullReq
   const title = (n: number) => pulls.find((p) => p.number === n)
   const you = train.prs.filter((t) => t.status === "needs-reapproval").length
   return (
-    <Section icon={TrainFront} title={train.mode === "on" ? "Merge train" : "Merge train (dry run: nothing is merged)"} count={you}
-      empty="No approved PRs.">
+    <Section icon={TrainFront} count={train.prs.length} empty="No approved PRs."
+      title={`${train.mode === "on" ? "Merge train" : "Merge train (dry run: nothing is merged)"}${you ? ` · ${you} to re-approve` : ""}`}>
       <ol className="grid gap-2">
         {train.prs.map((t, i) => {
           const pr = title(t.pr)
