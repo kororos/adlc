@@ -5,7 +5,8 @@
 //   JSON for the ADLC dashboard (written atomically; the poller refreshes it every minute).
 //
 // Mirrors the poller: an issue can start when all its "blocked by" issues are closed; among
-// those, the earliest milestone due date wins, then the oldest issue. Owner tasks (adlc:owner)
+// those, "run next" (label adlc:priority, set from the dashboard) comes first, then the earliest
+// milestone due date, then the oldest issue. Owner tasks (adlc:owner)
 // take their place in the same order, so you see when your task is the next thing in the way.
 // Epics and issues without ADLC labels aren't pipeline work and are left out.
 "use strict"
@@ -41,7 +42,7 @@ for (const i of issues) {
   if (!state) continue
   work.set(i.number, {
     n: i.number, title: i.title, url: i.url, state, created: i.createdAt, raw: i,
-    ms: i.milestone?.title ?? "", due: i.milestone?.dueOn ?? "9999",
+    ms: i.milestone?.title ?? "", due: i.milestone?.dueOn ?? "9999", priority: labels.includes("adlc:priority"),
     blockers: i.blockedBy.nodes.filter((b) => b.state === "OPEN").map((b) => b.number),
   })
 }
@@ -55,7 +56,7 @@ for (const w of work.values()) for (const b of w.blockers) if (work.has(b)) {
   if (!blocks.has(b)) blocks.set(b, [])
   blocks.get(b).push(w.n)
 }
-const key = (w) => [w.due, w.created, w.n]
+const key = (w) => [w.priority ? 0 : 1, w.due, w.created, w.n]
 const cmp = (a, b) => { const x = key(a), y = key(b); for (let k = 0; k < x.length; k++) if (x[k] !== y[k]) return x[k] < y[k] ? -1 : 1; return 0 }
 const avail = [...work.values()].filter((w) => remaining.get(w.n) === 0)
 const order = []
@@ -81,7 +82,7 @@ if (snapshot) {
   const item = (w, i) => ({
     rank: i + 1, number: w.n, title: w.title, url: w.url, state: w.state, milestone: w.ms,
     blockers: w.blockers.map((b) => ({ number: b, owner: work.get(b)?.state === "owner" })),
-    unblocks: (blocks.get(w.n) ?? []).length,
+    unblocks: (blocks.get(w.n) ?? []).length, priority: w.priority,
     assignees: w.raw.assignees.nodes.map((a) => a.login),
   })
   const lastComment = (w) => {
@@ -157,7 +158,7 @@ const line = (w, i, note = "") => {
   const tag = (b) => `#${b}${work.get(b)?.state === "owner" ? "(owner)" : ""}`
   const why = bs.length ? `← ${bs.slice(0, 5).map(tag).join(" ")}${bs.length > 5 ? ` +${bs.length - 5}` : ""}` : ""
   const unblocks = (blocks.get(w.n) ?? []).length
-  const tail = [why, w.state === "owner" && unblocks ? `→ unblocks ${unblocks}` : "", note].filter(Boolean).join("  ")
+  const tail = [w.priority ? "▲ run next" : "", why, w.state === "owner" && unblocks ? `→ unblocks ${unblocks}` : "", note].filter(Boolean).join("  ")
   return `${String(i).padStart(4)}. #${String(w.n).padEnd(5)}${pad(w.state, 12)}${pad(w.ms.split(" ")[0] || "-", 4)} ${pad(w.title, 58)} ${tail}`
 }
 const shown = order.slice(0, limit)

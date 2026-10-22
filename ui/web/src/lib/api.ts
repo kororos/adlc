@@ -12,6 +12,7 @@ export type QueueItem = {
   milestone: string
   blockers: { number: number; owner: boolean }[]
   unblocks: number
+  priority?: boolean   // "run next" (label adlc:priority): first in line once a run slot is free
   assignees: string[]
 }
 
@@ -68,7 +69,7 @@ export type CiRun = {
 
 export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current"
 export type Setting = { key: SettingKey; value: string; source: "dashboard" | "env" | "adlc.yaml" | "default"; project: string; allowed: string[] }
-export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}`
+export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}` | `prioritize:${number}` | `deprioritize:${number}`
 
 export type MergeTrainStatus =
   | "queued" | "updating" | "checks" | "ready" | "merged" | "agent" | "conflicts" | "checking"

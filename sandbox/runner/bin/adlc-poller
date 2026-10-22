@@ -150,6 +150,30 @@ post_run() { # post_run <n> <exit-code> <jsonl> <stderr>
   fi
 }
 
+# ── Run next (dashboard) ───────────────────────────────────────────────────────
+# "Run next" on an issue puts it first in line: label adlc:priority, which launch_ready sorts before the
+# milestone order. Only an open agent issue (ready, or queued with no open "blocked by" issue: it's then
+# promoted) qualifies. It doesn't stop a running delivery: it starts when a run slot is free. The label
+# is removed when its run starts.
+PRIORITY_LABEL=adlc:priority
+prioritize() { # prioritize <n>
+  local n=$1 info state labels open
+  info=$(gh issue view "$n" -R "$R" --json state,labels --jq '[.state, ([.labels[].name] | join(","))] | @tsv' 2>/dev/null) \
+    || { log "WARN: run next: cannot read #$n"; return 0; }
+  state=${info%%$'\t'*}; labels=",${info#*$'\t'},"
+  [ "$state" = OPEN ] || { log "WARN: run next: #$n is not open"; return 0; }
+  case $labels in *,adlc:owner,*|*,owner-task,*|*,type:epic,*) log "WARN: run next: #$n is not agent work"; return 0 ;; esac
+  case $labels in *,adlc:ready,*|*,adlc:queued,*) ;; *) log "WARN: run next: #$n is neither ready nor queued"; return 0 ;; esac
+  open=$(gh api "repos/$R/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null) \
+    || { log "WARN: run next: cannot read the blockers of #$n"; return 0; }
+  [ "$open" = 0 ] || { log "WARN: run next: #$n is blocked by $open open issue(s); not moved"; return 0; }
+  gh label create "$PRIORITY_LABEL" -R "$R" --color B60205 --description "Run this issue next (ADLC dashboard)" >/dev/null 2>&1 || true
+  [[ $labels == *,adlc:queued,* ]] && label "$n" adlc:queued adlc:ready
+  label "$n" "" "$PRIORITY_LABEL"
+  log "#$n: run next (from the dashboard); it starts when a run slot is free"
+}
+deprioritize() { label "$1" "$PRIORITY_LABEL" ""; log "#$1: back to the normal order (from the dashboard)"; }
+
 launch() { # launch <n> <title>
   local n=$1 title=$2 wt ts out err protected mode
   wt=$(prepare_worktree "$n" "$title") || { log "#$n: could not create worktree"; return 1; }
@@ -163,6 +187,7 @@ launch() { # launch <n> <title>
     mode=" --rework"
   fi
   label "$n" adlc:ready adlc:in-progress
+  gh issue edit "$n" -R "$R" --remove-label "$PRIORITY_LABEL" >/dev/null 2>&1 || true
   log "#$n: starting delivery${mode:+ (rework of its open PR)} in $wt"
   (
     cd "$wt" || exit 1
@@ -207,7 +232,7 @@ launch_ready() {
     launch "$n" "$title" && slots=$((slots - 1))
   done < <(gh issue list -R "$R" --label adlc:ready --state open --limit 100 \
              --json number,title,author,milestone,createdAt,labels \
-             --jq "map($NOT_AGENT_WORK) | sort_by((.milestone.dueOn // \"9999\"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv" 2>/dev/null)
+             --jq "map($NOT_AGENT_WORK) | sort_by(([.labels[].name] | index(\"$PRIORITY_LABEL\") == null), (.milestone.dueOn // \"9999\"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv" 2>/dev/null)
 }
 
 # ── Automation switches ──────────────────────────────────────────────────────
@@ -467,6 +492,8 @@ apply_ui_requests() {
     case $action in
       pause)  touch "$STATE_DIR/paused"; log "paused from the dashboard" ;;
       resume) rm -f "$STATE_DIR/paused"; log "resumed from the dashboard" ;;
+      prioritize:[0-9]*) prioritize "${action#*:}" ;;
+      deprioritize:[0-9]*) deprioritize "${action#*:}" ;;
       *:*)
         local key=${action%%:*} value=${action#*:} def
         def=$(setting_def "$key")

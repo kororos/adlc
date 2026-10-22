@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
-  HardDrive, HeartPulse, History, Inbox, KeyRound, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
+  ArrowUpToLine, HardDrive, HeartPulse, History, Inbox, KeyRound, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
@@ -67,7 +67,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
           <TabsTrigger value="health"><HeartPulse />Health</TabsTrigger>
         </TabsList>
         <TabsContent value="now" className="mt-2"><NowTab p={p} /></TabsContent>
-        <TabsContent value="queue" className="mt-2"><QueueTab items={s?.queue ?? []} /></TabsContent>
+        <TabsContent value="queue" className="mt-2"><QueueTab p={p} items={s?.queue ?? []} /></TabsContent>
         <TabsContent value="attention" className="mt-2"><AttentionTab p={p} /></TabsContent>
         <TabsContent value="ci" className="mt-2"><CiTab p={p} /></TabsContent>
         <TabsContent value="history" className="mt-2"><HistoryTab slug={slug} /></TabsContent>
@@ -131,7 +131,33 @@ function RiskBadge({ risk }: { risk: string }) {
   return <Badge variant="outline" className={tone}>{risk} risk</Badge>
 }
 
-function QueueTab({ items }: { items: QueueItem[] }) {
+// "Run next": an issue that can start (ready, or queued with nothing blocking it) goes first in line. The
+// runner checks it again, labels it adlc:priority and starts it when a run slot is free; a running
+// delivery isn't interrupted.
+function RunNext({ p, item }: { p: Project; item: QueueItem }) {
+  const qc = useQueryClient()
+  const m = useMutation({
+    mutationFn: (action: `prioritize:${number}` | `deprioritize:${number}`) => api.action(p.slug, action),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.project(p.slug) }),
+  })
+  const startable = (item.state === "ready" || item.state === "queued") && item.blockers.length === 0
+  if (!startable && !item.priority) return null
+  const pending = m.isPending || p.pending.some((r) => r.action === `prioritize:${item.number}` || r.action === `deprioritize:${item.number}`)
+  if (pending) return <span className="text-xs text-muted-foreground">applying…</span>
+  return item.priority ? (
+    <span className="inline-flex items-center gap-1.5 text-xs">
+      <Badge className="bg-primary/15 text-primary"><ArrowUpToLine />next</Badge>
+      <button type="button" className="text-muted-foreground hover:text-primary hover:underline" onClick={() => m.mutate(`deprioritize:${item.number}`)}>undo</button>
+    </span>
+  ) : (
+    <button type="button" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+      title="Start this issue before the others once a run slot is free" onClick={() => m.mutate(`prioritize:${item.number}`)}>
+      <ArrowUpToLine className="size-3.5" />Run next
+    </button>
+  )
+}
+
+function QueueTab({ p, items }: { p: Project; items: QueueItem[] }) {
   if (!items.length) return <EmptyState icon={ListOrdered} title="No queue data yet">The runner writes it within a minute.</EmptyState>
   const groups: { milestone: string; items: QueueItem[] }[] = []
   for (const i of items) {
@@ -150,7 +176,7 @@ function QueueTab({ items }: { items: QueueItem[] }) {
           <Table>
             <TableHeader><TableRow>
               <TableHead className="w-12 pl-4">Order</TableHead><TableHead>Issue</TableHead><TableHead className="w-32">State</TableHead>
-              <TableHead className="hidden w-56 md:table-cell">Waiting for</TableHead>
+              <TableHead className="hidden w-56 md:table-cell">Waiting for</TableHead><TableHead className="w-28 pr-4" />
             </TableRow></TableHeader>
             <TableBody>
               {g.items.map((i) => (
@@ -169,6 +195,7 @@ function QueueTab({ items }: { items: QueueItem[] }) {
                       {i.blockers.length > 4 && <span className="text-xs text-muted-foreground">+{i.blockers.length - 4}</span>}
                     </div>
                   </TableCell>
+                  <TableCell className="pr-4 text-right"><RunNext p={p} item={i} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>
