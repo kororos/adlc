@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
-  HardDrive, HeartPulse, History, Inbox, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, Workflow,
+  HardDrive, HeartPulse, History, Inbox, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useSidebar } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { api, queryKeys, type Component, type Project, type QueueItem } from "@/lib/api"
+import { api, queryKeys, type Component, type MergeTrain, type MergeTrainStatus, type Project, type PullRequest, type QueueItem } from "@/lib/api"
 import { ago, dateTime, duration, usd } from "@/lib/format"
 import { currentPhaseLabel } from "@/lib/phases"
 import { cn } from "@/lib/utils"
@@ -178,16 +178,63 @@ function QueueTab({ items }: { items: QueueItem[] }) {
   )
 }
 
+const TRAIN_TONE: Partial<Record<MergeTrainStatus, string>> = {
+  "needs-reapproval": "text-amber-600 dark:text-amber-400",
+  "changes-requested": "text-amber-600 dark:text-amber-400",
+  conflicts: "text-amber-600 dark:text-amber-400",
+  failed: "text-red-600 dark:text-red-400",
+  blocked: "text-red-600 dark:text-red-400",
+  ready: "text-emerald-600 dark:text-emerald-400",
+  merged: "text-emerald-600 dark:text-emerald-400",
+}
+const TRAIN_LABEL: Record<MergeTrainStatus, string> = {
+  queued: "queued", updating: "updating", checks: "checks running", ready: "ready to merge", merged: "merged",
+  agent: "agent working", conflicts: "conflicts", checking: "checking", failed: "checks failed", blocked: "blocked",
+  "needs-reapproval": "re-approve", "changes-requested": "changes requested", hold: "on hold",
+}
+
+// Approved agent PRs, merged one after another by ADLC (re-approval needed when code changed after approval).
+function MergeTrainSection({ train, pulls }: { train: MergeTrain; pulls: PullRequest[] }) {
+  const title = (n: number) => pulls.find((p) => p.number === n)
+  const you = train.prs.filter((t) => t.status === "needs-reapproval").length
+  return (
+    <Section icon={TrainFront} title={train.mode === "on" ? "Merge train" : "Merge train (dry run: nothing is merged)"} count={you}
+      empty="No approved PRs.">
+      <ol className="grid gap-2">
+        {train.prs.map((t, i) => {
+          const pr = title(t.pr)
+          return (
+            <li key={t.pr}>
+              <a href={pr?.url ?? "#"} target="_blank" rel="noreferrer"
+                className={cn("group flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border bg-card p-3 transition-colors hover:border-primary/40",
+                  t.status === "needs-reapproval" && "border-amber-500/50")}>
+                <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-medium tabular-nums">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate font-medium group-hover:text-primary">
+                  <span className="font-mono text-muted-foreground">PR #{t.pr}</span> {pr?.title ?? `#${t.issue}`}
+                </span>
+                <span className={cn("text-sm font-medium", TRAIN_TONE[t.status] ?? "text-muted-foreground")}>{TRAIN_LABEL[t.status] ?? t.status}</span>
+                <span className="w-full text-xs text-muted-foreground sm:w-auto">{t.detail}</span>
+              </a>
+            </li>
+          )
+        })}
+      </ol>
+    </Section>
+  )
+}
+
 function AttentionTab({ p }: { p: Project }) {
   const s = p.snapshot
   if (!s) return <EmptyState icon={Inbox} title="No data yet">The runner writes it within a minute.</EmptyState>
   const reviews = s.pullRequests.filter((pr) => pr.labels.includes("adlc:needs-human-review"))
   const owner = s.queue.filter((i) => i.state === "owner").slice(0, 6)
-  if (!reviews.length && !s.attention.length && !owner.length) {
+  const train = p.mergeTrain?.prs ?? []
+  if (!reviews.length && !s.attention.length && !owner.length && !train.length) {
     return <EmptyState icon={PartyPopper} title="Nothing needs you right now">The agents have everything they need.</EmptyState>
   }
   return (
     <div className="grid gap-6">
+      {p.mergeTrain && train.length > 0 && <MergeTrainSection train={p.mergeTrain} pulls={s.pullRequests} />}
       <Section icon={GitPullRequest} title="Pull requests to review" count={reviews.length} empty="No PR is waiting for you.">
         {reviews.map((pr) => (
           <a key={pr.number} href={pr.url} target="_blank" rel="noreferrer"

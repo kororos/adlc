@@ -65,6 +65,15 @@ export type CiRun = {
   jobs: CiJob[]
 }
 
+export type MergeTrainStatus =
+  | "queued" | "updating" | "checks" | "ready" | "merged" | "agent" | "conflicts" | "checking"
+  | "failed" | "blocked" | "needs-reapproval" | "changes-requested" | "hold"
+export type MergeTrain = {
+  mode: "on" | "dry-run"
+  updated: string
+  prs: { pr: number; issue: number; status: MergeTrainStatus; detail: string }[]
+}
+
 export type Snapshot = {
   generatedAt: string
   repo: string
@@ -112,6 +121,7 @@ export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention"
   loggedIn: boolean
   devDeployed: string | null
   dockerUsage: { text: string; updated: string } | null
+  mergeTrain: MergeTrain | null
   health: Record<Component, { updated: string | null; last: string }>
   snapshot: Snapshot | null
 }

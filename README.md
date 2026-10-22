@@ -507,6 +507,26 @@ adlc:pr-open ──(checks fail)──► adlc:ready (rework)       at most auto
 - **Merge conflicts:** an agent's PR that conflicts with its base goes back to the agent the same way, with the same limits. GitHub runs no PR checks while a PR has conflicts, so this is checked first. The agent merges the base, resolves the conflicts keeping both sides' intent, and verifies again. If a conflict needs a product decision, it asks.
 - **Behind `main`:** branch protection requires PRs to be up to date, so any merge leaves the other open PRs unmergeable. When an agent's PR has all checks green but is behind its base, the poller merges the base into it (a merge, not a rebase), and its checks run again on the current base. Low and medium risk PRs then auto-merge; high-risk ones reach you already up to date. Switch it off with `autonomy.keep_prs_current: false`.
 - **PRs from people** (yours, Renovate's) are left alone.
+
+### Merge train: you approve, ADLC merges
+When several agent PRs wait for your review (high risk, or overnight runs), merging one makes all the others stale, so each one needs updating and a new CI run before it can merge. With the merge train you only **review and approve**. The poller then merges the approved agent PRs **one after another**, in approval order:
+- It brings the front PR up to date with its base and waits for green checks.
+- Then it squash-merges it with the App. That's a normal merge: required checks and reviews apply, and the admin bypass is never used. Then the next PR moves up.
+
+Conflicts and failed checks take the rework path above.
+
+**Re-approval only when needed.** ADLC decides whether your approval still holds. It does when every commit after the one you approved is a clean merge of the base branch: a merge whose result is exactly what git produces by itself. New code, a conflict resolution, or anything slipped into a merge makes it stale. ADLC then asks you on the PR to re-approve, with a link to just those changes, and turns off the PR's GitHub auto-merge until you have (GitHub itself would otherwise still count the old approval). If you merge a PR by hand, check that the train doesn't say "re-approve" for it. For this, the branch protection setting **"Dismiss stale pull request approvals when new commits are pushed" must be off**, or GitHub drops your approval on every update:
+
+`gh api -X PATCH repos/<owner/repo>/branches/main/protection/required_pull_request_reviews -F dismiss_stale_reviews=false`
+
+**Taking a PR out of the train:** add `adlc:hold` to it, request changes, or remove your approval.
+
+**Mode** (`autonomy.merge_train` in `adlc.yaml`, or `ADLC_MERGE_TRAIN` in `/srv/adlc/config/<slug>.env`):
+- `dry-run` (default): decides and reports, but merges nothing,
+- `on`,
+- `off`.
+
+`adlc status` and the dashboard's **Needs you** tab show the train and anything waiting for your re-approval.
 - Switch it off with `autonomy.ci_auto_rework: false` in `adlc.yaml`.
 
 ### Risk tiers and merging

@@ -143,6 +143,8 @@ function state(p) {
   let devDeployed = null
   try { devDeployed = fs.readFileSync(st("dev_deployed"), "utf8").trim() } catch { /* never */ }
   // The agents' Docker engine (images, build cache, volumes), written by the poller's housekeeping.
+  // The merge train (approved agent PRs merged one after another), written by the poller.
+  const mergeTrain = readJson(st("merge_train.json"))
   let dockerUsage = null
   try { dockerUsage = { text: fs.readFileSync(st("docker_usage"), "utf8").trim(), updated: fs.statSync(st("docker_usage")).mtime.toISOString() } } catch { /* not yet */ }
   const health = Object.fromEntries(COMPONENTS.map((c) => {
@@ -153,7 +155,7 @@ function state(p) {
     ...p,
     paused: fs.existsSync(st("paused")),
     loggedIn: fs.existsSync(st("logged_in")),
-    backoffUntil, pending, devDeployed, dockerUsage, active, health,
+    backoffUntil, pending, devDeployed, dockerUsage, mergeTrain, active, health,
     snapshot,
   }
 }

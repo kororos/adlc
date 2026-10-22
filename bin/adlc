@@ -445,6 +445,10 @@ cmd_status() {
     n=$(find "$st/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
     say "    active runs: ${n:-none}"
     [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
+    if [ -s "$st/merge_train.json" ]; then
+      jq -r '"    merge train (\(.mode)): " + (if (.prs | length) == 0 then "no approved PRs" else "" end),
+             (.prs[] | "      PR #\(.pr) (#\(.issue)): \(.status) · \(.detail)")' "$st/merge_train.json" 2>/dev/null | sed '/^$/d' | while IFS= read -r l; do say "$l"; done
+    fi
     if [ "$disk" = 1 ]; then
       say "    Docker (agents): $(runner_exec "$slug" timeout 120 docker system df --format "$DF_FMT" 2>/dev/null | usage_fmt)"
       for r in $(ci_registrars "$slug"); do

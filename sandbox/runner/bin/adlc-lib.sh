@@ -27,6 +27,12 @@ cfg() {
   [ -f "$REPO_DIR/adlc.yaml" ] || return 0
   yq -r "($1) // \"\"" "$REPO_DIR/adlc.yaml" 2>/dev/null || true
 }
+# cfg_raw <path> <default>: like cfg, but keeps false and 0 (yq's // treats false as unset).
+cfg_raw() {
+  local v=""
+  [ -f "$REPO_DIR/adlc.yaml" ] && v=$(yq -r "$1" "$REPO_DIR/adlc.yaml" 2>/dev/null || true)
+  [ -n "$v" ] && [ "$v" != null ] && echo "$v" || echo "$2"
+}
 build_cfg() {
   [ -f "$REPO_DIR/adlc.build.yaml" ] || return 0
   yq -r "($1) // \"\"" "$REPO_DIR/adlc.build.yaml" 2>/dev/null || true

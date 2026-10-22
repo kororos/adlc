@@ -218,14 +218,14 @@ launch_ready() {
 # autonomy.ci_rework_max times per PR (default 2); then adlc:needs-human-review. PRs from people, Renovate
 # etc. are left alone. Off with autonomy.ci_auto_rework: false.
 CI_DIR="$STATE_DIR/ci_rework"
-ci_auto() { [ "$(cfg '.autonomy.ci_auto_rework')" != false ]; }
+ci_auto() { [ "$(cfg_raw '.autonomy.ci_auto_rework' true)" != false ]; }
 # A green agent PR that is behind its base branch (branch protection requires up-to-date branches, so any
 # other merge leaves it unmergeable): merge the base into it, so its checks run on the current base and it
 # can merge (auto-merge for low/medium risk, or by you). A merge, not a rebase, keeps the agent's history.
 # Once per head commit; failing PRs are left to the rework path, which merges the base itself.
 keep_current() { # keep_current <pr> <issue> <head sha>
   local pr=$1 n=$2 sha=$3 base behind f="$CI_DIR/current-$1"
-  [ "$(cfg '.autonomy.keep_prs_current')" != false ] || return 0
+  [ "$(cfg_raw '.autonomy.keep_prs_current' true)" != false ] || return 0
   grep -qx "$sha" "$f" 2>/dev/null && return 0
   has_label "$n" adlc:pr-open || return 0
   base=$(gh pr view "$pr" -R "$R" --json baseRefName --jq .baseRefName 2>/dev/null) || return 0
@@ -242,7 +242,7 @@ keep_current() { # keep_current <pr> <issue> <head sha>
 # head commit, at most autonomy.ci_rework_max automatic reworks per PR, then adlc:needs-human-review.
 request_rework() { # request_rework <pr> <issue> <head sha> <what> <comment>
   local pr=$1 n=$2 sha=$3 what=$4 body=$5 max f tried
-  max=$(cfg '.autonomy.ci_rework_max'); max=${max:-${ADLC_CI_REWORK_MAX:-2}}
+  max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
   is_running "$n" && return 0
   has_label "$n" adlc:pr-open || return 0
   f="$CI_DIR/$pr"
@@ -310,6 +310,102 @@ watch_main_checks() {
 Find the cause and fix it. If it's the environment (runner, emulator, network, disk, registry), report it instead of changing code or tests." >/dev/null 2>&1 \
     && log "$b at ${sha:0:7}: workflows failed ($failed); opened a regression issue" \
     || log "WARN: workflows failed on $b at ${sha:0:7} ($failed) but the regression issue could not be created"
+}
+
+# ── Merge train: approved agent PRs are merged one after another ─────────────
+# You review and approve; ADLC merges. Approved agent PRs (adlc/<n>-*) queue in approval order and one at a
+# time goes through: brought up to date with its base (keep it current), checks green, then squash-merged
+# with the App (a normal merge: required checks and reviews apply). Conflicts and failed checks take the
+# usual rework path. ADLC decides whether an approval still holds (the branch protection setting
+# "dismiss stale approvals" is off): it does when every commit after the approved one is a clean merge
+# from the base branch, i.e. a merge whose tree is exactly what git produces by itself. Anything else
+# (new code, a conflict resolution) needs a new approval, which ADLC asks for on the PR.
+# Mode autonomy.merge_train (or ADLC_MERGE_TRAIN): on | dry-run (default: decide and report, merge nothing) | off.
+# Out of the train: adlc:hold on the PR, a "changes requested" review, or removing the approval.
+TRAIN_FILE="$STATE_DIR/merge_train.json"
+train_mode() { local m; m=${ADLC_MERGE_TRAIN:-$(cfg_raw '.autonomy.merge_train' dry-run)}; case $m in on|true) echo on ;; off|false) echo off ;; *) echo dry-run ;; esac; }
+# Is every commit in <approved>..<head> a clean merge of the base branch? (1 = new changes since approval)
+approval_holds() { # approval_holds <approved sha> <head sha> <base>
+  local a=$1 h=$2 base=$3 c p1 p2 tree
+  [ "$a" = "$h" ] && return 0
+  git -C "$REPO_DIR" merge-base --is-ancestor "$a" "$h" 2>/dev/null || return 1
+  # The branch's own line (first parents); commits that came in from the base are covered by the p2 check.
+  for c in $(git -C "$REPO_DIR" rev-list --first-parent "$a..$h"); do
+    p1=$(git -C "$REPO_DIR" rev-parse --verify --quiet "$c^1") || return 1
+    p2=$(git -C "$REPO_DIR" rev-parse --verify --quiet "$c^2") || return 1     # not a merge
+    git -C "$REPO_DIR" rev-parse --verify --quiet "$c^3" >/dev/null && return 1 # octopus
+    git -C "$REPO_DIR" merge-base --is-ancestor "$p2" "origin/$base" 2>/dev/null || return 1
+    tree=$(git -C "$REPO_DIR" merge-tree --write-tree "$p1" "$p2" 2>/dev/null) || return 1  # conflicted
+    [ "$tree" = "$(git -C "$REPO_DIR" rev-parse "$c^{tree}")" ] || return 1     # edited by hand
+  done
+}
+train_entry() { jq -cn --argjson pr "$1" --argjson issue "$2" --arg status "$3" --arg detail "${4:-}" '{pr:$pr,issue:$issue,status:$status,detail:$detail}'; }
+merge_train() {
+  local mode rows pr branch head base mergeable hold approved approvedAt changes n front="" entries=() status detail behind failed f
+  mode=$(train_mode)
+  [ "$mode" != off ] || { rm -f "$TRAIN_FILE"; return 0; }
+  # latestOpinionatedReviews(writersOnly): each reviewer's latest approve/request-changes, people with write
+  # access only. Bots (the agents' App) never count as approval.
+  rows=$(gh api graphql -f query='query($o:String!,$r:String!){repository(owner:$o,name:$r){pullRequests(states:OPEN,first:50){nodes{
+      number headRefName headRefOid baseRefName mergeable labels(first:20){nodes{name}}
+      latestOpinionatedReviews(first:20,writersOnly:true){nodes{author{__typename login} state submittedAt commit{oid}}}}}}}' \
+      -f o="${R%%/*}" -f r="${R##*/}" --jq '
+      .data.repository.pullRequests.nodes[] | select(.headRefName | test("^adlc/[0-9]+-")) |
+      ([.latestOpinionatedReviews.nodes[] | select(.author.__typename != "Bot")]) as $rv |
+      ([$rv[] | select(.state == "APPROVED")] | sort_by(.submittedAt) | last) as $ok |
+      select($ok != null) |
+      [.number, .headRefName, .headRefOid, .baseRefName, .mergeable,
+       ([.labels.nodes[].name] | index("adlc:hold") != null),
+       $ok.commit.oid, $ok.submittedAt, ([$rv[] | select(.state == "CHANGES_REQUESTED")] | length > 0)] | @tsv' 2>/dev/null \
+    | sort -t$'\t' -k8) || return 0
+  mkdir -p "$CI_DIR"
+  while IFS=$'\t' read -r pr branch head base mergeable hold approved approvedAt changes; do
+    [ -n "$pr" ] || continue
+    n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
+    if [ "$hold" = true ]; then entries+=("$(train_entry "$pr" "$n" hold "adlc:hold on the PR")"); continue; fi
+    if [ "$changes" = true ]; then entries+=("$(train_entry "$pr" "$n" changes-requested "a review requests changes")"); continue; fi
+    if ! approval_holds "$approved" "$head" "$base"; then
+      entries+=("$(train_entry "$pr" "$n" needs-reapproval "new changes since your approval (${approved:0:7}..${head:0:7})")")
+      f="$CI_DIR/reapprove-$pr"
+      if ! grep -qx "$head" "$f" 2>/dev/null && [ "$mode" = on ]; then
+        # GitHub keeps the (stale) approval since "dismiss stale approvals" is off: make sure its auto-merge
+        # (enabled by the agents for low/medium risk) can't merge on it either.
+        gh pr merge "$pr" -R "$R" --disable-auto >/dev/null 2>&1 || true
+        gh pr comment "$pr" -R "$R" --body "ADLC merge train: this PR changed after your approval (beyond clean merges of \`$base\`): https://github.com/$R/compare/${approved:0:7}...${head:0:7}
+Please review those changes and approve again to put it back in the merge train (auto-merge, if it was on, is off until then)." >/dev/null 2>&1 && echo "$head" >>"$f"
+      fi
+      continue
+    fi
+    if [ -n "$front" ]; then entries+=("$(train_entry "$pr" "$n" queued "approved ${approvedAt:0:16}Z; waits for #$front")"); continue; fi
+    front=$pr
+    # The front PR: bring it to a mergeable state, one step per cycle.
+    if is_running "$n"; then status=agent; detail="the delivery agent is reworking #$n"
+    elif [ "$mergeable" = CONFLICTING ]; then status=conflicts; detail="conflicts with $base: the agent resolves them, then you re-approve"
+    elif [ "$mergeable" = UNKNOWN ]; then status=checking; detail="GitHub is computing mergeability"
+    else
+      behind=$(gh api "repos/$R/compare/$base...$head" --jq .behind_by 2>/dev/null || echo 0)
+      if [ "${behind:-0}" -gt 0 ]; then
+        status=updating; detail="$behind commit(s) behind $base"
+        if [ "$mode" = on ]; then
+          gh pr update-branch "$pr" -R "$R" >/dev/null 2>&1 && log "merge train: updated PR #$pr with $base" || log "WARN: merge train: could not update PR #$pr"
+        else detail="$detail (dry run: would update it)"; fi
+      else
+        failed=$(gh run list -R "$R" --commit "$head" --event pull_request --limit 50 --json status,conclusion,name --jq '
+          if length == 0 or any(.[]; .status != "completed") then "PENDING" else
+          [.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | .name] | join(", ") end' 2>/dev/null || echo PENDING)
+        if [ "$failed" = PENDING ]; then status=checks; detail="waiting for checks"
+        elif [ -n "$failed" ]; then status=failed; detail="checks failed ($failed): rework, then you re-approve if code changed"
+        elif [ "$mode" = on ]; then
+          if gh pr merge "$pr" -R "$R" --squash >/dev/null 2>&1; then
+            status=merged; detail="merged"; log "merge train: merged PR #$pr (#$n)"; front=""
+          else status=blocked; detail="GitHub refused the merge (branch protection?)"; log "WARN: merge train: GitHub refused to merge PR #$pr"; fi
+        else status=ready; detail="green and up to date (dry run: would merge it now)"; log "merge train (dry run): would merge PR #$pr (#$n)"; fi
+      fi
+    fi
+    entries+=("$(train_entry "$pr" "$n" "$status" "$detail")")
+  done <<<"$rows"
+  printf '%s\n' "${entries[@]}" | jq -s --arg mode "$mode" --arg at "$(date -u +%FT%TZ)" '{mode:$mode, updated:$at, prs:.}' >"$TRAIN_FILE.tmp" 2>/dev/null \
+    && mv "$TRAIN_FILE.tmp" "$TRAIN_FILE"
 }
 
 # ── ADLC dashboard ────────────────────────────────────────────────────────────
@@ -406,7 +502,7 @@ while :; do
     [ $((i % 10)) = 0 ] && log "paused (adlc resume $ADLC_SLUG)"
   else
     promote_queued
-    [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; }
+    [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; merge_train; }
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup
