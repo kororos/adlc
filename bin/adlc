@@ -119,6 +119,8 @@ drop_disabled_ci() {
   for r in test publish kvm; do
     has_ci_role "$slug" "$r" && continue
     for c in "$(ci_service "$r")" "$(ci_engine "$(ci_service "$r")")"; do
+      # docker rm -f succeeds for missing containers too: only report what existed.
+      docker container inspect "adlc-$slug-$c-1" >/dev/null 2>&1 || continue
       docker rm -f "adlc-$slug-$c-1" >/dev/null 2>&1 && ok "CI role $r is off on this host: removed $c"
     done
   done
