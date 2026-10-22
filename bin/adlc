@@ -99,7 +99,9 @@ ci_roles() {
     case $x in test|publish) echo "$x" ;; kvm) [ -e /dev/kvm ] && echo kvm ;; esac
   done
 }
-ci_kvm() { ci_roles "$1" | grep -qx kvm; }
+# has_ci_role <slug> <role>: no pipe into grep -q (under pipefail an early-exiting grep can fail the pipe).
+has_ci_role() { [[ " $(ci_roles "$1" | tr '\n' ' ') " == *" $2 "* ]]; }
+ci_kvm() { has_ci_role "$1" kvm; }
 ci_service() { case $1 in test) echo ci ;; *) echo "ci-$1" ;; esac; }
 # The CI registrars of a project and their Docker engines (one pair per role, see compose.ci.yml).
 ci_registrars() { local r; for r in $(ci_roles "$1"); do ci_service "$r"; done; }
@@ -115,7 +117,7 @@ runner_exec() {
 drop_disabled_ci() {
   local slug=$1 r c
   for r in test publish kvm; do
-    ci_roles "$slug" | grep -qx "$r" && continue
+    has_ci_role "$slug" "$r" && continue
     for c in "$(ci_service "$r")" "$(ci_engine "$(ci_service "$r")")"; do
       docker rm -f "adlc-$slug-$c-1" >/dev/null 2>&1 && ok "CI role $r is off on this host: removed $c"
     done
@@ -218,7 +220,7 @@ cmd_up() {
     esac
   done
   # Recreating the runner (a new image or settings) stops a delivery run in it, like adlc restart.
-  runs=$(find "$ADLC_ROOT/projects/$slug/state/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
+  runs=$(find "$ADLC_ROOT/projects/$slug/state/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ' || true)
   if [ -n "$runs" ] && [ "$force" = 0 ]; then
     die "delivery runs in progress: $runs(updating may restart the runner and stop them). Wait, or: adlc pause $slug, then retry; --force updates anyway"
   fi
@@ -417,7 +419,7 @@ cmd_restart() {
     compose "$slug" restart $(ci_registrars "$slug"); ok "CI registrars restarted (an idle runner is replaced; running jobs continue)"
     return
   fi
-  local runs; runs=$(find "$ADLC_ROOT/projects/$slug/state/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
+  local runs; runs=$(find "$ADLC_ROOT/projects/$slug/state/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ' || true)
   if [ -n "$runs" ] && [ "${2:-}" != --force ]; then
     die "delivery runs in progress: $runs(a restart stops them). Wait, or: adlc pause $slug, then retry; --force restarts anyway"
   fi
