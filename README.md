@@ -160,7 +160,11 @@ Jobs run on GitHub-hosted runners unless a repository variable sends them to the
 
 - Each **registrar** holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time** in its own engine. It never runs workflow code.
 - Each role has its **own Docker engine**, which agents can't reach, behind the same egress proxy. Before each new job, everything the previous job in that engine left behind is removed. Jobs that run at the same time never share an engine, so a pull-request job can't reach a running publish job or leave anything behind for it.
-- Up to three jobs can run at once. Expect some CPU contention on a small host (an Android job next to a test job).
+- **Shared capacity:** the roles share the dev server's CPU. `ADLC_CI_SLOTS` (default 2) is the capacity. A test or publish job takes 1 slot, an Android job takes 2 (`ADLC_CI_WEIGHT_KVM`). So by default an Android job runs alone, and test and publish jobs can run side by side.
+  - A registrar starts its runner only when its job fits next to the other roles' running jobs, and removes an idle runner that no longer fits.
+  - This is best effort: two idle runners can get jobs in the same second.
+  - On a bigger host, raise the slots in `/srv/adlc/config/<slug>.env`. With `ADLC_CI_SLOTS=4`, everything runs in parallel.
+  - Why: on a 4-vCPU dev server, three jobs at once plus the agents pushed tests with fixed time limits over them.
 - Because agents can edit workflows, two GitHub-side rules (set by `provision.sh`) complete the picture: `.github/` changes need **your review** (CODEOWNERS + "Require review from Code Owners"), and registry **push credentials live in the `publish` environment, limited to `main`**, so PR-branch workflows can't read them.
 
 `adlc logs <slug> ci` shows the registrars. Runners appear under the repo's Settings → Actions → Runners while waiting for a job.

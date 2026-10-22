@@ -196,7 +196,50 @@ prune_engine() {
   log "housekeeping: images idle for ${ADLC_CI_IMAGE_MAX_IDLE_H:-24}h removed; $(engine_usage)"
 }
 
-log "registrar ($ROLE) started: one runner at a time with labels $LABELS, image $IMAGE"
+# ── Shared CI capacity ───────────────────────────────────────────────────────
+# The roles' runners share the dev server's CPU. Capacity is ADLC_CI_SLOTS (default 2); a job of this
+# role takes ADLC_CI_WEIGHT (test and publish 1, kvm 2: an Android build plus emulator runs alone).
+# GitHub's runner list (same token for all registrars) says which runners are busy; the role is in the
+# name (adlc-<slug>-<role>-<time>). A registrar starts a runner only if its job fits next to the other
+# roles' busy jobs, and removes its idle runner when it no longer fits. Best effort: two idle runners
+# can still get jobs in the same second.
+SLOTS=${ADLC_CI_SLOTS:-2}
+WEIGHT=${ADLC_CI_WEIGHT:-$([ "$ROLE" = kvm ] && echo 2 || echo 1)}
+role_weight() { case $1 in kvm) echo "${ADLC_CI_WEIGHT_KVM:-2}" ;; *) echo 1 ;; esac; }
+# Weight of the other roles' busy runners; "?" when GitHub can't be asked (then don't block).
+others_busy() {
+  local names n r sum=0
+  names=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
+            --jq ".runners[] | select(.busy) | .name" 2>/dev/null) || { echo "?"; return; }
+  for n in $names; do
+    r=$(sed -nE "s/^adlc-$ADLC_SLUG-(test|publish|kvm)-[0-9]+$/\\1/p" <<<"$n")
+    [ "$r" = "$ROLE" ] && continue
+    [ -n "$r" ] || r=other
+    sum=$((sum + $(role_weight "$r")))
+  done
+  echo "$sum"
+}
+capacity_ok() { local b; b=$(others_busy); [ "$b" = "?" ] || [ $((b + WEIGHT)) -le "$SLOTS" ]; }
+# This registrar's runner, if it is registered and idle on GitHub.
+my_idle_runner() {
+  local c token
+  c=$(docker ps --filter label=adlc.ci=runner --format '{{.Names}}' | head -1); [ -n "$c" ] || return 1
+  token=$(secret ci_admin_pat)
+  GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
+    --jq ".runners[] | select(.name == \"$c\") | select(.busy | not) | \"$c \\(.id)\"" 2>/dev/null
+}
+waiting_logged=0
+yield_capacity() { # remove our idle runner while other roles' jobs fill the capacity
+  local idle c id
+  idle=$(my_idle_runner) || return 0; [ -n "$idle" ] || return 0
+  capacity_ok && return 0
+  c=${idle%% *}; id=${idle##* }
+  docker rm -f "$c" >/dev/null 2>&1
+  GH_TOKEN=$(secret ci_admin_pat) $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
+  log "removed idle runner $c: other CI jobs use the capacity ($SLOTS slots); a new one starts when they finish"
+}
+
+log "registrar ($ROLE) started: one runner at a time with labels $LABELS, image $IMAGE; CI capacity $SLOTS slot(s), this role takes $WEIGHT"
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
     log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue
@@ -205,10 +248,16 @@ while :; do
   # one runner waits for the next job.
   ensure_image
   replace_stale_runners
-  if ! runner_running; then
+  if runner_running; then
+    yield_capacity
+  elif capacity_ok; then
+    [ "$waiting_logged" = 0 ] || log "CI capacity free again"
+    waiting_logged=0
     reset_engine
     prune_engine
     start_runner || sleep 60
+  elif [ "$waiting_logged" = 0 ]; then
+    log "waiting: other CI jobs use the capacity ($SLOTS slots, this role takes $WEIGHT)"; waiting_logged=1
   fi
   sleep "$INTERVAL"
 done
