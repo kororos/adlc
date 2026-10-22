@@ -393,8 +393,9 @@ merge_train() {
       select($ok != null) |
       [.number, .headRefName, .headRefOid, .baseRefName, .mergeable,
        ([.labels.nodes[].name] | index("adlc:hold") != null),
-       $ok.commit.oid, $ok.submittedAt, ([$rv[] | select(.state == "CHANGES_REQUESTED")] | length > 0)] | @tsv' 2>/dev/null \
-    | sort -t$'\t' -k8) || return 0
+       $ok.commit.oid, $ok.submittedAt, ([$rv[] | select(.state == "CHANGES_REQUESTED")] | length > 0)] | @tsv' 2>/dev/null) \
+    || return 0   # GitHub unreachable: keep the last train state rather than writing an empty one
+  rows=$(sort -t$'\t' -k8 <<<"$rows")
   mkdir -p "$CI_DIR"
   while IFS=$'\t' read -r pr branch head base mergeable hold approved approvedAt changes; do
     [ -n "$pr" ] || continue
