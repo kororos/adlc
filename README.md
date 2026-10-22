@@ -513,6 +513,12 @@ adlc:pr-open ──(checks fail)──► adlc:ready (rework)       at most auto
 - **PRs from people** (yours, Renovate's) are left alone.
 - **Switches:** the dashboard's **Health → Automation** card switches the merge train (on / dry-run / off), rework on failed checks and conflicts, and keeping green PRs up to date, live. It shows where each value comes from (set there, `adlc.yaml` or default) and can go back to the project setting. These overrides live on the dev server (`state/settings/`) and don't change `adlc.yaml`.
 
+### New secrets
+A feature that adds a secret needs you to create it per environment. Values are never in the repo, and agents never see them. Three things make sure that doesn't slip through:
+1. The agent's PR lists it under **Owner setup needed**, with the command to create it.
+2. The agent opens an owner task, **"[owner] Create the dev secret <name>"**.
+3. The dev deployer checks the dev stack's secret files before every deploy. If one is missing, it doesn't deploy. It logs which secret is missing and how to create it, and `adlc status` and the dashboard's **Needs you** tab show the same. After you create it, the next attempt (within 2 minutes) deploys.
+
 ### Merge train: you approve, ADLC merges
 When several agent PRs wait for your review (high risk, or overnight runs), merging one makes all the others stale, so each one needs updating and a new CI run before it can merge. With the merge train you only **review and approve**. The poller then merges the approved agent PRs **one after another**, in approval order:
 - It brings the front PR up to date with its base and waits for green checks.

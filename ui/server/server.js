@@ -149,6 +149,8 @@ function state(p) {
   // The merge train (approved agent PRs merged one after another), written by the poller.
   const mergeTrain = readJson(st("merge_train.json"))
   const settings = readJson(st("settings.json"))?.settings ?? null
+  // Dev secrets the deployer found missing (the dev deploy waits for them), written by the deployer.
+  const devMissingSecrets = readJson(st("dev_missing_secrets.json"))
   let dockerUsage = null
   try { dockerUsage = { text: fs.readFileSync(st("docker_usage"), "utf8").trim(), updated: fs.statSync(st("docker_usage")).mtime.toISOString() } } catch { /* not yet */ }
   const health = Object.fromEntries(COMPONENTS.map((c) => {
@@ -159,7 +161,7 @@ function state(p) {
     ...p,
     paused: fs.existsSync(st("paused")),
     loggedIn: fs.existsSync(st("logged_in")),
-    backoffUntil, pending, devDeployed, dockerUsage, mergeTrain, settings, active, health,
+    backoffUntil, pending, devDeployed, devMissingSecrets, dockerUsage, mergeTrain, settings, active, health,
     snapshot,
   }
 }
@@ -181,7 +183,8 @@ app.get("/api/projects", async () => projects().map((p) => {
   return { slug: s.slug, repo: s.repo, paused: s.paused, backoffUntil: s.backoffUntil, pending: s.pending,
     active: s.active, counts: s.snapshot?.counts ?? null, snapshotAt: s.snapshot?.generatedAt ?? null,
     attention: s.snapshot?.attention?.length ?? 0,
-    reviews: (s.snapshot?.pullRequests ?? []).filter((pr) => pr.labels.includes("adlc:needs-human-review")).length,
+    reviews: (s.snapshot?.pullRequests ?? []).filter((pr) => pr.labels.includes("adlc:needs-human-review")).length
+      + (s.devMissingSecrets?.missing?.length ? 1 : 0),
     ciRunning: (s.snapshot?.actions?.runs ?? []).flatMap((r) => r.jobs ?? []).filter((j) => j.status === "in_progress").length }
 }))
 

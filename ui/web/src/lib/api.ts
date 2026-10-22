@@ -126,6 +126,7 @@ export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention"
   devDeployed: string | null
   dockerUsage: { text: string; updated: string } | null
   mergeTrain: MergeTrain | null
+  devMissingSecrets: { tag: string; since: string; missing: { name: string; path: string; hint: string }[] } | null
   settings: Setting[] | null
   health: Record<Component, { updated: string | null; last: string }>
   snapshot: Snapshot | null

@@ -454,6 +454,10 @@ cmd_status() {
     n=$(find "$st/running" -name '*.pid' 2>/dev/null | sed 's#.*/##; s#\.pid##' | tr '\n' ' ')
     say "    active runs: ${n:-none}"
     [ -s "$st/dev_deployed" ] && say "    dev environment: $(cat "$st/dev_deployed")"
+    if [ -s "$st/dev_missing_secrets.json" ]; then
+      warn "    dev deploy of $(jq -r .tag "$st/dev_missing_secrets.json") waits for missing dev secret(s):"
+      jq -r '.missing[] | "      \(.name): \(.hint)"' "$st/dev_missing_secrets.json" | while IFS= read -r l; do say "$l"; done
+    fi
     if [ -s "$st/merge_train.json" ]; then
       jq -r '"    merge train (\(.mode)): " + (if (.prs | length) == 0 then "no approved PRs" else "" end),
              (.prs[] | "      PR #\(.pr) (#\(.issue)): \(.status) · \(.detail)")' "$st/merge_train.json" 2>/dev/null | sed '/^$/d' | while IFS= read -r l; do say "$l"; done

@@ -10,6 +10,39 @@ source /usr/local/bin/adlc-lib.sh
 INTERVAL=${ADLC_DEPLOY_INTERVAL:-120}
 ensure_dirs
 
+# Missing secret files of the dev stack → state/dev_missing_secrets.json (for adlc status and the
+# dashboard) and one log line per new set; returns 1 while any is missing.
+missing_logged=""
+check_dev_secrets() {
+  local paths p name missing=() hint lines=() fmt
+  paths=$(IMAGE_TAG=check ADLC_PROJECT_DOMAIN="$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}" \
+    docker compose -p "$ADLC_SLUG-dev" --project-directory "$REPO_DIR" "$@" config --format json 2>/dev/null \
+    | jq -r '(.secrets // {})[] | .file // empty') || return 0      # can't tell: let the deploy report it
+  for p in $paths; do [ -e "$p" ] || missing+=("$p"); done
+  if [ ${#missing[@]} = 0 ]; then
+    [ -z "$missing_logged" ] || log "dev secrets complete again"
+    missing_logged=""; rm -f "$STATE_DIR/dev_missing_secrets.json"; return 0
+  fi
+  for p in "${missing[@]}"; do
+    name=$(basename "$p")
+    # The test environment usually generates the same secret: reuse its format (e.g. `make <name> hex 24`).
+    fmt=$(grep -hE "^[[:space:]]*make[[:space:]]+$name[[:space:]]" "$REPO_DIR"/deploy/test/secrets.sh 2>/dev/null | head -1 | awk '{print $3, $4}')
+    case $fmt in
+      "hex "*) hint="openssl rand -hex ${fmt#hex } > $p && chmod 444 $p   (chmod 600 instead if only a root container reads it and refuses world-readable files, like Garage)" ;;
+      *) hint="create $p (format: see deploy/test/secrets.sh or the PR's owner notes), then chmod 444 (600 if only a root container reads it)" ;;
+    esac
+    lines+=("$(jq -cn --arg name "$name" --arg path "$p" --arg hint "$hint" '{name:$name,path:$path,hint:$hint}')")
+  done
+  printf '%s\n' "${lines[@]}" | jq -s --arg tag "$tag" --arg at "$(date -u +%FT%TZ)" '{tag:$tag, since:$at, missing:.}' \
+    >"$STATE_DIR/dev_missing_secrets.json.tmp" && mv "$STATE_DIR/dev_missing_secrets.json.tmp" "$STATE_DIR/dev_missing_secrets.json"
+  if [ "$missing_logged" != "${missing[*]}" ]; then
+    log "ERROR: $tag needs dev secret(s) that don't exist yet, so it isn't deployed:"
+    printf '%s\n' "${lines[@]}" | jq -r '"  \(.name): \(.hint)"' | while IFS= read -r l; do log "$l"; done
+    missing_logged="${missing[*]}"
+  fi
+  return 1
+}
+
 while :; do
   sleep "$INTERVAL"
   repo_ready || continue
@@ -41,6 +74,9 @@ while :; do
   if [ -n "$missing" ]; then log "waiting for CI to publish $tag:$missing"; continue; fi
 
   files=(-f "$REPO_DIR/$base"); [ -n "$dev" ] && [ -f "$REPO_DIR/$dev" ] && files+=(-f "$REPO_DIR/$dev")
+  # Dev secrets are files the owner creates by hand. A feature that adds one would make the deploy fail
+  # with a Docker mount error: name the missing ones instead, with how to create them, and wait.
+  if ! check_dev_secrets "${files[@]}"; then continue; fi
   log "deploying $tag to dev"
   if IMAGE_TAG=$tag ADLC_PROJECT_DOMAIN="$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}" \
        docker compose -p "$ADLC_SLUG-dev" --project-directory "$REPO_DIR" "${files[@]}" pull --quiet \

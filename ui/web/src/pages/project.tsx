@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
-  HardDrive, HeartPulse, History, Inbox, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
+  HardDrive, HeartPulse, History, Inbox, KeyRound, ListOrdered, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
@@ -230,11 +230,25 @@ function AttentionTab({ p }: { p: Project }) {
   const reviews = s.pullRequests.filter((pr) => pr.labels.includes("adlc:needs-human-review"))
   const owner = s.queue.filter((i) => i.state === "owner").slice(0, 6)
   const train = p.mergeTrain?.prs ?? []
-  if (!reviews.length && !s.attention.length && !owner.length && !train.length) {
+  const secrets = p.devMissingSecrets?.missing ?? []
+  if (!reviews.length && !s.attention.length && !owner.length && !train.length && !secrets.length) {
     return <EmptyState icon={PartyPopper} title="Nothing needs you right now">The agents have everything they need.</EmptyState>
   }
   return (
     <div className="grid gap-6">
+      {secrets.length > 0 && (
+        <Section icon={KeyRound} title={`Dev deploy of ${p.devMissingSecrets!.tag} waits for dev secrets`} count={secrets.length} empty="">
+          <div className="grid gap-2 rounded-xl border border-amber-500/50 bg-card p-4" data-testid="dev-missing-secrets">
+            <p className="text-sm text-muted-foreground">A merged change needs these secret files on the dev server (since {ago(p.devMissingSecrets!.since)}). Create them there; the deployer retries every 2 minutes.</p>
+            {secrets.map((m) => (
+              <div key={m.name} className="grid gap-1">
+                <p className="font-mono text-sm font-medium">{m.name}</p>
+                <code className="rounded-md bg-muted px-2 py-1 text-xs break-all">{m.hint}</code>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
       {p.mergeTrain && train.length > 0 && <MergeTrainSection train={p.mergeTrain} pulls={s.pullRequests} />}
       <Section icon={GitPullRequest} title="Pull requests to review" count={reviews.length} empty="No PR is waiting for you.">
         {reviews.map((pr) => (
