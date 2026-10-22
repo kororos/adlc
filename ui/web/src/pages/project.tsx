@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
+import { AutomationCard } from "@/components/automation"
 import { CiTab } from "@/components/ci"
 import { ComponentLog, RunLog } from "@/components/logs"
 import { Freshness, PauseControl, PipelineBadge, StateBadge } from "@/components/status"
@@ -389,6 +390,7 @@ function HealthTab({ p }: { p: Project }) {
   const [log, setLog] = useState<Component>("poller")
   return (
     <div className="grid gap-4">
+      <AutomationCard p={p} />
       <DiskCard dockerUsage={p.dockerUsage} />
       <div className="grid gap-3 md:grid-cols-3">
         {COMPONENTS.map((c) => (

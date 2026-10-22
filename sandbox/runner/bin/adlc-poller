@@ -210,6 +210,41 @@ launch_ready() {
              --jq "map($NOT_AGENT_WORK) | sort_by((.milestone.dueOn // \"9999\"), .createdAt) | .[] | [.number, .author.login, .title] | @tsv" 2>/dev/null)
 }
 
+# ── Automation switches ──────────────────────────────────────────────────────
+# Live overrides in state/settings/<key> (written from the dashboard, or `adlc train`) win over the
+# project's adlc.yaml, which wins over the default. state/settings.json shows the effective values.
+SETTINGS_DIR="$STATE_DIR/settings"
+# key|adlc.yaml path|default|allowed values
+SETTINGS="merge_train|.autonomy.merge_train|dry-run|on dry-run off
+ci_auto_rework|.autonomy.ci_auto_rework|on|on off
+keep_prs_current|.autonomy.keep_prs_current|on|on off"
+setting_def() { grep "^$1|" <<<"$SETTINGS"; }
+norm_value() { case $1 in true|on|yes) echo on ;; false|off|no) echo off ;; *) echo "$1" ;; esac; }
+setting() { # setting <key> → effective value
+  local key=$1 def path default v
+  def=$(setting_def "$key"); path=$(cut -d'|' -f2 <<<"$def"); default=$(cut -d'|' -f3 <<<"$def")
+  v=$(cat "$SETTINGS_DIR/$key" 2>/dev/null)
+  [ -z "$v" ] && [ "$key" = merge_train ] && v=${ADLC_MERGE_TRAIN:-}
+  [ -n "$v" ] || v=$(cfg_raw "$path" "$default")
+  norm_value "$v"
+}
+setting_source() {
+  local key=$1 def path
+  [ -s "$SETTINGS_DIR/$key" ] && { echo dashboard; return; }
+  [ "$key" = merge_train ] && [ -n "${ADLC_MERGE_TRAIN:-}" ] && { echo env; return; }
+  def=$(setting_def "$key"); path=$(cut -d'|' -f2 <<<"$def")
+  [ -n "$(cfg_raw "$path" "")" ] && echo adlc.yaml || echo default
+}
+write_settings() {
+  local key path default allowed out=()
+  while IFS='|' read -r key path default allowed; do
+    out+=("$(jq -cn --arg key "$key" --arg value "$(setting "$key")" --arg source "$(setting_source "$key")" \
+      --arg project "$(norm_value "$(cfg_raw "$path" "$default")")" --arg allowed "$allowed" \
+      '{key:$key, value:$value, source:$source, project:$project, allowed:($allowed | split(" "))}')")
+  done <<<"$SETTINGS"
+  printf '%s\n' "${out[@]}" | jq -s '{settings:.}' >"$STATE_DIR/settings.json.tmp" 2>/dev/null && mv "$STATE_DIR/settings.json.tmp" "$STATE_DIR/settings.json"
+}
+
 # ── Failed checks go back to the agent ───────────────────────────────────────
 # An agent's PR (branch adlc/<n>-…, issue labelled adlc:pr-open) whose checks on the head commit have all
 # finished with a failure: comment the failed checks on the PR and relabel the issue adlc:ready, so the
@@ -218,14 +253,14 @@ launch_ready() {
 # autonomy.ci_rework_max times per PR (default 2); then adlc:needs-human-review. PRs from people, Renovate
 # etc. are left alone. Off with autonomy.ci_auto_rework: false.
 CI_DIR="$STATE_DIR/ci_rework"
-ci_auto() { [ "$(cfg_raw '.autonomy.ci_auto_rework' true)" != false ]; }
+ci_auto() { [ "$(setting ci_auto_rework)" = on ]; }
 # A green agent PR that is behind its base branch (branch protection requires up-to-date branches, so any
 # other merge leaves it unmergeable): merge the base into it, so its checks run on the current base and it
 # can merge (auto-merge for low/medium risk, or by you). A merge, not a rebase, keeps the agent's history.
 # Once per head commit; failing PRs are left to the rework path, which merges the base itself.
 keep_current() { # keep_current <pr> <issue> <head sha>
   local pr=$1 n=$2 sha=$3 base behind f="$CI_DIR/current-$1"
-  [ "$(cfg_raw '.autonomy.keep_prs_current' true)" != false ] || return 0
+  [ "$(setting keep_prs_current)" = on ] || return 0
   grep -qx "$sha" "$f" 2>/dev/null && return 0
   has_label "$n" adlc:pr-open || return 0
   base=$(gh pr view "$pr" -R "$R" --json baseRefName --jq .baseRefName 2>/dev/null) || return 0
@@ -323,13 +358,9 @@ Find the cause and fix it. If it's the environment (runner, emulator, network, d
 # Mode (see train_mode): on | dry-run (default: decide and report, merge nothing) | off.
 # Out of the train: adlc:hold on the PR, a "changes requested" review, or removing the approval.
 TRAIN_FILE="$STATE_DIR/merge_train.json"
-# The mode, first match wins: `adlc train <slug> <mode>` on the host (state/merge_train_mode, live, no
-# restart), ADLC_MERGE_TRAIN, adlc.yaml autonomy.merge_train, else dry-run.
-train_mode() {
-  local m; m=$(cat "$STATE_DIR/merge_train_mode" 2>/dev/null)
-  m=${m:-${ADLC_MERGE_TRAIN:-$(cfg_raw '.autonomy.merge_train' dry-run)}}
-  case $m in on|true) echo on ;; off|false) echo off ;; *) echo dry-run ;; esac
-}
+# The mode (see "Automation switches"): dashboard or `adlc train` override, ADLC_MERGE_TRAIN, adlc.yaml
+# autonomy.merge_train, else dry-run.
+train_mode() { case $(setting merge_train) in on) echo on ;; off) echo off ;; *) echo dry-run ;; esac; }
 # Is every commit in <approved>..<head> a clean merge of the base branch? (1 = new changes since approval)
 approval_holds() { # approval_holds <approved sha> <head sha> <base>
   local a=$1 h=$2 base=$3 c p1 p2 tree
@@ -431,6 +462,15 @@ apply_ui_requests() {
     case $action in
       pause)  touch "$STATE_DIR/paused"; log "paused from the dashboard" ;;
       resume) rm -f "$STATE_DIR/paused"; log "resumed from the dashboard" ;;
+      *:*)
+        local key=${action%%:*} value=${action#*:} def
+        def=$(setting_def "$key")
+        if [ -z "$def" ]; then log "WARN: ignored dashboard request '$action' (unknown setting)"
+        elif [ "$value" = default ]; then rm -f "$SETTINGS_DIR/$key"; log "$key: back to the project setting (from the dashboard)"
+        elif [[ " $(cut -d'|' -f4 <<<"$def") " == *" $value "* ]]; then
+          mkdir -p "$SETTINGS_DIR"; echo "$value" >"$SETTINGS_DIR/$key"; log "$key: $value (from the dashboard)"
+        else log "WARN: ignored dashboard request '$action' (value not allowed)"; fi
+        write_settings ;;
       *)      log "WARN: ignored dashboard request '$action' ($(basename "$f"))" ;;
     esac
     rm -f "$f"
@@ -514,6 +554,7 @@ while :; do
   [ $((i % 10)) = 0 ] && cleanup
   [ $((i % HOUSEKEEP_EVERY)) = 1 ] && housekeep
   write_snapshot
+  write_settings
   i=$((i + 1))
   nap
 done

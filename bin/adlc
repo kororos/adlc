@@ -420,9 +420,9 @@ cmd_shell() {
   runner_exec "$1" bash -c 'cd "$ADLC_ROOT/projects/$ADLC_SLUG"; exec bash -l'
 }
 cmd_train() { # adlc train <slug> [on|dry-run|off]: show or switch the merge train, live (no restart)
-  need_slug "${1:-}"; local f="$ADLC_ROOT/projects/$1/state/merge_train_mode"
+  need_slug "${1:-}"; local f="$ADLC_ROOT/projects/$1/state/settings/merge_train"
   case ${2:-} in
-    on|dry-run|off) echo "$2" >"$f"; say "merge train: $2 (the poller picks it up within two minutes)" ;;
+    on|dry-run|off) mkdir -p "$(dirname "$f")"; echo "$2" >"$f"; say "merge train: $2 (the poller picks it up within two minutes)" ;;
     "") say "merge train: $(cat "$f" 2>/dev/null || echo "not set here (adlc.yaml autonomy.merge_train, else dry-run)")" ;;
     *) die "usage: adlc train <slug> [on|dry-run|off]" ;;
   esac

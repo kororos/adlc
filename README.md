@@ -507,6 +507,7 @@ adlc:pr-open ──(checks fail)──► adlc:ready (rework)       at most auto
 - **Merge conflicts:** an agent's PR that conflicts with its base goes back to the agent the same way, with the same limits. GitHub runs no PR checks while a PR has conflicts, so this is checked first. The agent merges the base, resolves the conflicts keeping both sides' intent, and verifies again. If a conflict needs a product decision, it asks.
 - **Behind `main`:** branch protection requires PRs to be up to date, so any merge leaves the other open PRs unmergeable. When an agent's PR has all checks green but is behind its base, the poller merges the base into it (a merge, not a rebase), and its checks run again on the current base. Low and medium risk PRs then auto-merge; high-risk ones reach you already up to date. Switch it off with `autonomy.keep_prs_current: false`.
 - **PRs from people** (yours, Renovate's) are left alone.
+- **Switches:** the dashboard's **Health → Automation** card switches the merge train (on / dry-run / off), rework on failed checks and conflicts, and keeping green PRs up to date, live. It shows where each value comes from (set there, `adlc.yaml` or default) and can go back to the project setting. These overrides live on the dev server (`state/settings/`) and don't change `adlc.yaml`.
 
 ### Merge train: you approve, ADLC merges
 When several agent PRs wait for your review (high risk, or overnight runs), merging one makes all the others stale, so each one needs updating and a new CI run before it can merge. With the merge train you only **review and approve**. The poller then merges the approved agent PRs **one after another**, in approval order:
@@ -521,7 +522,7 @@ Conflicts and failed checks take the rework path above.
 
 **Taking a PR out of the train:** add `adlc:hold` to it, request changes, or remove your approval.
 
-**Mode:** switch it live with `adlc train <slug> on|dry-run|off`, which takes no restart. You can also set a default in `adlc.yaml` (`autonomy.merge_train`) or as `ADLC_MERGE_TRAIN` in `/srv/adlc/config/<slug>.env`. The modes:
+**Mode:** switch it live from the dashboard (a project's **Health** tab → **Automation**) or with `adlc train <slug> on|dry-run|off`. Neither takes a restart. You can also set a default in `adlc.yaml` (`autonomy.merge_train`) or as `ADLC_MERGE_TRAIN` in `/srv/adlc/config/<slug>.env`. The modes:
 - `dry-run` (default): decides and reports, but merges nothing,
 - `on`,
 - `off`.

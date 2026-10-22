@@ -21,7 +21,10 @@ const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
 const EXTRA_HOSTS = (process.env.ADLC_UI_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean)
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "public")
-const ACTIONS = new Set(["pause", "resume"])
+// Pause/resume, and the automation switches (applied by the poller; "default" = back to adlc.yaml).
+const SWITCHES = { merge_train: ["on", "dry-run", "off"], ci_auto_rework: ["on", "off"], keep_prs_current: ["on", "off"] }
+const ACTIONS = new Set(["pause", "resume",
+  ...Object.entries(SWITCHES).flatMap(([k, vs]) => [...vs, "default"].map((v) => `${k}:${v}`))])
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" }, trustProxy: true, bodyLimit: 16 * 1024 })
 
@@ -137,7 +140,7 @@ function state(p) {
   let pending = []
   try {
     pending = fs.readdirSync(path.join(DATA, "ui", "requests", p.slug))
-      .map((f) => f.match(/^(\d+)-([a-z]+)\.json$/)).filter(Boolean)
+      .map((f) => f.match(/^(\d+)-([a-z_]+(?::[a-z-]+)?)\.json$/)).filter(Boolean)
       .map(([, ms, action]) => ({ action, at: new Date(Number(ms)).toISOString() }))
   } catch { /* none */ }
   let devDeployed = null
@@ -145,6 +148,7 @@ function state(p) {
   // The agents' Docker engine (images, build cache, volumes), written by the poller's housekeeping.
   // The merge train (approved agent PRs merged one after another), written by the poller.
   const mergeTrain = readJson(st("merge_train.json"))
+  const settings = readJson(st("settings.json"))?.settings ?? null
   let dockerUsage = null
   try { dockerUsage = { text: fs.readFileSync(st("docker_usage"), "utf8").trim(), updated: fs.statSync(st("docker_usage")).mtime.toISOString() } } catch { /* not yet */ }
   const health = Object.fromEntries(COMPONENTS.map((c) => {
@@ -155,7 +159,7 @@ function state(p) {
     ...p,
     paused: fs.existsSync(st("paused")),
     loggedIn: fs.existsSync(st("logged_in")),
-    backoffUntil, pending, devDeployed, dockerUsage, mergeTrain, active, health,
+    backoffUntil, pending, devDeployed, dockerUsage, mergeTrain, settings, active, health,
     snapshot,
   }
 }

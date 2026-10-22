@@ -34,16 +34,18 @@ export function PauseControl({ slug, paused, pending }: { slug: string; paused: 
       void qc.invalidateQueries({ queryKey: queryKeys.project(slug) })
     },
   })
-  const waiting = pending.length > 0 || m.isPending
+  // Only pause/resume requests concern this button (the automation switches queue requests too).
+  const mine = pending.filter((r) => r.action === "pause" || r.action === "resume")
+  const waiting = mine.length > 0 || m.isPending
   const next = paused ? "resume" : "pause"
   // The poller applies requests within seconds; two minutes means it isn't seeing them.
-  const stuck = pending.some((r) => now - new Date(r.at).getTime() > 120_000)
+  const stuck = mine.some((r) => now - new Date(r.at).getTime() > 120_000)
   return (
     <div className="flex items-center gap-2">
       <Button variant={paused ? "default" : "outline"} size="sm" disabled={waiting} onClick={() => m.mutate(next)}
         data-testid={`${next}-${slug}`}>
         {waiting ? <LoaderCircle className="animate-spin" /> : paused ? <CirclePlay /> : <CirclePause />}
-        {waiting ? `${pending[0]?.action ?? next} requested…` : paused ? "Resume" : "Pause"}
+        {waiting ? `${mine[0]?.action ?? next} requested…` : paused ? "Resume" : "Pause"}
       </Button>
       {stuck && (
         <span className="max-w-xs text-xs text-amber-600 dark:text-amber-400">

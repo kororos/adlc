@@ -65,6 +65,10 @@ export type CiRun = {
   jobs: CiJob[]
 }
 
+export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current"
+export type Setting = { key: SettingKey; value: string; source: "dashboard" | "env" | "adlc.yaml" | "default"; project: string; allowed: string[] }
+export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}`
+
 export type MergeTrainStatus =
   | "queued" | "updating" | "checks" | "ready" | "merged" | "agent" | "conflicts" | "checking"
   | "failed" | "blocked" | "needs-reapproval" | "changes-requested" | "hold"
@@ -122,6 +126,7 @@ export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention"
   devDeployed: string | null
   dockerUsage: { text: string; updated: string } | null
   mergeTrain: MergeTrain | null
+  settings: Setting[] | null
   health: Record<Component, { updated: string | null; last: string }>
   snapshot: Snapshot | null
 }
@@ -163,7 +168,7 @@ export const api = {
   project: (slug: string) => request<Project>("GET", `/api/projects/${slug}`),
   runs: (slug: string) => request<Run[]>("GET", `/api/projects/${slug}/runs?limit=100`),
   disk: () => request<Disk | null>("GET", "/api/disk"),
-  action: (slug: string, action: "pause" | "resume") => request<{ ok: true }>("POST", `/api/projects/${slug}/actions`, { action }),
+  action: (slug: string, action: ProjectAction) => request<{ ok: true }>("POST", `/api/projects/${slug}/actions`, { action }),
 }
 
 export const queryKeys = {
