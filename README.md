@@ -521,7 +521,7 @@ Conflicts and failed checks take the rework path above.
 
 **Taking a PR out of the train:** add `adlc:hold` to it, request changes, or remove your approval.
 
-**Mode** (`autonomy.merge_train` in `adlc.yaml`, or `ADLC_MERGE_TRAIN` in `/srv/adlc/config/<slug>.env`):
+**Mode:** switch it live with `adlc train <slug> on|dry-run|off`, which takes no restart. You can also set a default in `adlc.yaml` (`autonomy.merge_train`) or as `ADLC_MERGE_TRAIN` in `/srv/adlc/config/<slug>.env`. The modes:
 - `dry-run` (default): decides and reports, but merges nothing,
 - `on`,
 - `off`.

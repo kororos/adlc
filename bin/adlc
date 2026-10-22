@@ -27,6 +27,7 @@
 #   adlc pause|resume <slug>         stop/start launching new delivery runs
 #   adlc logs <slug> [poller|deployer|rc|egress|ci|run <issue>]
 #   adlc audit <slug>                egress domains seen (to build the allowlist)
+#   adlc train <slug> [on|dry-run|off]  show or switch the merge train (approved agent PRs merged in order), live
 #   adlc restart <slug> [--force]    restart the runner: reloads the ADLC plugins and Remote Control
 #                                    (refuses while delivery runs are active unless --force)
 #   adlc down <slug>                 stop the runner (workspace and volumes are kept)
@@ -418,6 +419,14 @@ cmd_shell() {
   # shellcheck disable=SC2016  # expanded inside the container
   runner_exec "$1" bash -c 'cd "$ADLC_ROOT/projects/$ADLC_SLUG"; exec bash -l'
 }
+cmd_train() { # adlc train <slug> [on|dry-run|off]: show or switch the merge train, live (no restart)
+  need_slug "${1:-}"; local f="$ADLC_ROOT/projects/$1/state/merge_train_mode"
+  case ${2:-} in
+    on|dry-run|off) echo "$2" >"$f"; say "merge train: $2 (the poller picks it up within two minutes)" ;;
+    "") say "merge train: $(cat "$f" 2>/dev/null || echo "not set here (adlc.yaml autonomy.merge_train, else dry-run)")" ;;
+    *) die "usage: adlc train <slug> [on|dry-run|off]" ;;
+  esac
+}
 cmd_pause()  { need_slug "$1"; touch "$ADLC_ROOT/projects/$1/state/paused"; say "paused: no new runs will start (running ones continue)"; }
 cmd_resume() { need_slug "$1"; rm -f "$ADLC_ROOT/projects/$1/state/paused"; say "resumed"; }
 
@@ -532,6 +541,7 @@ main() {
     shell) cmd_shell "${1:-}" ;;
     status) cmd_status "$@" ;;
     pause) cmd_pause "${1:-}" ;;
+    train) cmd_train "${1:-}" "${2:-}" ;;
     resume) cmd_resume "${1:-}" ;;
     logs) cmd_logs "$@" ;;
     audit) cmd_audit "${1:-}" ;;

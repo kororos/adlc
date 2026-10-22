@@ -320,10 +320,16 @@ Find the cause and fix it. If it's the environment (runner, emulator, network, d
 # "dismiss stale approvals" is off): it does when every commit after the approved one is a clean merge
 # from the base branch, i.e. a merge whose tree is exactly what git produces by itself. Anything else
 # (new code, a conflict resolution) needs a new approval, which ADLC asks for on the PR.
-# Mode autonomy.merge_train (or ADLC_MERGE_TRAIN): on | dry-run (default: decide and report, merge nothing) | off.
+# Mode (see train_mode): on | dry-run (default: decide and report, merge nothing) | off.
 # Out of the train: adlc:hold on the PR, a "changes requested" review, or removing the approval.
 TRAIN_FILE="$STATE_DIR/merge_train.json"
-train_mode() { local m; m=${ADLC_MERGE_TRAIN:-$(cfg_raw '.autonomy.merge_train' dry-run)}; case $m in on|true) echo on ;; off|false) echo off ;; *) echo dry-run ;; esac; }
+# The mode, first match wins: `adlc train <slug> <mode>` on the host (state/merge_train_mode, live, no
+# restart), ADLC_MERGE_TRAIN, adlc.yaml autonomy.merge_train, else dry-run.
+train_mode() {
+  local m; m=$(cat "$STATE_DIR/merge_train_mode" 2>/dev/null)
+  m=${m:-${ADLC_MERGE_TRAIN:-$(cfg_raw '.autonomy.merge_train' dry-run)}}
+  case $m in on|true) echo on ;; off|false) echo off ;; *) echo dry-run ;; esac
+}
 # Is every commit in <approved>..<head> a clean merge of the base branch? (1 = new changes since approval)
 approval_holds() { # approval_holds <approved sha> <head sha> <base>
   local a=$1 h=$2 base=$3 c p1 p2 tree
