@@ -293,7 +293,7 @@ cd ~/adlc
 | `adlc pause` / `resume <slug>` | stop/start launching new runs (running ones finish) |
 | `adlc logs <slug> [poller\|deployer\|rc\|egress\|ci\|run <n>]` | follow logs (Ctrl-C to stop; don't pipe into `tail`, they never end). `run <n>` shows the agent's narrative and cost for the latest run of issue n |
 | `adlc audit <slug>` | domains reached through the egress proxy and whether each is allowlisted |
-| `adlc restart <slug> [--force]` | restart the runner to load ADLC plugin updates after `git pull` (`adlc up` only recreates it when the image or settings change). Refuses while delivery runs are active unless `--force` |
+| `adlc restart <slug> [--force]` | restart the runner: reloads the ADLC **plugins** (commands, agents, skills) after `git pull`. The runner's **scripts** (poller, merge train, queue, CI registrar, Remote Control loop) are built into its image: load those with `adlc up <slug>` (pause and let running deliveries finish first). `restart` and `adlc doctor` warn when the image is older than the checkout. Refuses while delivery runs are active unless `--force` |
 | `adlc down <slug>` | stop the project (workspace, volumes and login are kept) |
 | `adlc doctor` | host checks |
 
@@ -566,7 +566,7 @@ When several agent PRs wait for your review (high risk, or overnight runs), merg
 
 Conflicts and failed checks take the rework path above.
 
-**Re-approval only when needed.** ADLC decides whether your approval still holds. It does when every commit after the one you approved is a clean merge of the base branch: a merge whose result is exactly what git produces by itself. New code, a conflict resolution, or anything slipped into a merge makes it stale. ADLC then asks you on the PR to re-approve, with a link to just those changes, and turns off the PR's GitHub auto-merge until you have (GitHub itself would otherwise still count the old approval). If you merge a PR by hand, check that the train doesn't say "re-approve" for it. For this, the branch protection setting **"Dismiss stale pull request approvals when new commits are pushed" must be off**, or GitHub drops your approval on every update:
+**Re-approval only when needed.** ADLC decides whether your approval still holds. It does when every commit after the one you approved is a clean merge of the base branch (a merge whose result is exactly what git produces by itself) or touches only ADLC's own run records under `.adlc/` (review reports, rework notes, run state). New code, a conflict resolution, or anything slipped into a merge makes it stale. ADLC then asks you on the PR to re-approve, with a link to just those changes, and turns off the PR's GitHub auto-merge until you have (GitHub itself would otherwise still count the old approval). If you merge a PR by hand, check that the train doesn't say "re-approve" for it. For this, the branch protection setting **"Dismiss stale pull request approvals when new commits are pushed" must be off**, or GitHub drops your approval on every update. To re-approve, submit another review with **Approve** (Files changed → Review changes → Approve): GitHub accepts it although your earlier approval still shows:
 
 `gh api -X PATCH repos/<owner/repo>/branches/main/protection/required_pull_request_reviews -F dismiss_stale_reviews=false`
 

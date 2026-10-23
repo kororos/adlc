@@ -444,15 +444,17 @@ Find the cause and fix it. If it's the environment (runner, emulator, network, d
 # with the App (a normal merge: required checks and reviews apply). Conflicts and failed checks take the
 # usual rework path. ADLC decides whether an approval still holds (the branch protection setting
 # "dismiss stale approvals" is off): it does when every commit after the approved one is a clean merge
-# from the base branch, i.e. a merge whose tree is exactly what git produces by itself. Anything else
-# (new code, a conflict resolution) needs a new approval, which ADLC asks for on the PR.
+# from the base branch, i.e. a merge whose tree is exactly what git produces by itself, or touches only
+# ADLC's own run records under .adlc/ (review, rework notes, state). Anything else (new code, a conflict
+# resolution) needs a new approval, which ADLC asks for on the PR.
 # Mode (see train_mode): on | dry-run (default: decide and report, merge nothing) | off.
 # Out of the train: adlc:hold on the PR, a "changes requested" review, or removing the approval.
 TRAIN_FILE="$STATE_DIR/merge_train.json"
 # The mode (see "Automation switches"): dashboard or `adlc train` override, ADLC_MERGE_TRAIN, adlc.yaml
 # autonomy.merge_train, else dry-run.
 train_mode() { case $(setting merge_train) in on) echo on ;; off) echo off ;; *) echo dry-run ;; esac; }
-# Is every commit in <approved>..<head> a clean merge of the base branch? (1 = new changes since approval)
+# Is every commit in <approved>..<head> a clean merge of the base branch or a .adlc/-only record?
+# (1 = new changes since approval)
 approval_holds() { # approval_holds <approved sha> <head sha> <base>
   local a=$1 h=$2 base=$3 c p1 p2 tree
   [ "$a" = "$h" ] && return 0
@@ -460,7 +462,12 @@ approval_holds() { # approval_holds <approved sha> <head sha> <base>
   # The branch's own line (first parents); commits that came in from the base are covered by the p2 check.
   for c in $(git -C "$REPO_DIR" rev-list --first-parent "$a..$h"); do
     p1=$(git -C "$REPO_DIR" rev-parse --verify --quiet "$c^1") || return 1
-    p2=$(git -C "$REPO_DIR" rev-parse --verify --quiet "$c^2") || return 1     # not a merge
+    if ! p2=$(git -C "$REPO_DIR" rev-parse --verify --quiet "$c^2"); then     # not a merge
+      # ADLC's run records only (at least one file, none outside .adlc/)
+      git -C "$REPO_DIR" diff-tree --no-commit-id --name-only -r "$c" | grep -q . || return 1
+      git -C "$REPO_DIR" diff-tree --no-commit-id --name-only -r "$c" | grep -qv '^\.adlc/' && return 1
+      continue
+    fi
     git -C "$REPO_DIR" rev-parse --verify --quiet "$c^3" >/dev/null && return 1 # octopus
     git -C "$REPO_DIR" merge-base --is-ancestor "$p2" "origin/$base" 2>/dev/null || return 1
     tree=$(git -C "$REPO_DIR" merge-tree --write-tree "$p1" "$p2" 2>/dev/null) || return 1  # conflicted
@@ -500,7 +507,7 @@ merge_train() {
         # GitHub keeps the (stale) approval since "dismiss stale approvals" is off: make sure its auto-merge
         # (enabled by the agents for low/medium risk) can't merge on it either.
         gh pr merge "$pr" -R "$R" --disable-auto >/dev/null 2>&1 || true
-        gh pr comment "$pr" -R "$R" --body "ADLC merge train: this PR changed after your approval (beyond clean merges of \`$base\`): https://github.com/$R/compare/${approved:0:7}...${head:0:7}
+        gh pr comment "$pr" -R "$R" --body "ADLC merge train: this PR changed after your approval (beyond clean merges of \`$base\` and ADLC run records): https://github.com/$R/compare/${approved:0:7}...${head:0:7}
 Please review those changes and approve again to put it back in the merge train (auto-merge, if it was on, is off until then)." >/dev/null 2>&1 && echo "$head" >>"$f"
       fi
       continue
