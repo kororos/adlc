@@ -24,7 +24,9 @@ type GNode = { id: number; item?: QueueItem; x: number; y: number }
 type Layout = { nodes: GNode[]; edges: [number, number][]; width: number; height: number; isolated: number }
 
 // keep: draw only these issues (and only the edges between them); otherwise every issue and its blockers.
-function layout(items: QueueItem[], onlyLinked: boolean, keep: Set<number> | null): Layout {
+// byPriority: each column strictly in queue order (the Queue tab's rank); otherwise the queue order is
+// only the start, and cards move next to the issues they're connected to (fewer crossing lines).
+function layout(items: QueueItem[], onlyLinked: boolean, keep: Set<number> | null, byPriority = false): Layout {
   if (keep) items = items.filter((i) => keep.has(i.number))
   const byId = new Map(items.map((i) => [i.number, i]))
   const edges: [number, number][] = []
@@ -85,7 +87,7 @@ function layout(items: QueueItem[], onlyLinked: boolean, keep: Set<number> | nul
     const pos = new Map<number, number>()
     const index = () => cols.forEach((c) => c?.forEach((n, i) => pos.set(n, i)))
     index()
-    for (let sweep = 0; sweep < 4; sweep++) {
+    for (let sweep = 0; sweep < (byPriority ? 0 : 4); sweep++) {
       const forward = sweep % 2 === 0
       const order = forward ? cols.map((_, i) => i).slice(1) : cols.map((_, i) => i).reverse().slice(1)
       for (const ci of order) {
@@ -111,6 +113,7 @@ function layout(items: QueueItem[], onlyLinked: boolean, keep: Set<number> | nul
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`
 
 // An issue's chain over the given edges: everything it waits for and (downstream) everything waiting for it;
 // with downstream "direct", only the issues it blocks directly.
@@ -133,6 +136,7 @@ export function DependencyGraph({ items }: { items: QueueItem[] }) {
   const [hover, setHover] = useState<number | null>(null)
   const [focus, setFocus] = useState<number | null>(null)
   const [milestone, setMilestone] = useState("")
+  const [byPriority, setByPriority] = useState(false)
   const milestones = useMemo(() => [...new Set(items.map((i) => i.milestone).filter(Boolean))], [items])
   // Focus (click on an issue): only its chain, across milestones. Otherwise the milestone filter.
   const keep = useMemo(() => {
@@ -142,7 +146,7 @@ export function DependencyGraph({ items }: { items: QueueItem[] }) {
     }
     return milestone ? new Set(items.filter((i) => i.milestone === milestone).map((i) => i.number)) : null
   }, [focus, milestone, items])
-  const g = useMemo(() => layout(items, onlyLinked && focus === null, keep), [items, onlyLinked, focus, keep])
+  const g = useMemo(() => layout(items, onlyLinked && focus === null, keep, byPriority), [items, onlyLinked, focus, keep, byPriority])
   const at = useMemo(() => new Map(g.nodes.map((n) => [n.id, n])), [g])
   const lit = useMemo(() => (hover === null ? null : chain(hover, g.edges)), [hover, g.edges])
 
@@ -176,6 +180,10 @@ export function DependencyGraph({ items }: { items: QueueItem[] }) {
               {milestones.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           )}
+          <label className="inline-flex items-center gap-1.5 text-sm text-muted-foreground" title="Each column strictly in queue order (more crossing lines)">
+            <input type="checkbox" checked={byPriority} onChange={(e) => setByPriority(e.target.checked)} />
+            order by priority
+          </label>
           <label className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
             <input type="checkbox" checked={onlyLinked} onChange={(e) => setOnlyLinked(e.target.checked)} />
             only issues with dependencies{g.isolated ? ` (${g.isolated} without hidden)` : ""}
@@ -218,8 +226,13 @@ export function DependencyGraph({ items }: { items: QueueItem[] }) {
                       ) : <tspan className="fill-muted-foreground font-mono">#{n.id}</tspan>}
                       {" "}{i ? clip(i.title, 27) : "outside the pipeline"}
                     </text>
+                    {i && (
+                      <text x={W - 10} y={42} textAnchor="end" className="fill-muted-foreground text-[11px] font-medium tabular-nums">
+                        <title>{`${ordinal(i.rank)} in the queue (same order as the Queue tab)`}</title>{ordinal(i.rank)}
+                      </text>
+                    )}
                     <text x={14} y={42} className="fill-muted-foreground text-[11px]">
-                      {i ? clip([i.state === "owner" ? "your task" : i.state, i.priority ? "▲ next" : "", i.rework && i.state === "ready" ? "rework" : "", i.milestone.split(" ")[0]].filter(Boolean).join(" · "), 34) : ""}
+                      {i ? clip([i.state === "owner" ? "your task" : i.state, i.priority ? "▲ next" : "", i.rework && i.state === "ready" ? "rework" : "", i.milestone.split(" ")[0]].filter(Boolean).join(" · "), 28) : ""}
                     </text>
                   </g>
                 )
