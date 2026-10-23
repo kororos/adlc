@@ -82,6 +82,16 @@ cache_mounts() { local c; for c in $CACHES; do printf -- '-v %s ' "$c"; done; }
 # (http://<run>.app.<project>.ci.internal via the job's Traefik) and the dev domain.
 JOB_NO_PROXY=localhost,127.0.0.1,.lan,.internal
 
+# Remove an idle runner safely: unregister it on GitHub first, which GitHub refuses while the runner has a
+# job; only then remove its container. GitHub's "busy" flag lags a few seconds behind a job assignment, so
+# removing the container first could kill a job that was just handed out (GitHub then fails it after 10
+# minutes with no steps). Fails (and keeps the runner) when GitHub refuses.
+remove_idle_runner() { # remove_idle_runner <container> <runner id>
+  GH_TOKEN=$(secret ci_admin_pat) $GH api -X DELETE "repos/$R/actions/runners/$2" >/dev/null 2>&1 || return 1
+  docker rm -f "$1" >/dev/null 2>&1
+  return 0
+}
+
 replace_stale_runners() {
   local c labels image spec current token id why
   current=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null)
@@ -100,9 +110,8 @@ replace_stale_runners() {
       log "runner $c is outdated ($why) but busy or unknown to GitHub; leaving it"
       continue
     fi
-    docker rm -f "$c" >/dev/null 2>&1
-    GH_TOKEN=$token $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
-    log "replaced idle runner $c: $why"
+    if remove_idle_runner "$c" "$id"; then log "replaced idle runner $c: $why"
+    else log "runner $c is outdated ($why) but just took a job; leaving it"; fi
   done
 }
 
@@ -309,8 +318,7 @@ yield_capacity() { # remove our idle runner when other roles' jobs fill the capa
   elif ! capacity_ok; then why="other CI jobs use the capacity ($SLOTS slots)"
   else return 0; fi
   c=${idle%% *}; id=${idle##* }
-  docker rm -f "$c" >/dev/null 2>&1
-  GH_TOKEN=$(secret ci_admin_pat) $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
+  remove_idle_runner "$c" "$id" || return 0     # it just took a job: let it run
   log "removed idle runner $c: $why; a new one starts when there is room"
 }
 
