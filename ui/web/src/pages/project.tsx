@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
-  ArrowUpToLine, HardDrive, HeartPulse, History, Inbox, KeyRound, ListOrdered, Network, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
+  ArrowUpToLine, Bug, HardDrive, HeartPulse, History, Inbox, KeyRound, ListOrdered, Network, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useSidebar } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { api, queryKeys, type Component, type MergeTrain, type MergeTrainStatus, type Project, type PullRequest, type QueueItem } from "@/lib/api"
+import { api, queryKeys, type Component, type MergeTrain, type MergeTrainStatus, type Project, type PullRequest, type QueueItem, type TriageItem } from "@/lib/api"
 import { ago, dateTime, duration, usd } from "@/lib/format"
 import { currentPhaseLabel } from "@/lib/phases"
 import { cn } from "@/lib/utils"
@@ -34,7 +34,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
   const p = q.data
   const s = p.snapshot
   const reviews = s?.pullRequests.filter((pr) => pr.labels.includes("adlc:needs-human-review")) ?? []
-  const needYou = (s?.attention.length ?? 0) + reviews.length
+  const needYou = (s?.attention.length ?? 0) + reviews.length + (s?.triage?.length ?? 0)
   const run = p.active[0]
   const ciRunning = (s?.actions?.runs ?? []).flatMap((r) => r.jobs).filter((j) => j.status === "in_progress").length
   return (
@@ -54,7 +54,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
         <Stat icon={Workflow} label="Running" tone={run ? "primary" : "default"} value={run ? `#${run.issue}` : "idle"}
           hint={run ? currentPhaseLabel(run.progress) : `${s?.counts.ready ?? 0} ready`} />
         <Stat icon={ListOrdered} label="Queued" value={s?.counts.queued ?? 0} hint={`${s?.counts["pr-open"] ?? 0} with an open PR`} />
-        <Stat icon={Inbox} label="Needs you" tone={needYou ? "warn" : "ok"} value={needYou} hint={`${reviews.length} PRs · ${s?.attention.length ?? 0} issues`} />
+        <Stat icon={Inbox} label="Needs you" tone={needYou ? "warn" : "ok"} value={needYou} hint={`${reviews.length} PRs · ${(s?.attention.length ?? 0) + (s?.triage?.length ?? 0)} issues`} />
         <Stat icon={CircleUserRound} label="Your tasks" tone={s?.counts.owner ? "warn" : "default"} value={s?.counts.owner ?? 0} hint="owner tasks open" />
       </div>
 
@@ -267,7 +267,8 @@ function AttentionTab({ p }: { p: Project }) {
   const owner = s.queue.filter((i) => i.state === "owner").slice(0, 6)
   const train = p.mergeTrain?.prs ?? []
   const secrets = p.devMissingSecrets?.missing ?? []
-  if (!reviews.length && !s.attention.length && !owner.length && !train.length && !secrets.length) {
+  const triage = s.triage ?? []
+  if (!reviews.length && !s.attention.length && !owner.length && !train.length && !secrets.length && !triage.length) {
     return <EmptyState icon={PartyPopper} title="Nothing needs you right now">The agents have everything they need.</EmptyState>
   }
   return (
@@ -304,6 +305,10 @@ function AttentionTab({ p }: { p: Project }) {
           </a>
         ))}
       </Section>
+      <Section icon={Bug} title="New issues to triage" count={triage.length} empty="No flaky test, regression or spike is waiting for your decision.">
+        <p className="-mt-1 text-sm text-muted-foreground">Opened by the agents or the nightly run. They don't start until you start them.</p>
+        {triage.map((t) => <TriageCard key={t.number} p={p} item={t} />)}
+      </Section>
       <Section icon={OctagonAlert} title="Blocked runs and questions" count={s.attention.length} empty="Nothing is blocked or waiting for an answer.">
         {s.attention.map((a) => (
           <div key={a.number} className={cn("rounded-xl border bg-card p-4", a.state === "blocked" && "border-red-500/40")}>
@@ -330,6 +335,46 @@ function AttentionTab({ p }: { p: Project }) {
           ))}
         </div>
       </Section>
+    </div>
+  )
+}
+
+// An issue to triage: Start puts it in the pipeline (ready, or queued while blocked); Run next also puts it
+// first in line. Closing it on GitHub drops it.
+function TriageCard({ p, item }: { p: Project; item: TriageItem }) {
+  const qc = useQueryClient()
+  const m = useMutation({
+    mutationFn: (action: `start:${number}` | `prioritize:${number}`) => api.action(p.slug, action),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.project(p.slug) }),
+  })
+  const pending = m.isPending || p.pending.some((r) => r.action === `start:${item.number}` || r.action === `prioritize:${item.number}`)
+  const tone = item.kind === "regression" ? "border-red-500/40 text-red-600 dark:text-red-400" : item.kind === "flaky" ? "border-amber-500/40 text-amber-600 dark:text-amber-400" : ""
+  return (
+    <div className="rounded-xl border bg-card p-4" data-testid={`triage-${item.number}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline" className={tone}>{item.kind}</Badge>
+        <IssueLink item={item} className="font-medium" />
+        <span className="text-xs text-muted-foreground">opened {ago(item.created)}{item.blockers.length ? ` · blocked by ${item.blockers.map((b) => `#${b}`).join(" ")}` : ""}</span>
+        <span className="ml-auto flex items-center gap-2">
+          {pending ? <span className="text-xs text-muted-foreground">applying…</span> : (
+            <>
+              <button type="button" className="rounded-md border px-2.5 py-1 text-sm hover:bg-muted" onClick={() => m.mutate(`start:${item.number}`)}
+                title="Into the pipeline in the normal order">Start</button>
+              {!item.blockers.length && (
+                <button type="button" className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-sm text-primary-foreground hover:bg-primary/90"
+                  onClick={() => m.mutate(`prioritize:${item.number}`)} title="Start it before the other issues once a run slot is free"><ArrowUpToLine className="size-3.5" />Run next</button>
+              )}
+            </>
+          )}
+        </span>
+      </div>
+      {item.lastComment && (
+        <div className="mt-3 rounded-lg bg-muted/60 p-3 text-sm">
+          <p className="mb-1 text-xs text-muted-foreground">{item.lastComment.author} · {ago(item.lastComment.at)}</p>
+          <p className="line-clamp-4 whitespace-pre-wrap">{item.lastComment.body}</p>
+        </div>
+      )}
+      {m.isError && <p className="mt-2 text-sm text-destructive">{(m.error as Error).message}</p>}
     </div>
   )
 }

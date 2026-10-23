@@ -163,16 +163,36 @@ prioritize() { # prioritize <n>
   state=${info%%$'\t'*}; labels=",${info#*$'\t'},"
   [ "$state" = OPEN ] || { log "WARN: run next: #$n is not open"; return 0; }
   case $labels in *,adlc:owner,*|*,owner-task,*|*,type:epic,*) log "WARN: run next: #$n is not agent work"; return 0 ;; esac
-  case $labels in *,adlc:ready,*|*,adlc:queued,*) ;; *) log "WARN: run next: #$n is neither ready nor queued"; return 0 ;; esac
+  case $labels in
+    *,adlc:in-progress,*|*,adlc:pr-open,*|*,adlc:blocked,*|*,adlc:needs-info,*|*,adlc:needs-human-review,*)
+      log "WARN: run next: #$n is already in the pipeline (not ready or queued)"; return 0 ;;
+  esac
   open=$(gh api "repos/$R/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null) \
     || { log "WARN: run next: cannot read the blockers of #$n"; return 0; }
   [ "$open" = 0 ] || { log "WARN: run next: #$n is blocked by $open open issue(s); not moved"; return 0; }
   gh label create "$PRIORITY_LABEL" -R "$R" --color B60205 --description "Run this issue next (ADLC dashboard)" >/dev/null 2>&1 || true
-  [[ $labels == *,adlc:queued,* ]] && label "$n" adlc:queued adlc:ready
+  if [[ $labels == *,adlc:queued,* ]]; then label "$n" adlc:queued adlc:ready
+  elif [[ $labels != *,adlc:ready,* ]]; then label "$n" "" adlc:ready; fi      # an issue to triage: start it
   label "$n" "" "$PRIORITY_LABEL"
   log "#$n: run next (from the dashboard); it starts when a run slot is free"
 }
 deprioritize() { label "$1" "$PRIORITY_LABEL" ""; log "#$1: back to the normal order (from the dashboard)"; }
+# "Start" on an issue to triage (opened by an agent or the nightly, no pipeline state yet): into the
+# pipeline as ready, or queued while it has open blockers.
+start_issue() { # start_issue <n>
+  local n=$1 info state labels open
+  info=$(gh issue view "$n" -R "$R" --json state,labels --jq '[.state, ([.labels[].name] | join(","))] | @tsv' 2>/dev/null) \
+    || { log "WARN: start: cannot read #$n"; return 0; }
+  state=${info%%$'\t'*}; labels=",${info#*$'\t'},"
+  [ "$state" = OPEN ] || { log "WARN: start: #$n is not open"; return 0; }
+  case $labels in *,adlc:owner,*|*,owner-task,*|*,type:epic,*) log "WARN: start: #$n is not agent work"; return 0 ;; esac
+  case $labels in *,adlc:ready,*|*,adlc:queued,*|*,adlc:in-progress,*|*,adlc:pr-open,*|*,adlc:blocked,*|*,adlc:needs-info,*|*,adlc:needs-human-review,*)
+    log "WARN: start: #$n is already in the pipeline"; return 0 ;;
+  esac
+  open=$(gh api "repos/$R/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null) || open=0
+  if [ "$open" = 0 ]; then label "$n" "" adlc:ready; log "#$n: started from the dashboard (ready)"
+  else label "$n" "" adlc:queued; log "#$n: started from the dashboard (queued: $open open blocker(s))"; fi
+}
 
 launch() { # launch <n> <title>
   local n=$1 title=$2 wt ts out err protected mode
@@ -518,6 +538,7 @@ apply_ui_requests() {
       resume) rm -f "$STATE_DIR/paused"; log "resumed from the dashboard" ;;
       prioritize:[0-9]*) prioritize "${action#*:}" ;;
       deprioritize:[0-9]*) deprioritize "${action#*:}" ;;
+      start:[0-9]*) start_issue "${action#*:}" ;;
       *:*)
         local key=${action%%:*} value=${action#*:} def
         def=$(setting_def "$key")

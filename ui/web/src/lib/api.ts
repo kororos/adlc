@@ -17,6 +17,17 @@ export type QueueItem = {
   assignees: string[]
 }
 
+export type TriageItem = {
+  number: number
+  title: string
+  url: string
+  kind: "flaky" | "regression" | "spike"
+  created: string
+  milestone: string
+  blockers: number[]
+  lastComment: { author: string; at: string; url: string; body: string } | null
+}
+
 export type AttentionItem = QueueItem & {
   lastComment: { author: string; at: string; url: string; body: string } | null
 }
@@ -70,7 +81,7 @@ export type CiRun = {
 
 export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current" | "rework_first" | "max_open_prs"
 export type Setting = { key: SettingKey; value: string; source: "dashboard" | "env" | "adlc.yaml" | "default"; project: string; allowed: string[] }
-export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}` | `prioritize:${number}` | `deprioritize:${number}`
+export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}` | `prioritize:${number}` | `deprioritize:${number}` | `start:${number}`
 
 export type MergeTrainStatus =
   | "queued" | "updating" | "checks" | "ready" | "merged" | "agent" | "conflicts" | "checking"
@@ -87,6 +98,8 @@ export type Snapshot = {
   counts: Partial<Record<QueueState, number>>
   queue: QueueItem[]
   wip?: { openPrs: number; max: number | null; held: boolean }   // new issues wait while held
+  // Issues opened by agents or the nightly (flaky, regression, spike) without a pipeline state: you decide.
+  triage?: TriageItem[]
   cyclic: number[]
   attention: AttentionItem[]
   pullRequests: PullRequest[]

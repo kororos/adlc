@@ -207,7 +207,7 @@ app.post("/api/projects/:slug/actions", async (req, reply) => {
   if (!p) return reply.code(404).send({ error: "unknown project" })
   const action = String(req.body?.action ?? "")
   // Plus "run next" for one issue (the runner checks that it's open, agent work and not blocked).
-  if (!ACTIONS.has(action) && !/^(prioritize|deprioritize):\d{1,7}$/.test(action)) return reply.code(400).send({ error: "unknown action" })
+  if (!ACTIONS.has(action) && !/^(prioritize|deprioritize|start):\d{1,7}$/.test(action)) return reply.code(400).send({ error: "unknown action" })
   const dir = path.join(DATA, "ui", "requests", p.slug)
   fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, `${Date.now()}-${action}.json`)
