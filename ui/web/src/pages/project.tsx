@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
-  ArrowUpToLine, Bug, HardDrive, HeartPulse, History, Inbox, KeyRound, ListOrdered, Network, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
+  ArrowUpToLine, Bug, HardDrive, HeartPulse, History, Inbox, KeyRound, Layers, ListOrdered, Network, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
 import { AutomationCard } from "@/components/automation"
 import { CiTab } from "@/components/ci"
 import { DependencyGraph } from "@/components/dependency-graph"
+import { EpicRunNext, EpicsTab } from "@/components/epics"
 import { ComponentLog, RunLog } from "@/components/logs"
 import { Freshness, PauseControl, PipelineBadge, StateBadge } from "@/components/status"
 import { Badge } from "@/components/ui/badge"
@@ -22,7 +23,7 @@ import { ago, dateTime, duration, usd } from "@/lib/format"
 import { currentPhaseLabel } from "@/lib/phases"
 import { cn } from "@/lib/utils"
 
-export type ProjectTab = "now" | "queue" | "deps" | "attention" | "ci" | "history" | "health"
+export type ProjectTab = "now" | "queue" | "epics" | "deps" | "attention" | "ci" | "history" | "health"
 
 export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
   const navigate = useNavigate()
@@ -62,6 +63,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
         <TabsList className={cn("max-w-full justify-start overflow-x-auto", !showTabs && "hidden")}>
           <TabsTrigger value="now"><Radio />Now{p.active.length ? ` (${p.active.length})` : ""}</TabsTrigger>
           <TabsTrigger value="queue"><ListOrdered />Queue</TabsTrigger>
+          <TabsTrigger value="epics"><Layers />Epics</TabsTrigger>
           <TabsTrigger value="deps"><Network />Dependencies</TabsTrigger>
           <TabsTrigger value="attention"><Inbox />Needs you{needYou ? ` (${needYou})` : ""}</TabsTrigger>
           <TabsTrigger value="ci"><Workflow />CI{ciRunning ? ` (${ciRunning})` : ""}</TabsTrigger>
@@ -70,6 +72,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
         </TabsList>
         <TabsContent value="now" className="mt-2"><NowTab p={p} /></TabsContent>
         <TabsContent value="queue" className="mt-2"><QueueTab p={p} items={s?.queue ?? []} wip={s?.wip} epics={s?.epics ?? []} /></TabsContent>
+        <TabsContent value="epics" className="mt-2"><EpicsTab p={p} epics={s?.epics ?? []} /></TabsContent>
         <TabsContent value="deps" className="mt-2"><DependencyGraph items={s?.queue ?? []} /></TabsContent>
         <TabsContent value="attention" className="mt-2"><AttentionTab p={p} /></TabsContent>
         <TabsContent value="ci" className="mt-2"><CiTab p={p} /></TabsContent>
@@ -160,52 +163,28 @@ function RunNext({ p, item }: { p: Project; item: QueueItem }) {
   )
 }
 
-// The open epics with their progress. "Run next" on an epic puts its startable sub-issues first (after "run
-// next" on single issues), in their own order and dependencies; undo puts them back.
+// Epics on "run next" (their startable sub-issues go first); the Epics tab has them all.
 function EpicsCard({ p, epics }: { p: Project; epics: EpicItem[] }) {
-  const qc = useQueryClient()
-  const m = useMutation({
-    mutationFn: (action: `prioritize:${number}` | `deprioritize:${number}`) => api.action(p.slug, action),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.project(p.slug) }),
-  })
-  const open = epics.filter((e) => e.completed < e.total || e.total === 0)
-  if (!open.length) return null
+  const next = epics.filter((e) => e.priority)
   return (
     <Card className="gap-0 py-0">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <h3 className="text-sm font-semibold">Epics</h3>
-        <span className="text-xs text-muted-foreground">Run next on an epic puts its sub-issues first</span>
+        <h3 className="text-sm font-semibold">Epics on run next</h3>
+        <Link to="/p/$slug" params={{ slug: p.slug }} search={{ tab: "epics" }} className="text-xs text-muted-foreground hover:text-primary">
+          {next.length ? "all epics →" : "none: choose one in Epics →"}
+        </Link>
       </div>
-      <ul className="divide-y">
-        {open.map((e) => {
-          const pending = (m.isPending && m.variables?.endsWith(`:${e.number}`)) ||
-            p.pending.some((r) => r.action === `prioritize:${e.number}` || r.action === `deprioritize:${e.number}`)
-          const pct = e.total ? Math.round((e.completed / e.total) * 100) : 0
-          return (
-            <li key={e.number} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2" data-testid={`epic-${e.number}`}>
+      {next.length > 0 && (
+        <ul className="divide-y">
+          {next.map((e) => (
+            <li key={e.number} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
               <IssueLink item={e} className="min-w-0 flex-1 text-sm" />
-              <span className="hidden text-xs text-muted-foreground sm:inline">{e.milestone.split(" ")[0]}</span>
-              <span className="flex w-36 items-center gap-2 text-xs tabular-nums text-muted-foreground" title={`${e.completed} of ${e.total} sub-issues closed; ${e.ready} ready`}>
-                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><span className="block h-full bg-primary" style={{ width: `${pct}%` }} /></span>
-                {e.completed}/{e.total}
-              </span>
-              <span className="w-28 text-right text-xs">
-                {pending ? <span className="text-muted-foreground">applying…</span> : e.priority ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Badge className="bg-primary/15 text-primary"><ArrowUpToLine />next</Badge>
-                    <button type="button" className="text-muted-foreground hover:text-primary hover:underline" onClick={() => m.mutate(`deprioritize:${e.number}`)}>undo</button>
-                  </span>
-                ) : (
-                  <button type="button" className="inline-flex items-center gap-1 text-muted-foreground hover:text-primary" onClick={() => m.mutate(`prioritize:${e.number}`)}
-                    title="Its startable sub-issues run before the others">
-                    <ArrowUpToLine className="size-3.5" />Run next
-                  </button>
-                )}
-              </span>
+              <span className="text-xs tabular-nums text-muted-foreground">{e.completed}/{e.total} · {e.ready} ready</span>
+              <EpicRunNext p={p} epic={e} />
             </li>
-          )
-        })}
-      </ul>
+          ))}
+        </ul>
+      )}
     </Card>
   )
 }

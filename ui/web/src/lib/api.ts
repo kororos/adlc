@@ -28,6 +28,23 @@ export type EpicItem = {
   total: number       // sub-issues, and how many are closed
   completed: number
   ready: number
+  parent?: number | null  // the epic above, for a sub-epic
+  subs?: EpicSub[] | null // all sub-issues, closed ones included (null: not fetched)
+}
+
+export type EpicSub = {
+  number: number
+  title: string
+  url: string
+  // the pipeline state; done = closed, epic = a sub-epic, untracked = no ADLC label, flaky/regression/spike = triage
+  state: QueueState | "done" | "epic" | "untracked" | "flaky" | "regression" | "spike"
+  closedAt: string | null
+  rank: number | null     // position in the queue
+  blockers: number[]
+  pr: { number: number; url: string } | null
+  priority: boolean
+  total?: number          // sub-epics: their progress
+  completed?: number
 }
 
 export type TriageItem = {

@@ -36,11 +36,12 @@ const issues = JSON.parse(raw).flatMap((p) => p.data.repository.issues.nodes)
 
 // Issues with an open agent PR (branch adlc/<n>-…) and the poller's switches (state/settings.json).
 const prIssues = new Set()
+const prOf = new Map()   // issue → its open agent PR {number, url}
 try {
   for (const p of JSON.parse(execFileSync("gh", ["pr", "list", "-R", `${owner}/${name}`, "--state", "open", "--limit", "100",
-    "--json", "headRefName"], { encoding: "utf8" }))) {
+    "--json", "headRefName,number,url"], { encoding: "utf8" }))) {
     const m = p.headRefName.match(/^adlc\/(\d+)-/)
-    if (m) prIssues.add(Number(m[1]))
+    if (m) { prIssues.add(Number(m[1])); prOf.set(Number(m[1]), { number: p.number, url: p.url }) }
   }
 } catch { /* order without it */ }
 const settings = (() => {
@@ -127,6 +128,29 @@ if (snapshot) {
   }
   const counts = {}
   for (const w of work.values()) counts[w.state] = (counts[w.state] ?? 0) + 1
+  // Each open epic's sub-issues, closed ones included (Epics tab): one aliased query for all epics. Best
+  // effort: without it the tab shows the progress only.
+  const subsOf = new Map()
+  const triageKind = new Map(triage.map(({ i, kind }) => [i.number, kind]))
+  try {
+    if (epics.length) {
+      const q = `query($o:String!,$r:String!){repository(owner:$o,name:$r){${epics.map((e) => `e${e.number}:issue(number:${e.number}){
+        subIssues(first:100){nodes{number title url state closedAt labels(first:30){nodes{name}} subIssuesSummary{total completed}}}}`).join(" ")}}}`
+      const repo = JSON.parse(execFileSync("gh", ["api", "graphql", "-f", `query=${q}`, "-f", `o=${owner}`, "-f", `r=${name}`],
+        { encoding: "utf8", maxBuffer: 64 << 20 })).data.repository
+      for (const e of epics) subsOf.set(e.number, (repo[`e${e.number}`]?.subIssues.nodes ?? []).map((i) => {
+        const w = work.get(i.number)
+        const labels = i.labels.nodes.map((l) => l.name)
+        const state = i.state === "CLOSED" ? "done" : labels.includes("type:epic") ? "epic" : w ? w.state : triageKind.get(i.number) ?? "untracked"
+        const rank = w ? order.indexOf(w) + 1 : 0
+        return {
+          number: i.number, title: i.title, url: i.url, state, closedAt: i.closedAt, rank: rank || null,
+          blockers: w ? w.blockers : [], pr: prOf.get(i.number) ?? null, priority: w?.priority ?? false,
+          ...(state === "epic" ? { total: i.subIssuesSummary?.total ?? 0, completed: i.subIssuesSummary?.completed ?? 0 } : {}),
+        }
+      }))
+    }
+  } catch { /* progress only */ }
   const data = {
     generatedAt: new Date().toISOString(),
     repo: `${owner}/${name}`,
@@ -136,6 +160,7 @@ if (snapshot) {
       number: e.number, title: e.title, url: e.url, milestone: e.milestone?.title ?? "", priority: epicFirst.has(e.number),
       total: e.subIssuesSummary?.total ?? 0, completed: e.subIssuesSummary?.completed ?? 0,
       ready: [...work.values()].filter((w) => w.epic === e.number && w.state === "ready").length,
+      parent: e.parent?.number ?? null, subs: subsOf.get(e.number) ?? null,
     })),
     triage: triage.sort((a, b) => a.i.number - b.i.number).map(({ i, kind }) => {
       const c = i.comments.nodes[0]

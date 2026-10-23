@@ -59,7 +59,7 @@ function Shell() {
 
 const rootRoute = createRootRoute({ component: Shell })
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewPage })
-const TABS: ProjectTab[] = ["now", "queue", "deps", "attention", "ci", "history", "health"]
+const TABS: ProjectTab[] = ["now", "queue", "epics", "deps", "attention", "ci", "history", "health"]
 const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/p/$slug",
