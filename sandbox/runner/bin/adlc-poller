@@ -609,21 +609,33 @@ disk_ok() {
 # issue adlc:queued (promoted to ready once nothing blocks it) and say so on the issue. The next run
 # starts fresh from main. Merged PRs close their issue as usual and are left alone.
 watch_closed_prs() {
-  local n branch pr
-  for n in $(gh issue list -R "$R" --label adlc:pr-open --state open --limit 100 --json number --jq '.[].number' 2>/dev/null); do
+  local n branch pr oid tip had st done_dir="$STATE_DIR/closed-prs"
+  mkdir -p "$done_dir"
+  # Issues that can have an agent PR: pr-open, and those a rework left blocked or waiting for review.
+  for n in $(for st in pr-open blocked needs-human-review; do
+               gh issue list -R "$R" --label "adlc:$st" --state open --limit 100 --json number --jq '.[].number' 2>/dev/null
+             done | sort -un); do
     is_running "$n" && continue
     # still an open PR from its branch: nothing to do
     [ -z "$(gh pr list -R "$R" --state open --json headRefName --jq ".[] | select(.headRefName | startswith(\"adlc/$n-\")) | .headRefName" 2>/dev/null)" ] || continue
-    read -r pr branch < <(gh pr list -R "$R" --state closed --limit 100 --json number,headRefName,mergedAt,closedAt \
-      --jq "[.[] | select(.headRefName | startswith(\"adlc/$n-\")) | select(.mergedAt == null)] | sort_by(.closedAt) | last | select(. != null) | \"\(.number) \(.headRefName)\"" 2>/dev/null)
+    read -r pr branch oid < <(gh pr list -R "$R" --state closed --limit 100 --json number,headRefName,headRefOid,mergedAt,closedAt \
+      --jq "[.[] | select(.headRefName | startswith(\"adlc/$n-\")) | select(.mergedAt == null)] | sort_by(.closedAt) | last | select(. != null) | \"\(.number) \(.headRefName) \(.headRefOid)\"" 2>/dev/null)
     [ -n "${pr:-}" ] || continue                                    # merged (the issue closes) or unknown
-    if gh api "repos/$R/git/refs/heads/$branch" --silent >/dev/null 2>&1; then
+    [ -e "$done_dir/$pr" ] && continue                              # already handled
+    tip=$(gh api "repos/$R/git/refs/heads/$branch" --jq .object.sha 2>/dev/null || true)
+    # A branch that moved on after the close is a newer run's work (same branch name): leave it alone.
+    if [ -n "$tip" ] && [ "$tip" != "$oid" ]; then : >"$done_dir/$pr"; continue; fi
+    if [ -n "$tip" ]; then
       gh api -X POST "repos/$R/branches/$branch/rename" -f new_name="adlc-closed/$n-pr$pr" >/dev/null 2>&1 \
         || { log "WARN: #$n: PR #$pr was closed, but its branch $branch could not be archived (retrying next cycle)"; continue; }
+    elif ! has_label "$n" adlc:pr-open; then
+      : >"$done_dir/$pr"; continue                                  # blocked/review with no branch left: not this PR's state
     fi
     git -C "$REPO_DIR" update-ref -d "refs/remotes/origin/$branch" >/dev/null 2>&1 || true
     remove_workspace "$n" || log "WARN: #$n: the old worktree $RUNS_DIR/$n could not be removed; remove it by hand before the next run"
-    label "$n" adlc:pr-open adlc:queued
+    had=$(gh issue view "$n" -R "$R" --json labels --jq '[.labels[].name | select(. == "adlc:pr-open" or . == "adlc:blocked" or . == "adlc:needs-human-review")] | join(",")' 2>/dev/null)
+    label "$n" "$had" adlc:queued
+    : >"$done_dir/$pr"
     comment "$n" "ADLC: PR #$pr was closed without merging, so this issue starts again from \`main\`. The previous work is kept on the branch \`adlc-closed/$n-pr$pr\`; the next run doesn't use it."
     log "#$n: PR #$pr closed without merging; branch archived as adlc-closed/$n-pr$pr, issue back to queued"
   done
