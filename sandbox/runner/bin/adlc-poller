@@ -240,7 +240,7 @@ agent_pr_issues() {
 wip_held=""
 # Order of the ready issues: "run next" (adlc:priority), then reworks (rework_first, default on), then the
 # milestone due date and age. With max_open_prs set, a new issue (no open PR) doesn't start while that many
-# agent PRs are open: they wait for your review, a merge or a rework first. Reworks always start.
+# agent PRs are open: they wait for your review, a merge or a rework first. Reworks and "run next" always start.
 launch_ready() {
   local slots n author title has_pr prs open max rework order
   in_backoff && return 0
@@ -253,12 +253,13 @@ launch_ready() {
   open=$(jq length <<<"$prs"); max=$(setting max_open_prs)
   rework=false; [ "$(setting rework_first)" = on ] && rework=true
   order="sort_by(([.labels[].name] | index(\"$PRIORITY_LABEL\") == null), ($rework and (.number as \$n | $prs | index(\$n) == null)), (.milestone.dueOn // \"9999\"), .createdAt)"
-  while IFS=$'\t' read -r n author title has_pr; do
+  while IFS=$'\t' read -r n author title has_pr urgent; do
     [ -n "$n" ] || continue
     [ "$slots" -gt 0 ] || break
     is_running "$n" && continue
-    if [ "$has_pr" = false ] && [[ "$max" =~ ^[0-9]+$ ]] && [ "$open" -ge "$max" ]; then
-      [ "$wip_held" = "$open/$max" ] || log "not starting new issues: $open agent PRs are open (max_open_prs $max); reworks still run. Review, merge or close PRs to make room"
+    # "Run next" is your explicit choice: it isn't held back by the limit.
+    if [ "$has_pr" = false ] && [ "$urgent" != true ] && [[ "$max" =~ ^[0-9]+$ ]] && [ "$open" -ge "$max" ]; then
+      [ "$wip_held" = "$open/$max" ] || log "not starting new issues: $open agent PRs are open (max_open_prs $max); reworks and run next still run. Review, merge or close PRs to make room"
       wip_held="$open/$max"
       continue
     fi
@@ -271,7 +272,7 @@ launch_ready() {
     launch "$n" "$title" && slots=$((slots - 1))
   done < <(gh issue list -R "$R" --label adlc:ready --state open --limit 100 \
              --json number,title,author,milestone,createdAt,labels \
-             --jq "map($NOT_AGENT_WORK) | $order | .[] | [.number, .author.login, .title, (.number as \$n | $prs | index(\$n) != null)] | @tsv" 2>/dev/null)
+             --jq "map($NOT_AGENT_WORK) | $order | .[] | [.number, .author.login, .title, (.number as \$n | $prs | index(\$n) != null), ([.labels[].name] | index(\"$PRIORITY_LABEL\") != null)] | @tsv" 2>/dev/null)
   if [ -n "$wip_held" ] && ! { [[ "$max" =~ ^[0-9]+$ ]] && [ "$open" -ge "$max" ]; }; then
     log "open agent PRs below max_open_prs again: new issues start"; wip_held=""
   fi

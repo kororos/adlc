@@ -205,7 +205,7 @@ for (const w of work.values()) counts[w.state] = (counts[w.state] ?? 0) + 1
 console.log(`queue: ${work.size} open (${Object.entries(counts).map(([s, c]) => `${c} ${s}`).join(", ")})` +
   (shown.length < order.length ? `, next ${shown.length} shown (--all for everything)` : ""))
 if (triage.length) console.log(`  to triage (not started until you give them a state): ${triage.map(({ i, kind }) => `#${i.number} (${kind})`).join(" ")}`)
-if (wipHeld) console.log(`  new issues wait: ${prIssues.size} agent PRs are open (max_open_prs ${maxOpenPrs}); reworks still run`)
+if (wipHeld) console.log(`  new issues wait: ${prIssues.size} agent PRs are open (max_open_prs ${maxOpenPrs}); reworks and run next still run`)
 shown.forEach((w, i) => console.log(line(w, i + 1)))
 if (all) cyclic.forEach((w, i) => console.log(line(w, order.length + i + 1, "(dependency cycle)")))
 else if (cyclic.length) console.log(`  ${cyclic.length} issue(s) in a dependency cycle: ${cyclic.map((w) => `#${w.n}`).join(" ")}`)
