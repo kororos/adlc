@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useSidebar } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { api, queryKeys, type Component, type MergeTrain, type MergeTrainStatus, type Project, type PullRequest, type QueueItem, type TriageItem } from "@/lib/api"
+import { api, queryKeys, type Component, type MergeTrain, type MergeTrainStatus, type Project, type PullRequest, type EpicItem, type QueueItem, type TriageItem } from "@/lib/api"
 import { ago, dateTime, duration, usd } from "@/lib/format"
 import { currentPhaseLabel } from "@/lib/phases"
 import { cn } from "@/lib/utils"
@@ -69,7 +69,7 @@ export function ProjectPage({ slug, tab }: { slug: string; tab: ProjectTab }) {
           <TabsTrigger value="health"><HeartPulse />Health</TabsTrigger>
         </TabsList>
         <TabsContent value="now" className="mt-2"><NowTab p={p} /></TabsContent>
-        <TabsContent value="queue" className="mt-2"><QueueTab p={p} items={s?.queue ?? []} wip={s?.wip} /></TabsContent>
+        <TabsContent value="queue" className="mt-2"><QueueTab p={p} items={s?.queue ?? []} wip={s?.wip} epics={s?.epics ?? []} /></TabsContent>
         <TabsContent value="deps" className="mt-2"><DependencyGraph items={s?.queue ?? []} /></TabsContent>
         <TabsContent value="attention" className="mt-2"><AttentionTab p={p} /></TabsContent>
         <TabsContent value="ci" className="mt-2"><CiTab p={p} /></TabsContent>
@@ -160,7 +160,57 @@ function RunNext({ p, item }: { p: Project; item: QueueItem }) {
   )
 }
 
-function QueueTab({ p, items, wip }: { p: Project; items: QueueItem[]; wip?: { openPrs: number; max: number | null; held: boolean } }) {
+// The open epics with their progress. "Run next" on an epic puts its startable sub-issues first (after "run
+// next" on single issues), in their own order and dependencies; undo puts them back.
+function EpicsCard({ p, epics }: { p: Project; epics: EpicItem[] }) {
+  const qc = useQueryClient()
+  const m = useMutation({
+    mutationFn: (action: `prioritize:${number}` | `deprioritize:${number}`) => api.action(p.slug, action),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.project(p.slug) }),
+  })
+  const open = epics.filter((e) => e.completed < e.total || e.total === 0)
+  if (!open.length) return null
+  return (
+    <Card className="gap-0 py-0">
+      <div className="flex items-center justify-between border-b px-4 py-2.5">
+        <h3 className="text-sm font-semibold">Epics</h3>
+        <span className="text-xs text-muted-foreground">Run next on an epic puts its sub-issues first</span>
+      </div>
+      <ul className="divide-y">
+        {open.map((e) => {
+          const pending = (m.isPending && m.variables?.endsWith(`:${e.number}`)) ||
+            p.pending.some((r) => r.action === `prioritize:${e.number}` || r.action === `deprioritize:${e.number}`)
+          const pct = e.total ? Math.round((e.completed / e.total) * 100) : 0
+          return (
+            <li key={e.number} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2" data-testid={`epic-${e.number}`}>
+              <IssueLink item={e} className="min-w-0 flex-1 text-sm" />
+              <span className="hidden text-xs text-muted-foreground sm:inline">{e.milestone.split(" ")[0]}</span>
+              <span className="flex w-36 items-center gap-2 text-xs tabular-nums text-muted-foreground" title={`${e.completed} of ${e.total} sub-issues closed; ${e.ready} ready`}>
+                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><span className="block h-full bg-primary" style={{ width: `${pct}%` }} /></span>
+                {e.completed}/{e.total}
+              </span>
+              <span className="w-28 text-right text-xs">
+                {pending ? <span className="text-muted-foreground">applying…</span> : e.priority ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Badge className="bg-primary/15 text-primary"><ArrowUpToLine />next</Badge>
+                    <button type="button" className="text-muted-foreground hover:text-primary hover:underline" onClick={() => m.mutate(`deprioritize:${e.number}`)}>undo</button>
+                  </span>
+                ) : (
+                  <button type="button" className="inline-flex items-center gap-1 text-muted-foreground hover:text-primary" onClick={() => m.mutate(`prioritize:${e.number}`)}
+                    title="Its startable sub-issues run before the others">
+                    <ArrowUpToLine className="size-3.5" />Run next
+                  </button>
+                )}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </Card>
+  )
+}
+
+function QueueTab({ p, items, wip, epics }: { p: Project; items: QueueItem[]; wip?: { openPrs: number; max: number | null; held: boolean }; epics: EpicItem[] }) {
   if (!items.length) return <EmptyState icon={ListOrdered} title="No queue data yet">The runner writes it within a minute.</EmptyState>
   const groups: { milestone: string; items: QueueItem[] }[] = []
   for (const i of items) {
@@ -170,6 +220,7 @@ function QueueTab({ p, items, wip }: { p: Project; items: QueueItem[]; wip?: { o
   }
   return (
     <div className="grid gap-4">
+      <EpicsCard p={p} epics={epics} />
       {wip?.held && (
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm">
           New issues wait: {wip.openPrs} agent PRs are open (limit {wip.max}). Reworks still run; review, merge or close PRs to make room.
@@ -193,6 +244,7 @@ function QueueTab({ p, items, wip }: { p: Project; items: QueueItem[]; wip?: { o
                   <TableCell className="max-w-[34rem] whitespace-normal">
                     <IssueLink item={i} />
                     {i.rework && i.state === "ready" && <Badge variant="outline" className="ml-1.5 align-middle text-xs">rework</Badge>}
+                    {i.epicFirst && !i.priority && <Badge variant="outline" className="ml-1.5 align-middle text-xs text-primary">epic #{i.epic} first</Badge>}
                     {i.state === "owner" && i.unblocks ? <span className="ml-1.5 text-xs text-muted-foreground">unblocks {i.unblocks}</span> : null}
                   </TableCell>
                   <TableCell><StateBadge state={i.state} /></TableCell>

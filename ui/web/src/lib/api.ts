@@ -14,7 +14,20 @@ export type QueueItem = {
   unblocks: number
   priority?: boolean   // "run next" (label adlc:priority): first in line once a run slot is free
   rework?: boolean     // has an open agent PR: a run is a rework (conflicts, failed checks, review)
+  epic?: number | null // parent epic
+  epicFirst?: boolean  // its epic (or the epic above) has "run next"
   assignees: string[]
+}
+
+export type EpicItem = {
+  number: number
+  title: string
+  url: string
+  milestone: string
+  priority: boolean   // "run next": its startable sub-issues go first
+  total: number       // sub-issues, and how many are closed
+  completed: number
+  ready: number
 }
 
 export type TriageItem = {
@@ -100,6 +113,7 @@ export type Snapshot = {
   wip?: { openPrs: number; max: number | null; held: boolean }   // new issues wait while held
   // Issues opened by agents or the nightly (flaky, regression, spike) without a pipeline state: you decide.
   triage?: TriageItem[]
+  epics?: EpicItem[]
   cyclic: number[]
   attention: AttentionItem[]
   pullRequests: PullRequest[]

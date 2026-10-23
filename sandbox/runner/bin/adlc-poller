@@ -162,7 +162,14 @@ prioritize() { # prioritize <n>
     || { log "WARN: run next: cannot read #$n"; return 0; }
   state=${info%%$'\t'*}; labels=",${info#*$'\t'},"
   [ "$state" = OPEN ] || { log "WARN: run next: #$n is not open"; return 0; }
-  case $labels in *,adlc:owner,*|*,owner-task,*|*,type:epic,*) log "WARN: run next: #$n is not agent work"; return 0 ;; esac
+  # An epic: its startable sub-issues go first (see epic_first); the epic itself is never started.
+  if [[ $labels == *,type:epic,* ]]; then
+    gh label create "$PRIORITY_LABEL" -R "$R" --color B60205 --description "Run this issue next (ADLC dashboard)" >/dev/null 2>&1 || true
+    label "$n" "" "$PRIORITY_LABEL"
+    log "#$n (epic): its sub-issues run next (from the dashboard), in their own order and dependencies"
+    return 0
+  fi
+  case $labels in *,adlc:owner,*|*,owner-task,*) log "WARN: run next: #$n is not agent work"; return 0 ;; esac
   case $labels in
     *,adlc:in-progress,*|*,adlc:pr-open,*|*,adlc:blocked,*|*,adlc:needs-info,*|*,adlc:needs-human-review,*)
       log "WARN: run next: #$n is already in the pipeline (not ready or queued)"; return 0 ;;
@@ -237,12 +244,21 @@ agent_pr_issues() {
   gh pr list -R "$R" --state open --limit 100 --json headRefName \
     --jq '[.[].headRefName | select(test("^adlc/[0-9]+-")) | capture("^adlc/(?<n>[0-9]+)-").n | tonumber] | unique' 2>/dev/null || echo '[]'
 }
+# Ready issues whose epic (parent, or the parent's parent) has "run next" (adlc:priority on the epic), as a
+# JSON array of numbers.
+epic_first() {
+  gh api graphql -f query='query($o:String!,$r:String!){repository(owner:$o,name:$r){issues(states:OPEN,labels:["adlc:ready"],first:100){nodes{
+      number parent{labels(first:30){nodes{name}} parent{labels(first:30){nodes{name}}}}}}}}' \
+    -f o="${R%%/*}" -f r="${R##*/}" \
+    --jq "[.data.repository.issues.nodes[] | select([(.parent.labels.nodes[]?.name), (.parent.parent.labels.nodes[]?.name)] | index(\"$PRIORITY_LABEL\")) | .number]" 2>/dev/null \
+    || echo '[]'
+}
 wip_held=""
-# Order of the ready issues: "run next" (adlc:priority), then reworks (rework_first, default on), then the
-# milestone due date and age. With max_open_prs set, a new issue (no open PR) doesn't start while that many
+# Order of the ready issues: "run next" on the issue (adlc:priority), then "run next" on its epic, then reworks
+# (rework_first, default on), then the milestone due date and age. With max_open_prs set, a new issue (no open PR) doesn't start while that many
 # agent PRs are open: they wait for your review, a merge or a rework first. Reworks and "run next" always start.
 launch_ready() {
-  local slots n author title has_pr prs open max rework order
+  local slots n author title has_pr urgent prs open max rework order epics
   in_backoff && return 0
   [ -n "$(secret claude_oauth_token)" ] || { log "secret claude_oauth_token missing; not launching"; return 0; }
   identity_ok || return 0
@@ -252,7 +268,8 @@ launch_ready() {
   prs=$(agent_pr_issues); [[ "$prs" == \[* ]] || prs='[]'
   open=$(jq length <<<"$prs"); max=$(setting max_open_prs)
   rework=false; [ "$(setting rework_first)" = on ] && rework=true
-  order="sort_by(([.labels[].name] | index(\"$PRIORITY_LABEL\") == null), ($rework and (.number as \$n | $prs | index(\$n) == null)), (.milestone.dueOn // \"9999\"), .createdAt)"
+  epics=$(epic_first); [[ "$epics" == \[* ]] || epics='[]'
+  order="sort_by(([.labels[].name] | index(\"$PRIORITY_LABEL\") == null), (.number as \$n | $epics | index(\$n) == null), ($rework and (.number as \$n | $prs | index(\$n) == null)), (.milestone.dueOn // \"9999\"), .createdAt)"
   while IFS=$'\t' read -r n author title has_pr urgent; do
     [ -n "$n" ] || continue
     [ "$slots" -gt 0 ] || break
