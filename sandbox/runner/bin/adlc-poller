@@ -556,7 +556,50 @@ disk_ok() {
   disk_err=$free; return 1
 }
 
+# ── An agent PR closed without merging ───────────────────────────────────────
+# A person closed the PR to have the issue done again (e.g. on a changed main). Its issue would otherwise
+# stay adlc:pr-open forever, and a new run would resume the old branch. So: archive the branch as
+# adlc-closed/<n>-<pr> (the work stays reachable; no run picks it up), remove the workspace, relabel the
+# issue adlc:queued (promoted to ready once nothing blocks it) and say so on the issue. The next run
+# starts fresh from main. Merged PRs close their issue as usual and are left alone.
+watch_closed_prs() {
+  local n branch pr
+  for n in $(gh issue list -R "$R" --label adlc:pr-open --state open --limit 100 --json number --jq '.[].number' 2>/dev/null); do
+    is_running "$n" && continue
+    # still an open PR from its branch: nothing to do
+    [ -z "$(gh pr list -R "$R" --state open --json headRefName --jq ".[] | select(.headRefName | startswith(\"adlc/$n-\")) | .headRefName" 2>/dev/null)" ] || continue
+    read -r pr branch < <(gh pr list -R "$R" --state closed --limit 100 --json number,headRefName,mergedAt,closedAt \
+      --jq "[.[] | select(.headRefName | startswith(\"adlc/$n-\")) | select(.mergedAt == null)] | sort_by(.closedAt) | last | select(. != null) | \"\(.number) \(.headRefName)\"" 2>/dev/null)
+    [ -n "${pr:-}" ] || continue                                    # merged (the issue closes) or unknown
+    if gh api "repos/$R/git/refs/heads/$branch" --silent >/dev/null 2>&1; then
+      gh api -X POST "repos/$R/branches/$branch/rename" -f new_name="adlc-closed/$n-pr$pr" >/dev/null 2>&1 \
+        || { log "WARN: #$n: PR #$pr was closed, but its branch $branch could not be archived (retrying next cycle)"; continue; }
+    fi
+    git -C "$REPO_DIR" update-ref -d "refs/remotes/origin/$branch" >/dev/null 2>&1 || true
+    remove_workspace "$n" || log "WARN: #$n: the old worktree $RUNS_DIR/$n could not be removed; remove it by hand before the next run"
+    label "$n" adlc:pr-open adlc:queued
+    comment "$n" "ADLC: PR #$pr was closed without merging, so this issue starts again from \`main\`. The previous work is kept on the branch \`adlc-closed/$n-pr$pr\`; the next run doesn't use it."
+    log "#$n: PR #$pr closed without merging; branch archived as adlc-closed/$n-pr$pr, issue back to queued"
+  done
+}
+
 # ── Cleanup after merge/close ─────────────────────────────────────────────────
+# An issue's workspace: its test environment (and built images), worktree and local branches. Fails when
+# the worktree can't be removed.
+remove_workspace() { # remove_workspace <n>
+  local n=$1 wt="$RUNS_DIR/$1"
+  docker compose -p "adlc-$n" down -v --rmi local >/dev/null 2>&1 || true   # its built images too
+  if [ -e "$wt" ]; then
+    git -C "$REPO_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt" 2>/dev/null
+    # Test-environment containers (e.g. vite as root) leave files this user can't delete. The
+    # Docker sidecar sees the workspace at the same path and runs as root: remove them there.
+    [ ! -e "$wt" ] || docker run --rm -v "$RUNS_DIR:/runs" alpine:3.22 rm -rf "/runs/$n" >/dev/null 2>&1 || true
+  fi
+  git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
+  git -C "$REPO_DIR" for-each-ref --format='%(refname:short)' "refs/heads/adlc/$n-*" \
+    | xargs -r git -C "$REPO_DIR" branch -D >/dev/null 2>&1
+  [ ! -e "$wt" ]
+}
 cleanup() {
   local wt n state
   for wt in "$RUNS_DIR"/*/; do
@@ -565,21 +608,8 @@ cleanup() {
     is_running "$n" && continue
     state=$(gh issue view "$n" -R "$R" --json state --jq .state 2>/dev/null) || continue
     [ "$state" = CLOSED ] || continue
-    docker compose -p "adlc-$n" down -v --rmi local >/dev/null 2>&1 || true   # its built images too
-    git -C "$REPO_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt" 2>/dev/null
-    # Test-environment containers (e.g. vite as root) leave files this user can't delete. The
-    # Docker sidecar sees the workspace at the same path and runs as root: remove them there.
-    if [ -e "$wt" ]; then
-      docker run --rm -v "$RUNS_DIR:/runs" alpine:3.22 rm -rf "/runs/$n" >/dev/null 2>&1 || true
-    fi
-    git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
-    git -C "$REPO_DIR" for-each-ref --format='%(refname:short)' "refs/heads/adlc/$n-*" \
-      | xargs -r git -C "$REPO_DIR" branch -D >/dev/null 2>&1
-    if [ -e "$wt" ]; then
-      log "ERROR: #$n closed but its worktree $wt could not be removed; remove it by hand (sudo rm -rf)"
-    else
-      log "#$n closed: removed worktree and local branches"
-    fi
+    if remove_workspace "$n"; then log "#$n closed: removed worktree and local branches"
+    else log "ERROR: #$n closed but its worktree $wt could not be removed; remove it by hand (sudo rm -rf)"; fi
   done
   git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
   find "$LOG_DIR/runs" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
@@ -604,7 +634,7 @@ while :; do
     [ $((i % 10)) = 0 ] && log "paused (adlc resume $ADLC_SLUG)"
   else
     promote_queued
-    [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; merge_train; }
+    [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; watch_closed_prs; merge_train; }
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup
