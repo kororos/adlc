@@ -1,0 +1,281 @@
+<!doctype html>
+<!-- ADLC Field Guide: open this file in a browser, or in the dashboard at /guide/. Script: guide.js (no inline
+     scripts, no external resources, so it also works offline and under the dashboard's content security policy). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ADLC Field Guide</title>
+<style>
+/* Layout: a single reading column with a sticky section bar; the simulator is a two-pane console (issue + actions | event log). */
+:root {
+  --bg: #f4f6f4; --surface: #ffffff; --sunk: #eaeeeb; --ink: #16201c; --muted: #5a6862; --line: #d9e0dc;
+  --accent: #0b6b5d; --accent-ink: #ffffff; --accent-soft: #d8eee8;
+  --l-queued: #6b7672; --l-ready: #1a8a4a; --l-progress: #2563c9; --l-pr: #7a3fd0; --l-info: #b08a00; --l-blocked: #c4302b;
+  --l-review: #d0661a; --l-owner: #a86f00; --l-done: #0e7a52; --l-prio: #0b6b5d;
+  --code-bg: #10201b; --code-ink: #d5ece4;
+  --f-display: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", Roboto, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1412; --surface: #151d1a; --sunk: #1b2521; --ink: #e3ebe7; --muted: #93a39c; --line: #283430;
+  --accent: #3dc2a8; --accent-ink: #062019; --accent-soft: #123a32;
+  --l-queued: #8b9792; --l-ready: #3fbf74; --l-progress: #5b93f0; --l-pr: #a77cf0; --l-info: #e0b62a; --l-blocked: #f0625c;
+  --l-review: #f08c45; --l-owner: #e0a32a; --l-done: #34c58a; --l-prio: #3dc2a8;
+  --code-bg: #0a1210; --code-ink: #cfe6dd; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1412; --surface: #151d1a; --sunk: #1b2521; --ink: #e3ebe7; --muted: #93a39c; --line: #283430;
+  --accent: #3dc2a8; --accent-ink: #062019; --accent-soft: #123a32;
+  --l-queued: #8b9792; --l-ready: #3fbf74; --l-progress: #5b93f0; --l-pr: #a77cf0; --l-info: #e0b62a; --l-blocked: #f0625c;
+  --l-review: #f08c45; --l-owner: #e0a32a; --l-done: #34c58a; --l-prio: #3dc2a8;
+  --code-bg: #0a1210; --code-ink: #cfe6dd; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--f-body); }
+img { max-width: 100% }
+[hidden] { display: none !important }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; }
+h1, h2, h3 { font-family: var(--f-display); line-height: 1.15; text-wrap: balance; margin: 0 }
+h2 { font-size: 1.9rem; font-weight: 700; letter-spacing: -0.01em }
+h3 { font-size: 1.15rem; font-weight: 600 }
+p { margin: 0 }
+a { color: var(--accent) }
+code, kbd { font-family: var(--f-mono); font-size: 0.88em }
+:not(pre) > code { background: var(--sunk); padding: 0.1em 0.35em; border-radius: 4px }
+button { font: inherit; color: inherit; cursor: pointer }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.eyebrow { font: 600 0.72rem/1 var(--f-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted) }
+.lede { color: var(--muted); max-width: 64ch }
+
+/* nav */
+nav.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line) }
+nav.bar .wrap { display: flex; align-items: center; gap: 20px; padding-block: 10px; overflow-x: auto }
+nav.bar .brand { font: 700 1rem var(--f-display); white-space: nowrap }
+nav.bar .links { display: flex; gap: 4px }
+nav.bar a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; white-space: nowrap; font-size: 0.9rem }
+nav.bar a:hover { color: var(--ink); background: var(--sunk) }
+
+section { padding-block: 56px; border-bottom: 1px solid var(--line) }
+section > .wrap > header { display: grid; gap: 10px; margin-bottom: 28px }
+
+/* hero */
+.hero { padding-block: 48px 40px }
+.hero h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); font-weight: 700; letter-spacing: -0.02em; max-width: 18ch }
+.hero .lede { margin-top: 14px; font-size: 1.08rem }
+.flow { margin-top: 32px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface) }
+.flow button { background: none; border: 0; border-right: 1px solid var(--line); padding: 14px 14px 12px; text-align: left; display: grid; gap: 4px; min-width: 0 }
+.flow button:last-child { border-right: 0 }
+.flow button .n { font: 500 0.72rem var(--f-mono); color: var(--muted) }
+.flow button .t { font: 600 0.95rem var(--f-display) }
+.flow button .s { font-size: 0.8rem; color: var(--muted) }
+.flow button[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 -3px 0 var(--accent) }
+.flow-detail { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px }
+.flow-detail .k { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px }
+.flow-detail ul { margin: 0; padding-left: 18px }
+.who { display: inline-block; font: 600 0.72rem var(--f-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: var(--sunk); color: var(--muted) }
+
+/* labels (GitHub-style pills, the page's motif) */
+.lbl { display: inline-flex; align-items: center; gap: 6px; font: 500 0.78rem/1 var(--f-mono); padding: 5px 9px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; background: color-mix(in srgb, currentColor 10%, transparent) }
+.lbl::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor }
+.c-queued { color: var(--l-queued) } .c-ready { color: var(--l-ready) } .c-in-progress { color: var(--l-progress) }
+.c-pr-open { color: var(--l-pr) } .c-needs-info { color: var(--l-info) } .c-blocked { color: var(--l-blocked) }
+.c-needs-human-review { color: var(--l-review) } .c-owner { color: var(--l-owner) } .c-done { color: var(--l-done) } .c-priority { color: var(--l-prio) }
+
+/* simulator */
+.sim { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0 }
+.panel-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap }
+.panel-b { padding: 16px; display: grid; gap: 16px }
+.issue-title { font: 600 1.05rem var(--f-display) }
+.issue-title .num { font-family: var(--f-mono); color: var(--muted); font-weight: 400 }
+.labels { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px }
+.meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 0.86rem }
+.meta dt { color: var(--muted) } .meta dd { margin: 0; font-family: var(--f-mono); font-size: 0.82rem }
+.phases { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 3px }
+.phase { height: 6px; border-radius: 3px; background: var(--sunk) }
+.phase.done { background: var(--l-progress) } .phase.now { background: var(--l-progress); animation: pulse 1.2s ease-in-out infinite }
+@keyframes pulse { 50% { opacity: 0.35 } }
+.phase-name { font-size: 0.8rem; color: var(--muted) }
+.pr { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; font-size: 0.86rem }
+.pr .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center }
+.chk { font: 500 0.78rem var(--f-mono) }
+.chk.green { color: var(--l-ready) } .chk.red { color: var(--l-blocked) } .chk.running { color: var(--l-info) }
+.actions { display: grid; gap: 8px }
+.actions .grp { display: grid; gap: 6px }
+.act { display: flex; gap: 10px; align-items: flex-start; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px }
+.act:hover { border-color: var(--accent) }
+.act .who { flex: none; margin-top: 2px }
+.act .what { display: grid; gap: 1px } .act .what small { color: var(--muted); font-size: 0.8rem }
+.who.you { background: var(--accent-soft); color: var(--accent) }
+.risk { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden }
+.risk button { background: none; border: 0; padding: 4px 10px; font-size: 0.82rem; color: var(--muted) }
+.risk button[aria-pressed="true"] { background: var(--ink); color: var(--bg) }
+.log { list-style: none; margin: 0; padding: 0; display: grid; max-height: 560px; overflow-y: auto }
+.log li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 0.88rem }
+.log li:first-child { background: color-mix(in srgb, var(--accent-soft) 55%, transparent) }
+.log .who { justify-self: start; height: fit-content }
+.who.poller { background: color-mix(in srgb, var(--l-progress) 15%, transparent); color: var(--l-progress) }
+.who.agent { background: color-mix(in srgb, var(--l-pr) 15%, transparent); color: var(--l-pr) }
+.who.ci { background: color-mix(in srgb, var(--l-info) 18%, transparent); color: var(--l-info) }
+.who.train { background: color-mix(in srgb, var(--l-done) 15%, transparent); color: var(--l-done) }
+.ghost { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; font-size: 0.82rem; color: var(--muted) }
+.ghost:hover { color: var(--ink); border-color: var(--ink) }
+
+/* tutorials */
+.tut { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 20px; align-items: start }
+.tut-list { display: grid; gap: 4px; position: sticky; top: 64px }
+.tut-list button { display: grid; gap: 2px; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 10px 12px }
+.tut-list button:hover { background: var(--surface) }
+.tut-list button[aria-selected="true"] { background: var(--surface); border-color: var(--line) }
+.tut-list .tt { font: 600 0.95rem var(--f-display) }
+.tut-list .tp { font-size: 0.76rem; color: var(--muted); display: flex; align-items: center; gap: 8px }
+.meter { flex: 1; height: 4px; background: var(--sunk); border-radius: 2px; overflow: hidden; max-width: 90px }
+.meter > span { display: block; height: 100%; background: var(--accent) }
+.tut-body { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0 }
+.tut-body > header { padding: 20px 22px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 6px }
+.tut-body > header .when { font-size: 0.85rem; color: var(--muted) }
+.steps { list-style: none; margin: 0; padding: 0; counter-reset: s }
+.step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--line) }
+.step:last-child { border-bottom: 0 }
+.step input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent) }
+.step .st { font-weight: 600; margin-bottom: 4px }
+.step.checked .st { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line) }
+.step .sb { display: grid; gap: 8px; color: var(--ink); font-size: 0.93rem; min-width: 0 }
+.step .sb ul { margin: 0; padding-left: 18px }
+.where { font: 500 0.72rem var(--f-mono); color: var(--muted) }
+.code { position: relative; background: var(--code-bg); color: var(--code-ink); border-radius: 8px; min-width: 0 }
+.code pre { margin: 0; padding: 12px 14px; overflow-x: auto; font: 0.82rem/1.55 var(--f-mono) }
+.code .copy { position: absolute; top: 6px; right: 6px; background: color-mix(in srgb, var(--code-ink) 12%, transparent); color: var(--code-ink); border: 0; border-radius: 5px; font-size: 0.72rem; padding: 3px 8px }
+.code .copy:hover { background: color-mix(in srgb, var(--code-ink) 24%, transparent) }
+.note { border-left: 3px solid var(--l-info); padding: 6px 12px; background: color-mix(in srgb, var(--l-info) 8%, transparent); border-radius: 0 6px 6px 0; font-size: 0.88rem }
+.tut-foot { display: flex; justify-content: space-between; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--line) }
+
+/* labels guide */
+.lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px }
+.lcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; align-content: start }
+.lcard p { font-size: 0.88rem } .lcard .do { color: var(--muted); font-size: 0.85rem }
+
+/* commands */
+.cmd-tools { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px }
+.cmd-tools input { flex: 1; min-width: 0; max-width: 420px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit }
+.chips { display: flex; gap: 6px; flex-wrap: wrap }
+.chips button { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 0.84rem; color: var(--muted) }
+.chips button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink) }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px }
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem }
+th { text-align: left; font: 600 0.72rem var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line) }
+td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top }
+tr:last-child td { border-bottom: 0 }
+td.c { font: 0.82rem var(--f-mono); white-space: nowrap }
+td.w { white-space: nowrap }
+.empty { padding: 20px; color: var(--muted) }
+footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
+
+@media (max-width: 820px) {
+  .flow { grid-template-columns: minmax(0, 1fr) }
+  .flow button { border-right: 0; border-bottom: 1px solid var(--line) }
+  .flow-detail, .sim, .tut { grid-template-columns: minmax(0, 1fr) }
+  .tut-list { position: static; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) }
+  .log li { grid-template-columns: minmax(0, 1fr) }
+  td.c { white-space: normal; word-break: break-word }
+}
+@media (prefers-reduced-motion: reduce) { .phase.now { animation: none } }
+</style>
+</head>
+<body>
+
+<nav class="bar"><div class="wrap">
+  <span class="brand">ADLC Field Guide</span>
+  <div class="links">
+    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#labels">Labels</a><a href="#commands">Commands</a>
+  </div>
+</div></nav>
+
+<header class="hero" id="overview"><div class="wrap">
+  <p class="eyebrow">Agentic Delivery Life Cycle</p>
+  <h1>From an idea to merged pull requests, with you deciding what matters.</h1>
+  <p class="lede">ADLC runs Claude agents on your dev server. You plan the product with Claude in four conversations; then a poller delivers the GitHub issues one by one, in dependency order, and only comes back to you for decisions, high-risk reviews and your own tasks. Pick a step to see who does what.</p>
+  <div class="flow" role="group" aria-label="ADLC phases" id="flow"></div>
+  <div class="flow-detail" id="flow-detail"></div>
+</div></header>
+
+<section id="simulator"><div class="wrap">
+  <header>
+    <p class="eyebrow">Interactive demo</p>
+    <h2>Follow one issue through delivery</h2>
+    <p class="lede">The issue below is waiting for its blocker. Click what happens next and watch the labels, the PR and the log. Actions marked <span class="who you">you</span> are yours; everything else ADLC does by itself. Change the risk tier to see the two merge paths.</p>
+  </header>
+  <div class="sim">
+    <div class="panel">
+      <div class="panel-h">
+        <span class="eyebrow">Issue</span>
+        <span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="risk" role="group" aria-label="Risk tier" id="risk"></span>
+          <button class="ghost" id="reset" type="button">Start over</button>
+        </span>
+      </div>
+      <div class="panel-b">
+        <div class="issue-title"><span class="num">#178</span> Per-module test inventories feeding the architecture checks</div>
+        <div class="labels" id="labels" aria-live="polite"></div>
+        <dl class="meta" id="meta"></dl>
+        <div id="phasebox" hidden>
+          <div class="phases" id="phases"></div>
+          <div class="phase-name" id="phase-name"></div>
+        </div>
+        <div class="pr" id="prbox" hidden></div>
+        <div>
+          <p class="eyebrow" style="margin-bottom:8px">What happens next?</p>
+          <div class="actions" id="actions"></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><span class="eyebrow">Event log</span><span class="phase-name">newest first</span></div>
+      <ul class="log" id="log" aria-live="polite"></ul>
+    </div>
+  </div>
+</div></section>
+
+<section id="tutorials"><div class="wrap">
+  <header>
+    <p class="eyebrow">Tutorials</p>
+    <h2>Do it for real</h2>
+    <p class="lede">Six walkthroughs in the order you'll need them. Tick steps off as you go; your progress stays in this browser.</p>
+  </header>
+  <div class="tut">
+    <div class="tut-list" role="tablist" id="tut-list" aria-label="Tutorials"></div>
+    <article class="tut-body" id="tut-body" role="tabpanel"></article>
+  </div>
+</div></section>
+
+<section id="labels"><div class="wrap">
+  <header>
+    <p class="eyebrow">Reference</p>
+    <h2>What each label means</h2>
+    <p class="lede">GitHub labels are the pipeline's state. The poller reads and writes them every minute; you change them to steer.</p>
+  </header>
+  <div class="lgrid" id="lgrid"></div>
+</div></section>
+
+<section id="commands"><div class="wrap">
+  <header>
+    <p class="eyebrow">Reference</p>
+    <h2>Commands</h2>
+    <p class="lede"><code>adlc</code> runs on the dev server (or a CI-only host). Slash commands run in a Claude session, usually Remote Control from the Claude app.</p>
+  </header>
+  <div class="cmd-tools">
+    <input id="q" type="search" placeholder="Search: restart, epic, secrets…" aria-label="Search commands">
+    <div class="chips" id="chips"></div>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Command</th><th>Where</th><th>What it does</th></tr></thead>
+    <tbody id="cmds"></tbody>
+  </table></div>
+</div></section>
+
+<footer><div class="wrap">Based on the <a href="https://github.com/kororos/adlc#readme">ADLC README</a>. Commands use <code>&lt;slug&gt;</code> for your project, e.g. <code>diet</code>.</div></footer>
+<script src="guide.js"></script>
+</body>
+</html>

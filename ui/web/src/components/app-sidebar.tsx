@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
-import { ChevronRight, ExternalLink, FolderGit2, HeartPulse, History, Inbox, Layers, LayoutGrid, ListOrdered, LogOut, Network, Radio, Workflow } from "lucide-react"
+import { BookOpen, ChevronRight, ExternalLink, FolderGit2, HeartPulse, History, Inbox, Layers, LayoutGrid, ListOrdered, LogOut, Network, Radio, Workflow } from "lucide-react"
 import { Logo, ThemeToggle } from "@/components/chrome"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -138,6 +138,11 @@ export function AppSidebar() {
           <ThemeToggle />
         </div>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip="ADLC guide: tutorials and reference" render={<a href="/guide/" target="_blank" rel="noreferrer" />}>
+              <BookOpen /><span>Guide</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Sign out" onClick={() => logout.mutate()}>
               <LogOut /><span>Sign out</span>

@@ -1,0 +1,330 @@
+// ADLC Field Guide: overview, issue-lifecycle simulator, tutorials and references (index.html).
+"use strict"
+const $ = (s) => document.querySelector(s)
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]))
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v) } catch { return d } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} },
+}
+function codeBlock(text) {
+  return `<div class="code"><button class="copy" type="button">Copy</button><pre>${esc(text)}</pre></div>`
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".copy"); if (!b) return
+  const text = b.nextElementSibling.textContent
+  const done = () => { b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1400) }
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(b.nextElementSibling); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = "Selected" }
+  try { navigator.clipboard.writeText(text).then(done, fallback) } catch { fallback() }
+})
+
+/* ── Overview flow ─────────────────────────────────────────────── */
+const FLOW = [
+  { n: "once", t: "init", s: "repo, CI, environments", cmd: "/adlc-core:init",
+    you: ["Answer section by section, or accept defaults and review the summary", "Run .adlc/provision.sh yourself with your GitHub admin login"],
+    out: ["adlc.yaml (setup values)", "docs/project/setup.md with open tbd items", "A PR you merge"] },
+  { n: "step 1", t: "discover", s: "idea → PRD", cmd: "/adlc-core:discover <idea>",
+    you: ["Describe the idea; answer Claude's questions in rounds", "Decide scope: must-haves, later, not doing"],
+    out: ["docs/product/vision.md, prd.md, glossary.md", "Acceptance criteria per feature", "A PR that auto-merges"] },
+  { n: "step 2", t: "architect", s: "PRD → architecture", cmd: "/adlc-core:architect",
+    you: ["Pick between 2–3 options Claude compares", "Accept or change each ADR", "Agree which review findings to fix"],
+    out: ["docs/architecture/ with ADRs, quality attributes, evolution, fitness checks", "adlc.build.yaml commands", "A PR you merge (never auto-merged)"] },
+  { n: "step 3", t: "plan-backlog", s: "→ epics and issues", cmd: "/adlc-core:plan-backlog  (later: --revise)",
+    you: ["Review milestones, epics, issue table and the dependency graph", "Split, merge, reorder; approve before anything is created"],
+    out: ["GitHub milestones, epics and sub-issues", "blocked-by dependencies, adlc:ready / queued labels", "Owner tasks assigned to you"] },
+  { n: "ongoing", t: "deliver", s: "issue → merged PR", cmd: "/adlc-core:deliver <n>  (the poller runs it for you)",
+    you: ["Answer needs-info questions, do owner tasks", "Approve high-risk PRs (the merge train merges them)", "Steer from the dashboard: Run next, epics, pause"],
+    out: ["Spec, design, tests first, code, verify, e2e, review", "A PR per issue with evidence and AC → test mapping", "Low/medium risk merges itself when CI is green"] },
+]
+let flowSel = 4
+function renderFlow() {
+  $("#flow").innerHTML = FLOW.map((f, i) => `<button type="button" aria-pressed="${i === flowSel}" data-i="${i}"><span class="n">${f.n}</span><span class="t">${f.t}</span><span class="s">${f.s}</span></button>`).join("")
+  const f = FLOW[flowSel]
+  $("#flow-detail").innerHTML = `
+    <div><p class="k">Command</p>${codeBlock(f.cmd)}<p class="k" style="margin-top:14px">You</p><ul>${f.you.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+    <div><p class="k">Result</p><ul>${f.out.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`
+}
+$("#flow").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { flowSel = +b.dataset.i; renderFlow() } })
+renderFlow()
+
+/* ── Simulator ─────────────────────────────────────────────────── */
+const PHASES = ["Setup", "Understand", "Design", "Tests first", "Build", "Verify", "QA (e2e)", "Review", "Release"]
+const PHASE_NOTE = [
+  "branch adlc/178-…, label adlc:in-progress",
+  "codebase-scout maps the code; requirements-analyst writes spec.md",
+  "feature-architect writes design.md and tasks, and sets the risk tier",
+  "test-designer writes failing acceptance tests",
+  "implementers work in parallel, each in its own worktree",
+  "build-runner runs lint, typecheck, arch checks and tests; debugger fixes, up to 3 attempts",
+  "qa-engineer runs the e2e flows on web and Android",
+  "code-reviewer and security-reviewer, in parallel",
+  "release-manager opens the PR with the evidence",
+]
+let S, LOG
+function fresh() {
+  S = { label: "queued", blockers: 1, risk: "medium", phase: -1, priority: false, pr: null, rework: 0, review: false, archived: 0, done: false, resume: false }
+  LOG = [{ who: "poller", text: "#178 is <b>adlc:queued</b>: it's blocked by #177, which isn't merged yet. Nothing starts it until #177 closes." }]
+}
+const log = (who, text) => LOG.unshift({ who, text })
+
+function labelsOf() {
+  const l = []
+  if (S.done) return [["done", "closed · merged"]]
+  l.push([S.label, "adlc:" + S.label])
+  if (S.review) l.push(["needs-human-review", "adlc:needs-human-review"])
+  if (S.priority) l.push(["priority", "adlc:priority"])
+  l.push(["queued", "adlc:risk-" + S.risk])
+  return l
+}
+
+function actions() {
+  const A = []
+  const a = (who, title, sub, fn) => A.push({ who, title, sub, fn })
+  if (S.done) { a("you", "Start over", "Run the demo again", () => fresh()); return A }
+  switch (S.label) {
+    case "queued":
+      if (S.blockers) a("ci", "#177 merges", "Its PR goes green and merges; the issue closes", () => {
+        S.blockers = 0; S.label = "ready"
+        log("poller", "#177 closed, so nothing blocks #178 any more: relabelled <b>adlc:ready</b>.")
+      })
+      else a("poller", "Next poller cycle", "Within a minute", () => { S.label = "ready"; log("poller", "Nothing blocks #178: relabelled <b>adlc:ready</b>. The next run starts from the current main.") })
+      break
+    case "ready":
+      if (!S.priority) a("you", "Run next", "Dashboard → Queue tab", () => { S.priority = true; log("you", "Clicked <b>Run next</b>: label adlc:priority. #178 starts before every other ready issue once a run slot is free.") })
+      a("poller", "A run slot frees up", "Poller launches the delivery agent", () => {
+        const wasPrio = S.priority; S.priority = false; S.label = "in-progress"
+        if (S.pr) { S.phase = 5; log("poller", `Rework run: <code>claude -p "/adlc-core:deliver 178"</code> in the same worktree. It reads the failure comment and fixes the same PR.`) }
+        else if (S.resume) { log("poller", "Resumed <code>/adlc-core:deliver 178</code> from the phase where it stopped."); S.resume = false }
+        else { S.phase = 0; log("poller", `Started <code>claude -p "/adlc-core:deliver 178"</code> in its own worktree${wasPrio ? " (Run next removed: it has started)" : ""}.`) }
+      })
+      break
+    case "in-progress":
+      if (S.phase < PHASES.length - 1) {
+        a("agent", `Finish “${PHASES[S.phase]}”`, PHASE_NOTE[S.phase], () => { S.phase++; log("agent", `${PHASES[S.phase - 1]} done; branch pushed. Now: <b>${PHASES[S.phase]}</b>.`) })
+        if (S.phase <= 2) a("agent", "Needs a product decision", "The spec has a question only you can answer", () => { S.label = "needs-info"; S.resume = true; log("agent", "Posted the questions on the issue and set <b>adlc:needs-info</b>. The run stops here and resumes from this phase.") })
+        if (S.phase === 5) a("agent", "Verify fails 3 times", "The debugger runs out of attempts", () => { S.label = "blocked"; S.resume = true; log("agent", "Posted a summary (phase, reason, report paths) and set <b>adlc:blocked</b>.") })
+      } else {
+        a("agent", S.pr ? "Push the fix to the PR" : "Open the pull request", PHASE_NOTE[8], () => {
+          S.label = "pr-open"; S.phase = -1
+          if (!S.pr) {
+            S.pr = { n: 204, checks: "running", approved: false, stale: false }
+            S.review = S.risk === "high"
+            log("agent", `Opened <b>PR #204</b> with the spec, risk reason, AC → test mapping and review verdicts. Label <b>adlc:pr-open</b>${S.review ? " and <b>adlc:needs-human-review</b> (high risk: you review and approve)" : ""}.`)
+          } else {
+            S.pr.checks = "running"
+            if (S.pr.approved) { S.pr.stale = true; log("agent", "Pushed a code fix to PR #204. Your approval was on an older commit, so it no longer holds.") }
+            else log("agent", "Pushed the fix to PR #204; CI runs again.")
+          }
+        })
+      }
+      break
+    case "needs-info":
+      a("you", "Answer and relabel adlc:ready", "Reply on the issue, then change the label", () => { S.label = "ready"; log("you", "Answered on the issue and relabelled <b>adlc:ready</b>.") })
+      break
+    case "blocked":
+      a("you", "Fix the cause, relabel adlc:ready", "Clarify the issue, fix the environment or a tbd setting", () => { S.label = "ready"; log("you", "Fixed the cause and relabelled <b>adlc:ready</b>.") })
+      break
+    case "pr-open": {
+      const pr = S.pr
+      if (pr.checks === "running") {
+        a("ci", "Checks pass", "lint, typecheck, tests, e2e on the self-hosted runners", () => {
+          pr.checks = "green"
+          if (S.risk !== "high") { S.done = true; S.label = "done"; log("ci", "All required checks green."); log("poller", `Risk ${S.risk}: GitHub auto-merge squash-merged PR #204. #178 closed; the issues it blocked become <b>ready</b>.`) }
+          else log("ci", "All required checks green. High risk: waits for your approval.")
+        })
+        a("ci", "A check fails", "A test or build step fails", () => {
+          pr.checks = "red"
+          if (S.rework < 2) { S.rework++; S.label = "ready"; log("ci", "A required check failed."); log("poller", `Commented the failed checks on PR #204 and relabelled #178 <b>adlc:ready</b>: rework ${S.rework} of 2. Rework runs before new issues.`) }
+          else { S.review = true; log("ci", "A required check failed."); log("poller", "Rework budget used up (2 per PR): set <b>adlc:needs-human-review</b>. Look at the failure yourself.") }
+        })
+      } else if (pr.checks === "green" && S.risk === "high") {
+        if (!pr.approved || pr.stale) a("you", pr.stale ? "Approve again" : "Approve the PR", "GitHub → Files changed → Review changes → Approve", () => {
+          pr.approved = true; pr.stale = false; S.review = false
+          log("you", "Approved PR #204. The merge train queues it in approval order.")
+        })
+        if (pr.approved && !pr.stale) {
+          a("train", "Merge train reaches #204", "Front of the train: update, green checks, merge", () => {
+            S.done = true; S.label = "done"
+            log("train", "Brought PR #204 up to date with main, waited for green checks and squash-merged it with the App. #178 closed.")
+          })
+          a("agent", "Agent adds only run records", "A commit touching .adlc/ only", () => log("train", "The new commit only touches <code>.adlc/</code> run records: your approval still holds."))
+          a("ci", "Another PR merges first", "main moves on; #204 is behind", () => { pr.checks = "running"; log("poller", "PR #204 is behind main: merged main into it (a clean merge keeps your approval). Checks run again.") })
+        }
+      }
+      if (pr.checks === "red" && S.review) a("you", "Fix it and re-run the checks", "Push a fix yourself, or re-run a job that failed for environment reasons", () => {
+        pr.checks = "running"; S.review = S.risk === "high" && !pr.approved
+        log("you", "Re-ran the failed checks on PR #204.")
+      })
+      a("you", "Close the PR without merging", "To redo the issue from scratch", () => {
+        S.archived++; S.pr = null; S.review = false; S.rework = 0; S.label = "queued"; S.blockers = 0; S.phase = -1
+        log("you", "Closed PR #204 without merging.")
+        log("poller", "Archived the branch as <code>adlc-closed/178-pr204</code>, removed the workspace and put #178 back to <b>adlc:queued</b>. The next run starts from the current main.")
+      })
+      break
+    }
+  }
+  return A
+}
+
+function renderSim() {
+  $("#risk").innerHTML = ["low", "medium", "high"].map((r) => `<button type="button" aria-pressed="${S.risk === r}" data-r="${r}" ${S.pr ? "disabled title='Set by the feature-architect before the PR opens'" : ""}>${r}</button>`).join("")
+  $("#labels").innerHTML = labelsOf().map(([c, t]) => `<span class="lbl c-${c}">${esc(t)}</span>`).join("")
+  $("#meta").innerHTML = `<dt>Blocked by</dt><dd>${S.blockers ? "#177 (open)" : "nothing open"}</dd><dt>Epic</dt><dd>#175 Merge-friendly layout</dd><dt>Reworks</dt><dd>${S.rework} of 2</dd>`
+  const inRun = S.label === "in-progress" || ((S.label === "needs-info" || S.label === "blocked") && S.phase >= 0)
+  $("#phasebox").hidden = !inRun
+  if (inRun) {
+    $("#phases").innerHTML = PHASES.map((p, i) => `<span class="phase ${i < S.phase ? "done" : i === S.phase ? (S.label === "in-progress" ? "now" : "done") : ""}" title="${p}"></span>`).join("")
+    $("#phase-name").textContent = `Phase ${S.phase + 1}/9: ${PHASES[S.phase]}${S.label !== "in-progress" ? " (stopped)" : ""}`
+  }
+  const pr = S.pr
+  $("#prbox").hidden = !pr
+  if (pr) {
+    const chk = { running: "● checks running", green: "✓ checks green", red: "✕ a check failed" }[pr.checks]
+    $("#prbox").innerHTML = `<div class="row"><b>PR #${pr.n}</b><span class="chk ${pr.checks}">${chk}</span></div>
+      <div class="row" style="color:var(--muted)">${S.risk === "high" ? (pr.approved && !pr.stale ? "Approved by you · in the merge train" : pr.stale ? "Your approval is stale: approve again" : "Waits for your approval") : "Auto-merge on (low/medium risk)"}</div>`
+  }
+  const A = actions()
+  $("#actions").innerHTML = A.map((x, i) => `<button class="act" type="button" data-i="${i}"><span class="who ${x.who}">${x.who === "train" ? "merge train" : x.who}</span><span class="what"><span>${esc(x.title)}</span><small>${esc(x.sub)}</small></span></button>`).join("")
+  $("#actions").onclick = (e) => { const b = e.target.closest(".act"); if (b) { A[+b.dataset.i].fn(); renderSim() } }
+  $("#log").innerHTML = LOG.map((l) => `<li><span class="who ${l.who}">${l.who === "train" ? "merge train" : l.who}</span><span>${l.text}</span></li>`).join("")
+}
+$("#risk").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && !S.pr) { S.risk = b.dataset.r; renderSim() } })
+$("#reset").addEventListener("click", () => { fresh(); renderSim() })
+fresh(); renderSim()
+
+/* ── Tutorials ─────────────────────────────────────────────────── */
+const TUTS = [
+  { id: "setup", title: "Set up a dev server", when: "Once per server and project · about 30 minutes", steps: [
+    { t: "Check the host", w: "dev server", b: "A Linux x86_64 host with Docker Engine and Compose v2, 50 GB+ free, <code>/dev/kvm</code> for the Android emulator.",
+      c: "git clone https://github.com/kororos/adlc.git ~/adlc && cd ~/adlc\nsudo mkdir -p /srv/adlc && sudo chown \"$USER\": /srv/adlc\nsudo ln -s ~/adlc/bin/adlc /usr/local/bin/adlc\nadlc doctor" },
+    { t: "Store the secrets", w: "dev server", b: "Prompted one by one and stored with mode 600. Values never go into the repo or the chat.<ul><li><code>claude_oauth_token</code>: output of <code>claude setup-token</code> (unattended runs)</li><li><code>ci_admin_pat</code>: fine-grained, this repo, Administration read/write (CI runners)</li><li><code>registry_token</code>: pull-only, for the dev deployer</li></ul>",
+      c: "adlc secrets <slug>" },
+    { t: "Give the agents their own GitHub identity", w: "github.com + dev server", b: "Create a GitHub App once per account (Contents, Issues, Pull requests, Workflows: read/write; Actions, Commit statuses: read; webhook off), install it on the repo, then store its key.",
+      c: "adlc app <slug> --id <APP_ID> --key /tmp/app.pem && shred -u /tmp/app.pem" },
+    { t: "Start the runner", w: "dev server", b: "Builds the runner image and starts the runner, its Docker engine, the egress proxy and the CI registrars.",
+      c: "adlc up <slug> --repo <owner>/<slug>" },
+    { t: "Log in Claude and enable Remote Control", w: "dev server", b: "One-time login, then answer “Enable Remote Control? y” in the rc window and detach with Ctrl-b d.",
+      c: "adlc login <slug>\nadlc attach <slug>" },
+    { t: "Open the dashboard", w: "dev server", b: "Shows what's running with its live log, the queue, epics, dependencies, what needs you, CI and health.",
+      c: "adlc ui up\nadlc ui token     # the login token" },
+  ] },
+  { id: "plan", title: "Plan a product", when: "Interactive sessions from the Claude app · a few hours over a few days", steps: [
+    { t: "Open a Remote Control session", w: "Claude app / claude.ai/code", b: "Start a new session on the <b>adlc-&lt;slug&gt;</b> environment and wait for <b>Ready</b>. It works in <code>sessions/rc</code> on the dev server." },
+    { t: "Set up the project", w: "Claude session", b: "Go section by section or accept the defaults and review the summary. Then run the provisioning script yourself: it needs your admin login, which agents never get.",
+      c: "/adlc-core:init\n! bash .adlc/provision.sh" },
+    { t: "Discover the product", w: "Claude session", b: "Rounds of questions turn the idea into a vision, a PRD and acceptance criteria. Say “more ideas” or “stop suggesting” at any time.",
+      c: "/adlc-core:discover A booking app for small gyms…" },
+    { t: "Design the architecture", w: "Claude session", b: "Quality attributes, 2–3 options, ADRs you accept, the design, evolution triggers and fitness checks, then an independent review. Merge its PR yourself.",
+      c: "/adlc-core:architect\n/adlc-core:architect --resume   # continue later" },
+    { t: "Plan the backlog", w: "Claude session", b: "Review milestones, epics, the issue table and the dependency graph. Nothing is created until you approve. Use <code>--revise</code> to add work to an existing backlog.",
+      c: "/adlc-core:plan-backlog" },
+    { t: "Let it deliver", w: "dashboard", b: "The walking skeleton comes first; the poller then takes ready issues in dependency order. Watch it on the dashboard's <b>Now</b> and <b>Queue</b> tabs.",
+      n: "Finish or push open session work before <code>adlc up</code> or <code>adlc restart</code>: a restart ends every app session, and old sessions don't reconnect." },
+  ] },
+  { id: "steer", title: "Steer delivery", when: "Day to day · from the dashboard", steps: [
+    { t: "Read the queue", w: "dashboard → Queue", b: "Issues in the order they will start: Run next, then epics on Run next, then reworks, then milestone due date and age. Each row shows what it waits for." },
+    { t: "Put one issue first", w: "dashboard → Queue", b: "<b>Run next</b> on a startable issue (ready, or queued with nothing open blocking it). It starts as soon as a run slot is free, even past the open-PR limit. A running delivery isn't interrupted." },
+    { t: "Put a whole epic first", w: "dashboard → Epics", b: "<b>Run next</b> on an epic: its startable sub-issues go first until you undo it. Dependencies and the open-PR limit still apply. Expand an epic to see each sub-issue's state, queue position, blockers and PR." },
+    { t: "See why something waits", w: "dashboard → Dependencies", b: "Open issues and their “blocked by” links, left to right. Hover an issue to light up its chain; click it to see only what it waits for." },
+    { t: "Limit work in progress", w: "dashboard → Health → Automation", b: "<b>Rework first</b> (default on) finishes PRs that need work before new issues. <b>Limit open PRs</b> holds new issues while that many agent PRs are open, so merges don't keep causing conflicts." },
+    { t: "Pause and resume", w: "dashboard or dev server", b: "Pausing stops new runs; running ones finish.", c: "adlc pause <slug>\nadlc resume <slug>" },
+  ] },
+  { id: "you", title: "Handle what needs you", when: "When the dashboard's Needs you count goes up", steps: [
+    { t: "Answer questions", w: "GitHub issue", b: "<span class='lbl c-needs-info'>adlc:needs-info</span> Reply in a comment, then relabel <code>adlc:ready</code> (or <code>adlc:queued</code> if it still has open blockers). The run resumes from where it stopped." },
+    { t: "Unblock a run", w: "GitHub issue", b: "<span class='lbl c-blocked'>adlc:blocked</span> Read the summary comment (phase, reason, report paths), fix the cause, relabel <code>adlc:ready</code>. Environment failures (runner, emulator, network) are reported, never “fixed” by changing tests." },
+    { t: "Review and approve high-risk PRs", w: "GitHub PR", b: "<span class='lbl c-needs-human-review'>adlc:needs-human-review</span> Review like any PR. Approve it and the merge train merges it: updated with main, checks green, squash-merged. If code changes after your approval, ADLC asks you to approve again (Review changes → Approve)." },
+    { t: "Do your owner tasks", w: "GitHub issue", b: "<span class='lbl c-owner'>adlc:owner</span> Accounts, credentials, infrastructure, sign-offs. Do the task, check its acceptance criteria, close the issue: what it blocked starts by itself." },
+    { t: "Triage new issues", w: "dashboard → Needs you", b: "Flaky tests, regressions and spikes opened by agents have no pipeline state. <b>Start</b> puts one in the queue, <b>Run next</b> puts it first; close it on GitHub to drop it." },
+    { t: "Redo an issue from scratch", w: "GitHub PR", b: "Close its agent PR without merging. The poller archives the branch as <code>adlc-closed/&lt;n&gt;-pr&lt;PR&gt;</code>, removes the workspace and requeues the issue; the next run starts from the current main." },
+  ] },
+  { id: "ci", title: "Add a CI-only host", when: "When CI and agents compete for CPU · about an hour", steps: [
+    { t: "Create the VM", w: "hypervisor", b: "On a different physical host: 8 vCPU (6 if the host has ≤ 8 cores), 24 GB RAM fully reserved, 150 GB SSD, hardware virtualisation exposed to the guest (for <code>/dev/kvm</code>), Ubuntu LTS with Docker CE. Outbound internet only; no inbound ports." },
+    { t: "Install ADLC", w: "new VM", b: "Only <code>ci_admin_pat</code> is needed there (add Contents: read so the proxy can read adlc.yaml); press Enter for the other secrets.",
+      c: "sudo mkdir -p /srv/adlc && sudo chown \"$USER\": /srv/adlc\ngit clone https://github.com/kororos/adlc ~/adlc && sudo ln -s ~/adlc/bin/adlc /usr/local/bin/adlc\nadlc doctor\nadlc secrets <slug>" },
+    { t: "Start the CI roles", w: "new VM", b: "Roles are <code>test</code>, <code>publish</code> and <code>kvm</code> (Android). Capacity is per host; an Android job counts 2.",
+      c: "adlc up <slug> --ci-only --repo <owner>/<slug> --ci-roles test,kvm --ci-host ci2\necho 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>\nadlc logs <slug> ci     # each registrar: runner … waiting for a job" },
+    { t: "Hand roles over on the main host", w: "dev server", b: "Once no Android job runs there, drop kvm and free its disk. The roles you pass are remembered; later updates need no flag.",
+      c: "adlc up <slug> --ci-roles test,publish\ndocker volume rm adlc-<slug>_ci-data-kvm adlc-<slug>_ci-certs-kvm" },
+    { t: "Check the priority", w: "dashboard → CI", b: "When a host is full, it holds capacity for waiting higher-priority roles (default kvm, publish, test), so Android jobs aren't starved by test jobs. The CI tab shows which host ran each job." },
+  ] },
+  { id: "update", title: "Update ADLC safely", when: "After every ADLC change · 10 minutes", steps: [
+    { t: "Know what each command reloads", w: "", b: "<ul><li><code>adlc restart</code> reloads only the <b>plugins</b> (commands, agents, skills).</li><li><code>adlc up</code> rebuilds the runner image: the <b>scripts</b> (poller, merge train, queue, CI registrar, Remote Control loop).</li><li><code>adlc ui up</code> rebuilds the <b>dashboard</b>.</li></ul>" },
+    { t: "Let running work finish", w: "dev server", b: "Rebuilding stops running deliveries and ends app sessions. Pause, then wait until <code>adlc status</code> shows no active runs. Push any open session work.",
+      c: "adlc pause <slug>\nadlc status <slug>" },
+    { t: "Pull and rebuild", w: "dev server", c: "cd ~/adlc && git pull && adlc up <slug> && adlc ui up\nadlc resume <slug>" },
+    { t: "Update each CI-only host", w: "CI host", b: "Its roles are remembered.", c: "cd ~/adlc && git pull && adlc up <slug>" },
+    { t: "Verify", w: "every host", b: "Doctor says whether the running runner uses this checkout's scripts. Then start a new Remote Control session in the app.",
+      c: "adlc doctor     # <slug>: runner runs this checkout's scripts" },
+  ] },
+]
+let tutSel = store.get("adlc-guide-tut", "setup")
+if (!TUTS.some((t) => t.id === tutSel)) tutSel = "setup"
+const doneSteps = store.get("adlc-guide-done", {})
+const progress = (t) => t.steps.filter((_, i) => doneSteps[`${t.id}:${i}`]).length
+function renderTut() {
+  $("#tut-list").innerHTML = TUTS.map((t) => {
+    const p = progress(t)
+    return `<button type="button" role="tab" aria-selected="${t.id === tutSel}" data-id="${t.id}"><span class="tt">${esc(t.title)}</span><span class="tp"><span class="meter"><span style="width:${(p / t.steps.length) * 100}%"></span></span>${p}/${t.steps.length}</span></button>`
+  }).join("")
+  const i = TUTS.findIndex((t) => t.id === tutSel), t = TUTS[i]
+  $("#tut-body").innerHTML = `<header><p class="eyebrow">Tutorial ${i + 1} of ${TUTS.length}</p><h3 style="font-size:1.4rem">${esc(t.title)}</h3><p class="when">${esc(t.when)}</p></header>
+    <ol class="steps">${t.steps.map((s, k) => {
+      const key = `${t.id}:${k}`, on = !!doneSteps[key]
+      return `<li class="step${on ? " checked" : ""}"><input type="checkbox" id="s-${key}" data-k="${key}" ${on ? "checked" : ""} aria-label="Mark step ${k + 1} done">
+        <div class="sb"><label for="s-${key}" class="st">${k + 1}. ${esc(s.t)}</label>${s.w ? `<span class="where">${esc(s.w)}</span>` : ""}${s.b ? `<div>${s.b}</div>` : ""}${s.c ? codeBlock(s.c) : ""}${s.n ? `<p class="note">${s.n}</p>` : ""}</div></li>`
+    }).join("")}</ol>
+    <div class="tut-foot"><button class="ghost" type="button" data-go="${i - 1}" ${i === 0 ? "disabled" : ""}>← Previous</button><button class="ghost" type="button" data-go="${i + 1}" ${i === TUTS.length - 1 ? "disabled" : ""}>Next tutorial →</button></div>`
+}
+$("#tut-list").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { tutSel = b.dataset.id; store.set("adlc-guide-tut", tutSel); renderTut() } })
+$("#tut-body").addEventListener("change", (e) => { const k = e.target.dataset.k; if (!k) return; if (e.target.checked) doneSteps[k] = 1; else delete doneSteps[k]; store.set("adlc-guide-done", doneSteps); renderTut() })
+$("#tut-body").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b && !b.disabled) { tutSel = TUTS[+b.dataset.go].id; store.set("adlc-guide-tut", tutSel); renderTut(); $("#tutorials").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }) } })
+renderTut()
+
+/* ── Labels ────────────────────────────────────────────────────── */
+const LABELS = [
+  ["queued", "adlc:queued", "Planned, but something it depends on is still open.", "Nothing. The poller promotes it when its blockers close."],
+  ["ready", "adlc:ready", "Can start. The poller launches it when a run slot is free.", "Run next on the dashboard to put it first."],
+  ["in-progress", "adlc:in-progress", "A delivery run is working on it in its own worktree; the branch is pushed after every phase.", "Follow it on the Now tab or with adlc logs <slug> run <n>."],
+  ["pr-open", "adlc:pr-open", "Its PR is open. Failed checks or conflicts send it back to ready for a rework, at most twice.", "Low/medium risk: nothing, it merges itself. High risk: review and approve."],
+  ["needs-info", "adlc:needs-info", "The agent needs a decision. The questions are on the issue.", "Answer, then relabel adlc:ready."],
+  ["blocked", "adlc:blocked", "The run gave up: retries used up or the environment failed. A summary is on the issue.", "Fix the cause, then relabel adlc:ready."],
+  ["needs-human-review", "adlc:needs-human-review", "High risk, a proposed ADR, an untrusted author, or reworks used up.", "Review the PR; approve to put it in the merge train."],
+  ["owner", "adlc:owner", "Your task: accounts, credentials, infrastructure, sign-offs. ADLC never runs it.", "Do it and close the issue; what it blocked starts."],
+  ["priority", "adlc:priority", "Run next: on an issue, first in line; on an epic, its sub-issues first.", "Set and undo it from the dashboard."],
+]
+$("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span class="lbl c-${c}" style="justify-self:start">${n}</span><p>${esc(m)}</p><p class="do"><b>You:</b> ${esc(d)}</p></div>`).join("")
+
+/* ── Commands ──────────────────────────────────────────────────── */
+const CMDS = [
+  ["adlc doctor", "host", "Host checks: Docker, /dev/kvm, disk, secrets, and whether each runner runs this checkout's scripts."],
+  ["adlc secrets <slug>", "host", "Enter or update the project's secrets (stored mode 600, never shown)."],
+  ["adlc up <slug> [--repo o/r] [--ci-roles …]", "host", "Build the runner image and start or update everything. Loads new ADLC scripts. Remembers CI roles."],
+  ["adlc up <slug> --ci-only --ci-roles test,kvm --ci-host ci2", "CI host", "Run only CI registrars and their engines on a second machine."],
+  ["adlc restart <slug> [--force]", "host", "Restart the runner: reloads plugins only, ends app sessions. Warns when the image is out of date."],
+  ["adlc login <slug>", "host", "One-time Claude login for Remote Control (also after it expires)."],
+  ["adlc attach <slug>", "host", "tmux with the rc, poller, deployer and shell windows (detach: Ctrl-b d)."],
+  ["adlc session <slug> [name]", "host", "Interactive Claude session in its own worktree, also reachable from the app."],
+  ["adlc session <slug> --run <n> [--takeover]", "host", "Session inside run #n's worktree; --takeover stops the unattended run."],
+  ["adlc status <slug> [--all]", "host", "Containers, active runs, pause state and the open work in order."],
+  ["adlc logs <slug> [poller|deployer|rc|ci|run <n>]", "host", "Follow a component's log, or a run's narrative and cost."],
+  ["adlc pause <slug> / adlc resume <slug>", "host", "Stop or start launching new runs; running ones finish."],
+  ["adlc train <slug> [on|dry-run|off]", "host", "Show or switch the merge train, live."],
+  ["adlc ui up / adlc ui token", "host", "Build and start the dashboard; show its login token."],
+  ["adlc audit <slug>", "host", "Domains reached through the egress proxy and whether each is allowed."],
+  ["adlc down <slug>", "host", "Stop the project; workspace, volumes and login are kept."],
+  ["/adlc-core:init [--update <section>]", "session", "Project setup: repo, CI, registry, environments, autonomy."],
+  ["/adlc-core:discover <idea> [--resume]", "session", "Idea to vision, PRD, glossary and acceptance criteria."],
+  ["/adlc-core:architect [--resume] [--assess]", "session", "Architecture, ADRs, quality attributes, evolution and fitness checks."],
+  ["/adlc-core:plan-backlog [--revise]", "session", "Milestones, epics and dependency-ordered issues, created after approval."],
+  ["/adlc-core:deliver <n>", "session", "Deliver one issue (the poller runs this for you); resumes from the last phase."],
+]
+let where = "all"
+$("#chips").innerHTML = [["all", "All"], ["host", "Dev server"], ["CI host", "CI host"], ["session", "Claude session"]].map(([k, l]) => `<button type="button" data-w="${k}" aria-pressed="${k === where}">${l}</button>`).join("")
+function renderCmds() {
+  const q = $("#q").value.trim().toLowerCase()
+  const rows = CMDS.filter(([c, w, d]) => (where === "all" || w === where) && (!q || (c + " " + d).toLowerCase().includes(q)))
+  $("#cmds").innerHTML = rows.length ? rows.map(([c, w, d]) => `<tr><td class="c">${esc(c)}</td><td class="w">${w === "host" ? "dev server" : w === "session" ? "Claude session" : w}</td><td>${esc(d)}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="empty">No command matches “${esc(q)}”.</td></tr>`
+}
+$("#q").addEventListener("input", renderCmds)
+$("#chips").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; where = b.dataset.w; $("#chips").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b)); renderCmds() })
+renderCmds()

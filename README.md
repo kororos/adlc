@@ -54,6 +54,10 @@ It is packaged as a Claude Code **plugin marketplace**, so a project gets the wh
 
 ---
 
+**New to ADLC?** The **ADLC Field Guide** walks through it interactively: an issue-lifecycle simulator (labels, poller, CI, merge train), six step-by-step tutorials and a label and command reference. Open [`ui/web/public/guide/index.html`](ui/web/public/guide/index.html) from a clone in any browser (it needs no server or network), or use **Guide** in the dashboard's sidebar (`/guide/`).
+
+---
+
 ## 2. Key concepts
 
 | Concept | Meaning |
