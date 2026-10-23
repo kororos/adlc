@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
-import { ChevronRight, ExternalLink, FolderGit2, HeartPulse, History, Inbox, LayoutGrid, ListOrdered, LogOut, Radio, Workflow } from "lucide-react"
+import { ChevronRight, ExternalLink, FolderGit2, HeartPulse, History, Inbox, LayoutGrid, ListOrdered, LogOut, Network, Radio, Workflow } from "lucide-react"
 import { Logo, ThemeToggle } from "@/components/chrome"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -31,6 +31,7 @@ function statusDot(p: ProjectSummary) {
 const SECTIONS: { tab: ProjectTab; label: string; icon: typeof Radio }[] = [
   { tab: "now", label: "Now", icon: Radio },
   { tab: "queue", label: "Queue", icon: ListOrdered },
+  { tab: "deps", label: "Dependencies", icon: Network },
   { tab: "attention", label: "Needs you", icon: Inbox },
   { tab: "ci", label: "CI", icon: Workflow },
   { tab: "history", label: "History", icon: History },
