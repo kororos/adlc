@@ -222,6 +222,7 @@ function QueueTab({ p, items, wip, epics }: { p: Project; items: QueueItem[]; wi
                   <TableCell className="pl-4 font-mono text-xs text-muted-foreground">{i.rank}</TableCell>
                   <TableCell className="max-w-[34rem] whitespace-normal">
                     <IssueLink item={i} />
+                    {i.regression && !i.priority && <Badge variant="outline" className="ml-1.5 align-middle text-xs text-red-600 dark:text-red-400">regression first</Badge>}
                     {i.rework && i.state === "ready" && <Badge variant="outline" className="ml-1.5 align-middle text-xs">rework</Badge>}
                     {i.epicFirst && !i.priority && <Badge variant="outline" className="ml-1.5 align-middle text-xs text-primary">epic #{i.epic} first</Badge>}
                     {i.state === "owner" && i.unblocks ? <span className="ml-1.5 text-xs text-muted-foreground">unblocks {i.unblocks}</span> : null}

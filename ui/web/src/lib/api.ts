@@ -13,6 +13,7 @@ export type QueueItem = {
   blockers: { number: number; owner: boolean }[]
   unblocks: number
   priority?: boolean   // "run next" (label adlc:priority): first in line once a run slot is free
+  regression?: boolean // adlc:regression: main or the nightly is broken; runs right after "run next"
   rework?: boolean     // has an open agent PR: a run is a rework (conflicts, failed checks, review)
   epic?: number | null // parent epic
   epicFirst?: boolean  // its epic (or the epic above) has "run next"

@@ -196,9 +196,26 @@ start_issue() { # start_issue <n>
   case $labels in *,adlc:ready,*|*,adlc:queued,*|*,adlc:in-progress,*|*,adlc:pr-open,*|*,adlc:blocked,*|*,adlc:needs-info,*|*,adlc:needs-human-review,*)
     log "WARN: start: #$n is already in the pipeline"; return 0 ;;
   esac
+  enter_pipeline "$n" "from the dashboard"
+}
+# Into the pipeline: ready, or queued while it has open blockers.
+enter_pipeline() { # enter_pipeline <n> <why>
+  local n=$1 open
   open=$(gh api "repos/$R/issues/$n/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length' 2>/dev/null) || open=0
-  if [ "$open" = 0 ]; then label "$n" "" adlc:ready; log "#$n: started from the dashboard (ready)"
-  else label "$n" "" adlc:queued; log "#$n: started from the dashboard (queued: $open open blocker(s))"; fi
+  if [ "$open" = 0 ]; then label "$n" "" adlc:ready; log "#$n: started $2 (ready)"
+  else label "$n" "" adlc:queued; log "#$n: started $2 (queued: $open open blocker(s))"; fi
+}
+# Regressions (main or the nightly is broken) don't wait for triage: one with no pipeline state, e.g. opened
+# by a nightly workflow without adlc:ready, is started once. Remove its state label later and it stays out.
+start_regressions() {
+  local d="$STATE_DIR/regressions-started" n
+  mkdir -p "$d"
+  for n in $(gh issue list -R "$R" --label adlc:regression --state open --limit 50 --json number,labels --jq "map($NOT_AGENT_WORK)
+      | .[] | select([.labels[].name] | any(test(\"^adlc:(ready|queued|in-progress|pr-open|blocked|needs-info|needs-human-review)$\")) | not) | .number" 2>/dev/null); do
+    [ -e "$d/$n" ] && continue
+    touch "$d/$n"
+    enter_pipeline "$n" "automatically: a regression"
+  done
 }
 
 launch() { # launch <n> <title>
@@ -254,7 +271,7 @@ epic_first() {
     || echo '[]'
 }
 wip_held=""
-# Order of the ready issues: "run next" on the issue (adlc:priority), then "run next" on its epic, then reworks
+# Order of the ready issues: "run next" on the issue (adlc:priority), then regressions (adlc:regression), then "run next" on its epic, then reworks
 # (rework_first, default on), then the milestone due date and age. With max_open_prs set, a new issue (no open PR) doesn't start while that many
 # agent PRs are open: they wait for your review, a merge or a rework first. Reworks and "run next" always start.
 launch_ready() {
@@ -269,7 +286,7 @@ launch_ready() {
   open=$(jq length <<<"$prs"); max=$(setting max_open_prs)
   rework=false; [ "$(setting rework_first)" = on ] && rework=true
   epics=$(epic_first); [[ "$epics" == \[* ]] || epics='[]'
-  order="sort_by(([.labels[].name] | index(\"$PRIORITY_LABEL\") == null), (.number as \$n | $epics | index(\$n) == null), ($rework and (.number as \$n | $prs | index(\$n) == null)), (.milestone.dueOn // \"9999\"), .createdAt)"
+  order="sort_by(([.labels[].name] | index(\"$PRIORITY_LABEL\") == null), ([.labels[].name] | index(\"adlc:regression\") == null), (.number as \$n | $epics | index(\$n) == null), ($rework and (.number as \$n | $prs | index(\$n) == null)), (.milestone.dueOn // \"9999\"), .createdAt)"
   while IFS=$'\t' read -r n author title has_pr urgent; do
     [ -n "$n" ] || continue
     [ "$slots" -gt 0 ] || break
@@ -691,6 +708,7 @@ while :; do
   if [ -f "$STATE_DIR/paused" ]; then
     [ $((i % 10)) = 0 ] && log "paused (adlc resume $ADLC_SLUG)"
   else
+    start_regressions
     promote_queued
     [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; watch_closed_prs; merge_train; }
     launch_ready
