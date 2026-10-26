@@ -300,11 +300,13 @@ cd ~/adlc
 | `adlc shell <slug>` | bash inside the runner, with `gh` authenticated |
 | `adlc attach <slug>` | tmux with windows **rc** (Remote Control), **poller**, **deployer**, **shell** and your sessions (detach: Ctrl-b d) |
 | `adlc pause` / `resume <slug>` | stop/start launching new runs (running ones finish) |
-| `adlc logs <slug> [poller\|deployer\|rc\|egress\|ci\|run <n>]` | follow logs (Ctrl-C to stop; don't pipe into `tail`, they never end). `run <n>` shows the agent's narrative and cost for the latest run of issue n |
+| `adlc logs <slug> [poller\|deployer\|rc\|egress\|ci\|hoststats\|run <n>]` | follow logs (Ctrl-C to stop; don't pipe into `tail`, they never end). `hoststats` (CI-only host) shows whether its stats reach the dashboard. `run <n>` shows the agent's narrative and cost for the latest run of issue n |
 | `adlc audit <slug>` | domains reached through the egress proxy and whether each is allowlisted |
 | `adlc restart <slug> [--force]` | restart the runner: reloads the ADLC **plugins** (commands, agents, skills) after `git pull`. The runner's **scripts** (poller, merge train, queue, CI registrar, Remote Control loop) are built into its image: load those with `adlc up <slug>` (pause and let running deliveries finish first). `restart` and `adlc doctor` warn when the image is older than the checkout. Refuses while delivery runs are active unless `--force` |
 | `adlc down <slug>` | stop the project (workspace, volumes and login are kept) |
 | `adlc doctor` | host checks |
+| `adlc ui host-token <host> [--rotate\|--remove]` | on the main host: the token a CI-only host reports its CPU, memory and disk with ([setup](#a-second-machine-for-ci-ci-only-host)) |
+| `adlc ui report <dashboard url>` | on a CI-only host: start reporting to the dashboard (asks for that token) |
 
 ### Option B: locally, in any Claude Code session
 ```text
