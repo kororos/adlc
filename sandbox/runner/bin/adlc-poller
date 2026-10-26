@@ -673,9 +673,18 @@ watch_closed_prs() {
 # ── Cleanup after merge/close ─────────────────────────────────────────────────
 # An issue's workspace: its test environment (and built images), worktree and local branches. Fails when
 # the worktree can't be removed.
+# Compose projects of issue <n> in the Docker sidecar: adlc-<n>, and adlc-<n>-<suffix> that a task agent
+# may start with its own ADLC_RUN (e.g. adlc-38-t2). Not adlc-emulator or the dev deployment.
+issue_projects() { # issue_projects <n>
+  { echo "adlc-$1"; docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | grep -E "^adlc-$1(-[a-z0-9]+)?$"; } | sort -u
+}
+down_issue_envs() { # down_issue_envs <n>: their containers, volumes, networks and built images
+  local p
+  for p in $(issue_projects "$1"); do docker compose -p "$p" down -v --rmi local >/dev/null 2>&1 || true; done
+}
 remove_workspace() { # remove_workspace <n>
   local n=$1 wt="$RUNS_DIR/$1"
-  docker compose -p "adlc-$n" down -v --rmi local >/dev/null 2>&1 || true   # its built images too
+  down_issue_envs "$n"
   if [ -e "$wt" ]; then
     git -C "$REPO_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt" 2>/dev/null
     # Test-environment containers (e.g. vite as root) leave files this user can't delete. The
@@ -688,7 +697,7 @@ remove_workspace() { # remove_workspace <n>
   [ ! -e "$wt" ]
 }
 cleanup() {
-  local wt n state
+  local wt n state envs
   for wt in "$RUNS_DIR"/*/; do
     [ -d "$wt" ] || continue
     n=$(basename "$wt")
@@ -697,6 +706,17 @@ cleanup() {
     [ "$state" = CLOSED ] || continue
     if remove_workspace "$n"; then log "#$n closed: removed worktree and local branches"
     else log "ERROR: #$n closed but its worktree $wt could not be removed; remove it by hand (sudo rm -rf)"; fi
+  done
+  # Test environments left behind with no workspace: a task agent's adlc-<n>-t<k> after the workspace went,
+  # or a workspace removed by hand. Down once the issue is closed.
+  for n in $(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sed -nE 's/^adlc-([0-9]+)(-[a-z0-9]+)?$/\1/p' | sort -un); do
+    [ -d "$RUNS_DIR/$n" ] && continue
+    is_running "$n" && continue
+    state=$(gh issue view "$n" -R "$R" --json state --jq .state 2>/dev/null) || continue
+    [ "$state" = CLOSED ] || continue
+    envs=$(issue_projects "$n" | paste -sd' ' -)
+    down_issue_envs "$n"
+    log "#$n closed: removed its leftover test environments ($envs)"
   done
   git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
   find "$LOG_DIR/runs" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true

@@ -28,6 +28,7 @@ Do:
 - Match the surrounding code: naming, structure, error handling, comment density.
 - Make the acceptance tests for your ACs pass. Add unit tests for any non-trivial logic you introduce. If you add or rename a test that covers an AC, update `.adlc/runs/<n>/tests.md` (the one run file you may edit besides your status).
 - Run lint, typecheck and the relevant tests from `adlc.build.yaml` before committing. Run only the test files you touched or that cover your ACs. The full suite runs later.
+- If those tests need the test environment, start it with `ADLC_RUN=<n>-t<k>` (`env.up`, then `env.seed`) so it doesn't collide with the lead's or another task's, and always run `env.down` with the same `ADLC_RUN` before you end, also when you return blocked.
 - Commit with a conventional message referencing `#<n>`. Don't push or merge. The lead integrates task branches.
 
 - **Never record a human's approval.** Don't write a person's name, handle, date or "approved" into reviewer, approver, sign-off or exception fields (licence exceptions, ADR acceptance, risk acceptances, checklists). Leave them empty or `pending`, and list each one under ISSUES as needing the owner's decision before merge.
