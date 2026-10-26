@@ -226,9 +226,14 @@ launch() { # launch <n> <title>
   protected=$(cfg '.repo.protected_branches | join("|")')
   # An open PR from this issue's branch means a rework (failed checks or a person's request): say so
   # explicitly, so the run never just resumes its recorded phase.
+  # A conflicting PR adds --conflicts: a person may have relabelled the issue (e.g. from blocked) without the
+  # poller's conflict comment on the PR, and the run must not reuse an earlier conclusion.
+  local pr_state
   mode=""
-  if [ -n "$(gh pr list -R "$R" --state open --json headRefName --jq ".[] | select(.headRefName | startswith(\"adlc/$n-\")) | .headRefName" 2>/dev/null)" ]; then
+  pr_state=$(gh pr list -R "$R" --state open --json headRefName,mergeable --jq ".[] | select(.headRefName | startswith(\"adlc/$n-\")) | .mergeable" 2>/dev/null | head -1)
+  if [ -n "$pr_state" ]; then
     mode=" --rework"
+    [ "$pr_state" = CONFLICTING ] && mode=" --rework --conflicts"
   fi
   label "$n" adlc:ready adlc:in-progress
   gh issue edit "$n" -R "$R" --remove-label "$PRIORITY_LABEL" >/dev/null 2>&1 || true
@@ -379,11 +384,16 @@ keep_current() { # keep_current <pr> <issue> <head sha>
 }
 # Send an agent PR back to its issue's delivery run. Shared by failed checks and merge conflicts: once per
 # head commit, at most autonomy.ci_rework_max automatic reworks per PR, then adlc:needs-human-review.
-request_rework() { # request_rework <pr> <issue> <head sha> <what> <comment>
-  local pr=$1 n=$2 sha=$3 what=$4 body=$5 max f tried
+# Conflicts also send back a PR whose issue is adlc:blocked (e.g. waiting on an environment fix): the base
+# moved on after the block, and nothing else would tell the agent.
+request_rework() { # request_rework <pr> <issue> <head sha> <what> <comment> [also-blocked]
+  local pr=$1 n=$2 sha=$3 what=$4 body=$5 max f tried from=adlc:pr-open
   max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
   is_running "$n" && return 0
-  has_label "$n" adlc:pr-open || return 0
+  if ! has_label "$n" adlc:pr-open; then
+    [ "${6:-}" = also-blocked ] && has_label "$n" adlc:blocked || return 0
+    from=adlc:blocked
+  fi
   f="$CI_DIR/$pr"
   grep -qx "$sha" "$f" 2>/dev/null && return 0         # this commit was handled already
   tried=$(grep -c . "$f" 2>/dev/null || true); tried=${tried:-0}
@@ -399,7 +409,7 @@ The delivery agent will rework this PR (automatic attempt $((tried + 1)) of $max
     || { log "WARN: could not comment on PR #$pr (retrying next cycle)"; return 0; }
   # Recorded only once the comment is posted, so a failed attempt is retried.
   echo "$sha" >>"$f"
-  label "$n" adlc:pr-open adlc:ready
+  label "$n" "$from" adlc:ready
   log "#$n: PR #$pr: $what on ${sha:0:7}; queued for rework ($((tried + 1))/$max)"
 }
 watch_pr_checks() {
@@ -417,9 +427,11 @@ watch_pr_checks() {
     # Conflicts first: GitHub runs no pull_request workflows for a conflicting PR, so its checks would
     # look pending forever.
     if [ "$mergeable" = CONFLICTING ]; then
-      request_rework "$pr" "$n" "$sha" "merge conflicts with $base" "ADLC: this PR has merge conflicts with \`$base\` at \`${sha:0:7}\`. Merge \`$base\` into the branch and resolve them, keeping the intent of both sides; then verify and review again."
+      request_rework "$pr" "$n" "$sha" "merge conflicts with $base" "ADLC: this PR has merge conflicts with \`$base\` at \`${sha:0:7}\`. Merge \`$base\` into the branch and resolve them, keeping the intent of both sides; then verify and review again." also-blocked
       continue
     fi
+    # GitHub computes mergeability lazily: UNKNOWN may still turn out CONFLICTING, so don't treat it as green yet.
+    [ "$mergeable" = UNKNOWN ] && continue
     # "PENDING" while any run for the commit is unfinished (or none started yet); else the failed
     # workflows as "name <url>" joined by "; " (empty = all green). Only each workflow's latest run counts:
     # one superseded by a newer run for the same commit doesn't. A latest run that was cancelled (by hand,

@@ -161,6 +161,19 @@ section > .wrap > header { display: grid; gap: 10px; margin-bottom: 28px }
 .cmd-tools { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px }
 .cmd-tools input { flex: 1; min-width: 0; max-width: 420px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit }
 .chips { display: flex; gap: 6px; flex-wrap: wrap }
+.fixes { display: grid; gap: 8px }
+.fix { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0 }
+.fix > summary { cursor: pointer; list-style: none; padding: 12px 16px; display: flex; gap: 12px; align-items: baseline }
+.fix > summary::-webkit-details-marker { display: none }
+.fix > summary::before { content: "›"; color: var(--muted); transition: transform 0.15s; display: inline-block }
+.fix[open] > summary::before { transform: rotate(90deg) }
+.fix .ft { font: 600 0.98rem var(--f-display); flex: 1; min-width: 0 }
+.fix .fc { font-size: 0.74rem; color: var(--muted); white-space: nowrap }
+.fix .fb { padding: 0 16px 14px 34px; display: grid; gap: 10px; font-size: 0.9rem; min-width: 0 }
+.fix .why { color: var(--muted) }
+.fix ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px }
+.fixes .empty { color: var(--muted); padding: 12px 4px }
+
 .chips button { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 0.84rem; color: var(--muted) }
 .chips button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink) }
 .tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px }
@@ -189,7 +202,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
 <nav class="bar"><div class="wrap">
   <span class="brand">ADLC Field Guide</span>
   <div class="links">
-    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#labels">Labels</a><a href="#commands">Commands</a>
+    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#labels">Labels</a><a href="#fixes">Fix it</a><a href="#commands">Commands</a>
   </div>
 </div></nav>
 
@@ -257,6 +270,19 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
     <p class="lede">GitHub labels are the pipeline's state. The poller reads and writes them every minute; you change them to steer.</p>
   </header>
   <div class="lgrid" id="lgrid"></div>
+</div></section>
+
+<section id="fixes"><div class="wrap">
+  <header>
+    <p class="eyebrow">Troubleshooting</p>
+    <h2>What to do when…</h2>
+    <p class="lede">Situations from real projects: what you see, why it happens, and the steps that resolve it.</p>
+  </header>
+  <div class="cmd-tools">
+    <input id="fq" type="search" placeholder="Search: re-approve, conflicts, Safari, slots…" aria-label="Search situations">
+    <div class="chips" id="fchips"></div>
+  </div>
+  <div class="fixes" id="fixlist"></div>
 </div></section>
 
 <section id="commands"><div class="wrap">

@@ -1,4 +1,4 @@
-// ADLC Field Guide: overview, issue-lifecycle simulator, tutorials and references (index.html).
+// ADLC Field Guide: overview, issue-lifecycle simulator, tutorials, troubleshooting and references (index.html).
 "use strict"
 const $ = (s) => document.querySelector(s)
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]))
@@ -292,6 +292,80 @@ const LABELS = [
   ["priority", "adlc:priority", "Run next: on an issue, first in line; on an epic, its sub-issues first.", "Set and undo it from the dashboard."],
 ]
 $("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span class="lbl c-${c}" style="justify-self:start">${n}</span><p>${esc(m)}</p><p class="do"><b>You:</b> ${esc(d)}</p></div>`).join("")
+
+/* ── Fix it: what to do when… ──────────────────────────────────── */
+// [category, what you see, why, steps, optional code]. `x` in text renders as code.
+const FIXES = [
+  ["Pipeline", "An issue doesn't start after you answered its question",
+    "Removing `adlc:needs-info` leaves the issue with no pipeline state. The poller only starts `adlc:ready` issues (and `adlc:queued` ones once their blockers close).",
+    ["Relabel it `adlc:ready` (or `adlc:queued` if it still has open blockers), or press Start on the dashboard's Needs you tab.", "The run resumes where it stopped and reads your answer."],
+    "gh issue edit <n> --add-label adlc:ready"],
+  ["Pipeline", "An issue starts before its planned turn",
+    "Only GitHub's blocked-by relationships hold an issue back. An order written in a comment or in backlog.md (\"after #180\") isn't read by the poller.",
+    ["On the issue: Relationships → Mark as blocked by, for each issue that must go first.", "For larger changes to the order, run `/adlc-core:plan-backlog --revise`."]],
+  ["Pipeline", "A regression waits behind other work",
+    "Regressions (`adlc:regression`) run right after Run next, ahead of epics and milestones. One opened without a state (a nightly script that adds only `adlc:regression`) is started automatically, once. Older runner images did neither.",
+    ["Press Run next on it to start it now.", "Update the runner so this happens by itself (see \"The dev server runs old code\")."]],
+  ["Pipeline", "An issue stays blocked after you closed its PR",
+    "Closing an agent PR without merging archives the branch as `adlc-closed/<n>-pr<PR>`, removes the workspace and puts the issue back to `adlc:queued`, also when it was `adlc:blocked` or `adlc:needs-human-review`. Older runner images handled only `adlc:pr-open`.",
+    ["Relabel the issue `adlc:queued` yourself.", "Update the runner."],
+    "gh issue edit <n> --remove-label adlc:blocked --add-label adlc:queued"],
+  ["Pipeline", "Health shows Remote Control \"login required\"",
+    "Only interactive sessions (Remote Control, the Claude app) use that login. Unattended deliveries use the `claude_oauth_token` secret and keep running.",
+    ["Log in again on the dev server."],
+    "adlc login <slug>"],
+  ["Pipeline", "The Claude app can't reconnect after a restart",
+    "Every runner restart registers a new Remote Control environment; old sessions don't reconnect.",
+    ["Start a new session on the online adlc-<slug> environment.", "Right after a restart it can say \"folder already served\" for about 3 minutes; wait for Ready.", "Send `/adlc-core:<phase> --resume` to continue a planning phase."]],
+  ["PRs", "A PR asks you to re-approve, but GitHub still shows your approval",
+    "ADLC checks every commit after the one you approved. Clean merges of the base and commits touching only `.adlc/` (run records) keep the approval. New code or a conflict resolution makes it stale; ADLC also turns off the PR's auto-merge until you re-approve.",
+    ["Open the compare link in ADLC's comment and review just those changes.", "Files changed → Review changes → Approve. GitHub accepts it although the old approval still shows."]],
+  ["PRs", "An approved, green PR is behind main and never merges",
+    "The merge train only reports what it would do in `dry-run`, the default.",
+    ["Switch it on (or Health → Automation on the dashboard).", "It then updates the front PR, waits for its checks and squash-merges, one PR at a time."],
+    "adlc train <slug> on"],
+  ["PRs", "A blocked PR gets merge conflicts, or a rework repeats an old conclusion",
+    "The poller sends a conflicting PR back to the agent even when its issue is `adlc:blocked`, and the run is told `--conflicts`. Every rework reads the PR's current checks and mergeability and new comments on both the issue and the PR. Runners from before 2026-10-26 checked conflicts only for `adlc:pr-open` and could reuse an earlier conclusion.",
+    ["Relabel the issue `adlc:pr-open`: the poller posts its conflict comment and starts a rework.", "Or write the request on the PR and relabel the issue `adlc:ready`.", "A conflict resolution is new code: re-approve when it's done."],
+    "gh issue edit <n> --remove-label adlc:blocked --add-label adlc:pr-open"],
+  ["PRs", "A required check fails on a PR that didn't touch that code",
+    "Usually a flaky test, e.g. a UI test that waits 1 s for data while the runner is busy. Its log shows the page still loading.",
+    ["Re-run the failed jobs.", "Open an issue labelled `adlc:flaky` with the test name and the log lines, so it's fixed for good."],
+    "gh run rerun <run-id> --failed"],
+  ["CI", "Many CI jobs wait and none seem to run",
+    "Each host runs one runner per role at a time, and runners are single-use: between two jobs there's a 20–90 s gap while a new one registers, so a snapshot can show none.",
+    ["Check the dashboard's CI tab, or the registrar log.", "If the queue really is longer than your capacity: raise a host's slots (next item) or add a CI-only host."],
+    "adlc logs <slug> ci"],
+  ["CI", "A CI host sits idle while test jobs wait",
+    "CI capacity is `ADLC_CI_SLOTS` per host (default 2). An Android (kvm) job takes 2, so while one runs or waits, that host's test runner holds back. Its log says \"waiting: other CI jobs use the capacity\".",
+    ["On a host with 4+ CPUs, raise the slots on that host so Android and one test job run side by side."],
+    "echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>"],
+  ["CI", "Publish fails: \"findings at or above CRITICAL, or the scan failed\"",
+    "The same message covers real findings and a scan that couldn't run. Read the `Total:` lines in the log first.",
+    ["`CRITICAL: 0` with `FATAL … failed to download vulnerability DB`: Trivy's database mirror failed. Re-run the failed job.", "Real CRITICAL findings: they need a newer base image or a package upgrade in the Dockerfile. Open an issue for it."],
+    "gh run rerun <run-id> --failed"],
+  ["Dashboard", "The dashboard lacks something new, or the dev server runs old code",
+    "`adlc restart` reloads only the plugins. The poller, queue, merge train and CI registrar are built into the runner image. `adlc doctor` says when an image is older than your checkout.",
+    ["Pause and wait until `adlc status` shows no active run.", "Pull, rebuild the runner and the dashboard, resume.", "A CI-only host needs `git pull && adlc up <slug>` too (its roles are remembered)."],
+    "adlc pause <slug>; adlc status <slug>\ncd ~/adlc && git pull && adlc up <slug> && adlc ui up && adlc resume <slug>"],
+  ["Dashboard", "The dashboard opens in Chrome but not in Safari",
+    "DNS-rebind protection in the router (e.g. pfSense) drops nip.io answers that point to private IPs. Chrome's secure DNS goes around the router; Safari doesn't.",
+    ["Allow nip.io as a private domain in the router, or give the dashboard your own name with `adlc ui up --host <name>`.", "Flush the Mac's DNS cache."],
+    "sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder"],
+]
+const inline = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>")
+let fcat = "All"
+$("#fchips").innerHTML = ["All", "Pipeline", "PRs", "CI", "Dashboard"].map((k) => `<button type="button" data-c="${k}" aria-pressed="${k === fcat}">${k}</button>`).join("")
+function renderFixes() {
+  const q = $("#fq").value.trim().toLowerCase()
+  const rows = FIXES.filter(([c, t, w, s, code]) => (fcat === "All" || c === fcat) && (!q || [t, w, ...s, code ?? ""].join(" ").toLowerCase().includes(q)))
+  $("#fixlist").innerHTML = rows.length ? rows.map(([c, t, w, s, code]) => `<details class="fix"${q ? " open" : ""}><summary><span class="ft">${esc(t)}</span><span class="fc">${c}</span></summary>
+    <div class="fb"><p class="why">${inline(w)}</p><ol>${s.map((x) => `<li>${inline(x)}</li>`).join("")}</ol>${code ? codeBlock(code) : ""}</div></details>`).join("")
+    : `<p class="empty">Nothing matches “${esc(q)}”.</p>`
+}
+$("#fq").addEventListener("input", renderFixes)
+$("#fchips").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; fcat = b.dataset.c; $("#fchips").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b)); renderFixes() })
+renderFixes()
 
 /* ── Commands ──────────────────────────────────────────────────── */
 const CMDS = [
