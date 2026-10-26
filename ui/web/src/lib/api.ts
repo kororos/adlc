@@ -151,6 +151,18 @@ export type RunTotals = { runs: number; finished: number; costUsd: number; durat
 
 export type Run = { file: string; issue: number; started: string; updated: string | null; result: RunResult | null }
 
+export type Host = {
+  name: string
+  role: "main" | "ci"
+  at: string
+  stale: boolean
+  cpuPct: number | null
+  load1?: number | null
+  cores?: number | null
+  mem?: { totalGb: number; usedPct: number } | null
+  disk?: { freeGb: number; totalGb: number } | null
+}
+
 export type Component = "poller" | "deployer" | "rc"
 
 export type Disk = { freeGb: number; totalGb: number; minFreeGb: number; warnPct: number }
@@ -221,6 +233,7 @@ export const api = {
   runs: (slug: string) => request<Run[]>("GET", `/api/projects/${slug}/runs?limit=100`),
   runTotals: (slug: string) => request<RunTotals>("GET", `/api/projects/${slug}/runs/totals`),
   disk: () => request<Disk | null>("GET", "/api/disk"),
+  hosts: () => request<Host[]>("GET", "/api/hosts"),
   action: (slug: string, action: ProjectAction) => request<{ ok: true }>("POST", `/api/projects/${slug}/actions`, { action }),
 }
 
@@ -231,4 +244,5 @@ export const queryKeys = {
   runs: (slug: string) => ["runs", slug] as const,
   runTotals: (slug: string) => ["runs", slug, "totals"] as const,
   disk: ["disk"] as const,
+  hosts: ["hosts"] as const,
 }

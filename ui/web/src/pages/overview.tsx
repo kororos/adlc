@@ -2,17 +2,21 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowRight, CircleUserRound, FolderGit2, GitPullRequest, HardDrive, OctagonAlert, Workflow } from "lucide-react"
 import { EmptyState, Stat } from "@/components/chrome"
+import { HostsCard } from "@/components/hosts"
 import { PauseControl, PipelineBadge } from "@/components/status"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, queryKeys } from "@/lib/api"
 import { ago } from "@/lib/format"
+import { diskTone } from "@/lib/hosts"
 import { currentPhaseLabel } from "@/lib/phases"
 import { cn } from "@/lib/utils"
 
 export function OverviewPage() {
   const q = useQuery({ queryKey: queryKeys.projects, queryFn: api.projects, refetchInterval: 10_000 })
   const disk = useQuery({ queryKey: queryKeys.disk, queryFn: api.disk, refetchInterval: 60_000 })
+  const hosts = useQuery({ queryKey: queryKeys.hosts, queryFn: api.hosts, refetchInterval: 15_000 })
+  const lowCi = (hosts.data ?? []).filter((h) => h.role === "ci" && !h.stale && diskTone(h.disk, disk.data) !== "ok")
   if (q.isPending) return <div className="grid gap-4 md:grid-cols-2"><Skeleton className="h-56" /><Skeleton className="h-56" /></div>
   if (q.isError) return <p className="text-destructive">{q.error.message}</p>
   if (!q.data.length) return <EmptyState icon={FolderGit2} title="No projects yet">Create one on the dev server with <code>adlc up &lt;slug&gt; --repo owner/name</code>.</EmptyState>
@@ -24,6 +28,12 @@ export function OverviewPage() {
           <span>Dev server disk: <b>{disk.data.freeGb} GB free</b> of {disk.data.totalGb} GB.{disk.data.freeGb < disk.data.minFreeGb ? " New runs are on hold until there's more space." : ""} On the dev server: <code>adlc prune</code>.</span>
         </div>
       )}
+      {lowCi.map((h) => (
+        <div key={h.name} className={cn("flex items-center gap-3 rounded-xl border p-3 text-sm", diskTone(h.disk, disk.data) === "bad" ? "border-red-500/50 bg-red-500/5" : "border-amber-500/50 bg-amber-500/5")} data-testid={`host-disk-warning-${h.name}`}>
+          <HardDrive className="size-4 shrink-0" />
+          <span>{h.name} disk: <b>{h.disk?.freeGb} GB free</b> of {h.disk?.totalGb} GB. On {h.name}: <code>adlc prune</code>.</span>
+        </div>
+      ))}
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
         <p className="text-sm text-muted-foreground">Delivery pipelines on this dev server.</p>
@@ -61,6 +71,7 @@ export function OverviewPage() {
           )
         })}
       </div>
+      <HostsCard />
     </div>
   )
 }

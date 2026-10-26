@@ -28,7 +28,7 @@
 #   adlc attach <slug>               attach to the runner's tmux (rc / poller / deployer / shell / sessions)
 #   adlc status [slug] [--all] [--disk]  runners, active runs, pause state, open work in order of precedence; --disk: Docker usage per engine (slow)
 #   adlc pause|resume <slug>         stop/start launching new delivery runs
-#   adlc logs <slug> [poller|deployer|rc|egress|ci|run <issue>]
+#   adlc logs <slug> [poller|deployer|rc|egress|ci|hoststats|run <issue>]
 #   adlc audit <slug>                egress domains seen (to build the allowlist)
 #   adlc train <slug> [on|dry-run|off]  show or switch the merge train (approved agent PRs merged in order), live
 #   adlc restart <slug> [--force]    restart the runner: reloads the ADLC plugins and Remote Control
@@ -38,6 +38,8 @@
 #   adlc ui [up|down|token|status]   web dashboard for all projects (LAN; login token)
 #       up [--host <name>]…          start it; --host adds names a reverse proxy will use
 #       token [--rotate]             show the login token (--rotate signs everyone out)
+#       host-token <name> [--rotate|--remove]  token a CI-only host reports its CPU/memory/disk with
+#       report <dashboard url>       on a CI-only host: report to the main host's dashboard (asks for the token)
 set -euo pipefail
 
 ADLC_HOME=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -86,9 +88,12 @@ compose() { # compose <slug> <args...>
     [ "${ADLC_DIND_MODE:-}" = sysbox ] && files+=(-f "$SANDBOX/compose.ci-sysbox.yml")
     [ -n "${ADLC_REGISTRY_CA:-}" ] && files+=(-f "$SANDBOX/compose.ci-registry-ca.yml")
   fi
-  # Each CI role (registrar + engine) is a compose profile: test, publish, kvm.
-  COMPOSE_PROFILES=$(ci_roles "$slug" | paste -sd, -) docker compose --env-file "$f" "${files[@]}" "$@"
+  # Each CI role (registrar + engine) is a compose profile: test, publish, kvm; hoststats reports a
+  # CI-only host to the dashboard once `adlc ui report` has set it up.
+  COMPOSE_PROFILES=$({ ci_roles "$slug"; ci_only && hoststats_on && echo hoststats; } | paste -sd, -) \
+    docker compose --env-file "$f" "${files[@]}" "$@"
 }
+hoststats_on() { [ -n "${ADLC_DASHBOARD_URL:-}" ] && [ -s "$ADLC_ROOT/config/dashboard-token" ]; }
 ci_only() { [ "${ADLC_CI_ONLY:-0}" = 1 ]; }
 # Fingerprint of the runner image's sources (scripts, Dockerfiles): stored as a label at build time, so
 # `adlc restart` and `adlc doctor` can tell a runner that still runs older scripts than this checkout.
@@ -511,6 +516,7 @@ cmd_prune() {
 edge_get() { [ -f "$(edge_cfg)" ] && grep "^$1=" "$(edge_cfg)" | cut -d= -f2- || true; }
 ui_compose() {
   ADLC_ROOT=$ADLC_ROOT ADLC_UID=$(id -u) ADLC_GID=$(id -g) ADLC_UI_HOSTS=$(edge_get ADLC_UI_HOSTS) \
+    ADLC_HOST_NAME=$(hostname -s | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | cut -c1-32) \
     docker compose -f "$ADLC_HOME/ui/compose.yml" "$@"
 }
 ui_host() {
@@ -538,7 +544,7 @@ cmd_ui() {
       done
       [ "$(id -u)" != 0 ] || die "run as the non-root owner of $ADLC_ROOT"
       docker network inspect adlc-edge >/dev/null 2>&1 || die "the edge proxy isn't running yet: start a project first (adlc up <slug>)"
-      mkdir -p "$ADLC_ROOT/ui/requests" "$ADLC_ROOT/edge/dynamic"; chmod 700 "$ADLC_ROOT/ui"
+      mkdir -p "$ADLC_ROOT/ui/requests" "$ADLC_ROOT/ui/hosts" "$ADLC_ROOT/edge/dynamic"; chmod 700 "$ADLC_ROOT/ui"
       [ -s "$tokf" ] || { new_token "$tokf"; ok "login token created"; }
       set_cfg "$(edge_cfg)" ADLC_UI_HOSTS "$hosts"
       local host rule h; host=$(ui_host); rule="Host(\`$host\`)"
@@ -557,12 +563,43 @@ cmd_ui() {
       if [ "${1:-}" = --rotate ]; then new_token "$tokf"; ok "token rotated: every browser has to sign in again"; fi
       [ -s "$tokf" ] || die "no dashboard yet: adlc ui up"
       cat "$tokf"; echo ;;
+    host-token)
+      local n=${1:-} hf; [[ "$n" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] \
+        || die "usage: adlc ui host-token <name> [--rotate|--remove]   (the CI-only host's name in its runner names, e.g. ci2)"
+      [ -d "$ADLC_ROOT/ui" ] || die "no dashboard yet: adlc ui up"
+      mkdir -p "$ADLC_ROOT/ui/hosts"; hf="$ADLC_ROOT/ui/hosts/$n.token"
+      case ${2:-} in
+        --remove) rm -f "$hf" "$ADLC_ROOT/ui/hosts/$n.json"; ok "'$n' no longer reports to the dashboard"; return ;;
+        --rotate) new_token "$hf"; ok "token for '$n' rotated: run adlc ui report on that host again" ;;
+        "") [ -s "$hf" ] || { new_token "$hf"; ok "token for '$n' created"; } ;;
+        *) die "unknown option $2" ;;
+      esac
+      cat "$hf"; echo
+      local sfx=""; [ "$(edge_port)" = 80 ] || sfx=":$(edge_port)"
+      say "  on '$n': adlc ui report http://$(ui_host)$sfx   (paste this token when asked)" ;;
+    report)
+      local url=${1:-} f s="" t tf="$ADLC_ROOT/config/dashboard-token"
+      [[ "$url" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] || die "usage: adlc ui report <dashboard url>   (e.g. http://adlc.example.lan:8088)"
+      # One reporter per machine: on the first CI-only project here (each one's ADLC_CI_HOST names this host).
+      for f in "$ADLC_ROOT"/config/*.env; do grep -qs '^ADLC_CI_ONLY=1$' "$f" && { s=$(basename "$f" .env); break; }; done
+      [ -n "$s" ] || die "no CI-only project on this host: the main host's dashboard samples its own host"
+      local name; name=$(grep '^ADLC_CI_HOST=' "$(cfg_file "$s")" | cut -d= -f2)
+      docker run --rm --entrypoint sh adlc/runner-base:local -c 'command -v adlc-hoststats' >/dev/null 2>&1 \
+        || die "this host's runner image predates the reporter: adlc up $s first"
+      curl -fsS -m 5 "${url%/}/healthz" >/dev/null || die "can't reach the dashboard at $url from here"
+      say "This host reports as '$name'. On the main host: adlc ui host-token $name"
+      read -rsp "Token: " t; echo
+      [[ "$t" =~ ^[0-9a-f]{48}$ ]] || die "that isn't a host token"
+      (umask 077; printf '%s\n' "$t" >"$tf")
+      set_cfg "$(cfg_file "$s")" ADLC_DASHBOARD_URL "${url%/}"
+      (load_cfg "$s"; compose "$s" up -d hoststats)
+      ok "reporting CPU, memory and disk to $url every 30 s (adlc logs $s hoststats)" ;;
     down) ui_compose down; rm -f "$route"; ok "dashboard stopped" ;;
     status)
       docker ps --filter name=adlc-ui --format '{{.Names}}  {{.Status}}'
       local sfx=""; [ "$(edge_port)" = 80 ] || sfx=":$(edge_port)"
       say "  url: http://$(ui_host)$sfx" ;;
-    *) die "usage: adlc ui [up [--host name]…|down|token [--rotate]|status]" ;;
+    *) die "usage: adlc ui [up [--host name]…|down|token [--rotate]|host-token <name> [--rotate|--remove]|report <url>|status]" ;;
   esac
 }
 
@@ -664,6 +701,7 @@ cmd_logs() {
     egress) tail -n 100 -f "$d/egress/access.log" ;;
     # shellcheck disable=SC2046  # one service per word
     ci) load_cfg "$slug"; compose "$slug" logs -f --tail 100 $(ci_registrars "$slug") ;;
+    hoststats) load_cfg "$slug"; compose "$slug" logs -f --tail 100 hoststats ;;
     run)
       [ -n "${3:-}" ] || die "usage: adlc logs <slug> run <issue>"
       local latest; latest=$(ls -t "$d/runs/$3"-*.jsonl 2>/dev/null | head -1)

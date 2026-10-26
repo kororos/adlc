@@ -10,12 +10,13 @@
 //   PORT             default 8080
 import crypto from "node:crypto"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import readline from "node:readline"
 import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import fastifyStatic from "@fastify/static"
-import { COMPONENTS, RUN_FILE_RE, SLUG_RE, eventsFromLine, mtime, parseEnv, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
+import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, cpuPct, eventsFromLine, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
 
 const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
@@ -83,6 +84,7 @@ app.addHook("onRequest", async (req, reply) => {
     }
   }
   if (req.url === "/api/session" || req.url === "/api/login") return
+  if (req.url.startsWith("/api/host-reports/")) return // a CI host's own token, checked by the route
   if (!authed(req)) return reply.code(401).send({ error: "sign in required" })
 })
 
@@ -193,6 +195,52 @@ function disk() {
   } catch { return null }
 }
 app.get("/api/disk", async () => disk())
+
+// ── Hosts: this one is sampled here (/proc is the host's); CI-only hosts report in with their own
+//    token (adlc ui host-token <name> here, adlc ui report <url> there).
+const HOST_NAME = HOST_RE.test(process.env.ADLC_HOST_NAME ?? "") ? process.env.ADLC_HOST_NAME : "main"
+const HOSTS_DIR = path.join(DATA, "ui", "hosts")
+const STALE_MS = 3 * 60_000
+const read = (f) => { try { return fs.readFileSync(f, "utf8") } catch { return "" } }
+let lastStat = procStat(read("/proc/stat"))
+let local = { cpuPct: null }
+function sample() {
+  const cur = procStat(read("/proc/stat"))
+  local = { cpuPct: cpuPct(lastStat, cur), load1: Math.round(os.loadavg()[0] * 100) / 100, cores: os.cpus().length, mem: memInfo(read("/proc/meminfo")) }
+  lastStat = cur
+}
+sample()
+setInterval(sample, 15_000).unref()
+
+function hosts() {
+  const d = disk()
+  const list = [{ name: HOST_NAME, role: "main", at: new Date().toISOString(), stale: false, ...local, disk: d && { freeGb: d.freeGb, totalGb: d.totalGb } }]
+  let files = []
+  try { files = fs.readdirSync(HOSTS_DIR).filter((f) => f.endsWith(".json")) } catch { /* no CI hosts */ }
+  for (const f of files.sort()) {
+    const r = readJson(path.join(HOSTS_DIR, f))
+    const name = f.slice(0, -5)
+    if (!r || !HOST_RE.test(name) || name === HOST_NAME) continue
+    list.push({ ...r, name, role: "ci", stale: Date.now() - Date.parse(r.at) > STALE_MS })
+  }
+  return list
+}
+app.get("/api/hosts", async () => hosts())
+
+app.post("/api/host-reports/:name", async (req, reply) => {
+  const name = req.params.name
+  if (rateLimited(`host:${req.ip}`)) return reply.code(429).send({ error: "too many attempts" })
+  const want = HOST_RE.test(name) ? read(path.join(HOSTS_DIR, `${name}.token`)).trim() : ""
+  const given = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "")
+  if (!want || !given || !safeEq(sessionValue(given), sessionValue(want))) return reply.code(401).send({ error: "unknown host or wrong token" })
+  attempts.delete(`host:${req.ip}`)
+  const r = hostReport(req.body)
+  if (!r) return reply.code(400).send({ error: "not a host report" })
+  const tmp = path.join(HOSTS_DIR, `.${name}.json.tmp`)
+  fs.writeFileSync(tmp, JSON.stringify({ ...r, at: new Date().toISOString() }))
+  fs.renameSync(tmp, path.join(HOSTS_DIR, `${name}.json`))
+  return { ok: true }
+})
 
 app.get("/api/projects", async () => projects().map((p) => {
   const s = state(p)

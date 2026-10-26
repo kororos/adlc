@@ -121,3 +121,37 @@ export function runTotals(summaries, now = Date.now()) {
   }
   return t
 }
+
+// ── Host stats ───────────────────────────────────────────────────────────────
+// /proc/stat's first line: cumulative CPU jiffies (user nice system idle iowait irq softirq steal…).
+export function procStat(text) {
+  const f = (text.split("\n").find((l) => l.startsWith("cpu ")) ?? "").trim().split(/\s+/).slice(1).map(Number)
+  if (f.length < 4 || f.some((n) => !Number.isFinite(n))) return null
+  return { idle: f[3] + (f[4] ?? 0), total: f.slice(0, 8).reduce((a, b) => a + b, 0) }
+}
+// Busy share between two procStat samples, 0–100 (null until there are two).
+export function cpuPct(prev, cur) {
+  if (!prev || !cur || cur.total <= prev.total) return null
+  return Math.round((1 - (cur.idle - prev.idle) / (cur.total - prev.total)) * 1000) / 10
+}
+// /proc/meminfo: used = total - available (page cache counts as free).
+export function memInfo(text) {
+  const kb = (k) => Number(text.match(new RegExp(`^${k}:\\s+(\\d+)`, "m"))?.[1])
+  const total = kb("MemTotal"), avail = kb("MemAvailable")
+  if (!total || !Number.isFinite(avail)) return null
+  return { totalGb: Math.round((total / 2 ** 20) * 10) / 10, usedPct: Math.round((1 - avail / total) * 1000) / 10 }
+}
+export const HOST_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
+// A CI host's report, reduced to known numeric fields; null when it isn't one.
+export function hostReport(b) {
+  const num = (v, max) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max ? v : null)
+  if (!b || typeof b !== "object") return null
+  const r = {
+    cpuPct: num(b.cpuPct, 100), load1: num(b.load1, 10_000), cores: num(b.cores, 4096),
+    mem: b.mem && { totalGb: num(b.mem.totalGb, 1e6), usedPct: num(b.mem.usedPct, 100) },
+    disk: b.disk && { freeGb: num(b.disk.freeGb, 1e7), totalGb: num(b.disk.totalGb, 1e7) },
+  }
+  if (r.disk && (r.disk.freeGb == null || r.disk.totalGb == null)) r.disk = null
+  if (r.mem && (r.mem.totalGb == null || r.mem.usedPct == null)) r.mem = null
+  return r.cpuPct == null && !r.disk ? null : r
+}

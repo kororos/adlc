@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# adlc-hoststats: on a CI-only host, report this machine's CPU, memory and disk to the main host's
+# dashboard every 30 s (`adlc ui report <url>` sets it up). /proc in a container is the host's;
+# /disk is a read-only mount on the filesystem that holds ADLC_ROOT and Docker's data.
+set -uo pipefail
+url=${ADLC_DASHBOARD_URL:?ADLC_DASHBOARD_URL not set}
+host=${ADLC_CI_HOST:?ADLC_CI_HOST not set}
+tok=$(cat /run/adlc/dashboard-token 2>/dev/null) || { echo "hoststats: no dashboard token" >&2; exit 1; }
+cpu_jiffies() { awk '/^cpu /{ i=$5+$6; t=0; for (k=2; k<=9; k++) t+=$k; print i, t }' /proc/stat; }
+read -r pi pt < <(cpu_jiffies)
+last=""
+while sleep 30; do
+  read -r ci ct < <(cpu_jiffies)
+  cpu=$(awk -v a="$pi" -v b="$pt" -v c="$ci" -v d="$ct" 'BEGIN{ printf "%.1f", (d>b) ? (1-(c-a)/(d-b))*100 : 0 }')
+  pi=$ci pt=$ct
+  read -r l1 _ </proc/loadavg
+  mem=$(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{ printf "{\"totalGb\":%.1f,\"usedPct\":%.1f}", t/1048576, (1-a/t)*100 }' /proc/meminfo)
+  disk=$(df -Pk /disk | awk 'NR==2{ printf "{\"freeGb\":%d,\"totalGb\":%d}", $4/1048576, $2/1048576 }')
+  body=$(jq -nc --argjson cpu "$cpu" --argjson l1 "$l1" --argjson cores "$(nproc)" --argjson mem "$mem" --argjson disk "$disk" \
+    '{cpuPct: $cpu, load1: $l1, cores: $cores, mem: $mem, disk: $disk}')
+  code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST "${url%/}/api/host-reports/$host" \
+    -H "authorization: Bearer $tok" -H 'x-adlc-request: 1' -H 'content-type: application/json' -d "$body")
+  # Log only changes, so a dashboard that's down doesn't fill the log.
+  [ "$code" = "$last" ] || echo "hoststats: dashboard answered $code$([ "$code" = 401 ] && echo ' (token: adlc ui host-token '"$host"' on the main host)')"
+  last=$code
+done

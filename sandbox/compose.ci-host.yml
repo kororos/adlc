@@ -27,6 +27,22 @@ services:
       outbound: {}
     restart: unless-stopped
 
+  # This machine's CPU, memory and disk for the main host's dashboard (adlc ui report <url>).
+  hoststats:
+    image: ${ADLC_RUNNER_IMAGE:-adlc/runner-base:local}
+    entrypoint: ["adlc-hoststats"]
+    profiles: [hoststats]
+    environment:
+      ADLC_DASHBOARD_URL: ${ADLC_DASHBOARD_URL:-}
+      ADLC_CI_HOST: ${ADLC_CI_HOST:-}
+    volumes:
+      - ${ADLC_ROOT}/config/dashboard-token:/run/adlc/dashboard-token:ro
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/repo:/disk:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
   ci: *policy
   ci-publish: *policy
   ci-kvm: *policy

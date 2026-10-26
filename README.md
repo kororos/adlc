@@ -201,6 +201,7 @@ CI jobs and the agents share the dev server's CPU. A second VM, **on a different
 - **Runner names include the host** (`adlc-<slug>-<host>-<role>-<time>`; none on the main host), and the CI tab shows it. **CI capacity (`ADLC_CI_SLOTS`) is per host**: each host counts only its own busy runners.
 - **Network policy:** the proxy reads `adlc.yaml` like on the main host. With no poller clone there, the registrars fetch it from the default branch every 10 minutes. This needs **Contents: read** on `ci_admin_pat`; without it the proxy stays in `ADLC_NETWORK_MODE` (default `audit`), which is enough unless the project uses `allowlist`.
 - **Not on a CI-only host:** `login`, `session`, `shell`, `attach`, `train`, `logs <slug> poller`. Run those on the main host.
+- **On the dashboard:** the Overview and Health pages show every machine's CPU, memory and disk. The main host is sampled by the dashboard; a CI-only host reports in every 30 s with its own token once you link it (`adlc ui host-token <host>` on the main host, then `adlc ui report <dashboard url>` on the CI host; see Setup). It needs to reach the dashboard's URL over the LAN.
 
 **Suggested VM** for the kvm and test roles (an Android job and a test job side by side):
 
@@ -224,6 +225,10 @@ adlc up <slug> --ci-only --repo <owner/name> --ci-roles test,kvm [--ci-host ci2]
                [--registry harbor.example.com --registry-ca /path/ca.crt]   # same registry flags as the main host
 echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>   # Android (2) + one test job (1)
 adlc logs <slug> ci                           # each registrar: "runner … waiting for a job"
+
+# CPU, memory and disk on the dashboard
+adlc ui host-token ci2                        # on the main host: prints the token for this host (its --ci-host name)
+adlc ui report http://adlc.<base>[:port]      # on the CI host: asks for that token; adlc logs <slug> hoststats
 
 # on the main host, once no Android job runs: drop kvm there (test stays on both hosts)
 adlc up <slug> --ci-roles test,publish
@@ -645,15 +650,16 @@ ADLC builds many images (every verify attempt rebuilds a run's images) and would
 - **Now:** `adlc prune [slug]` does all of the above immediately and prints free space before and after.
 
 ### Dashboard (`adlc ui`)
-A web page for all projects on the dev server: what's running now with its **live log**, the queue in order of precedence, what **needs you** (PRs to review, blocked runs and questions, your next owner tasks), run history with duration and cost (plus the all-time and last-30-days total), component health and logs, and **pause/resume**. It works on a phone.
+A web page for all projects on the dev server: what's running now with its **live log**, the queue in order of precedence, what **needs you** (PRs to review, blocked runs and questions, your next owner tasks), run history with duration and cost (plus the all-time and last-30-days total), component health and logs, each machine's **CPU, memory and disk** (the main host and any CI-only hosts), and **pause/resume**. It works on a phone.
 
 ```bash
 adlc ui up                      # build and start it → http://adlc.<base>[:port]
 adlc ui token                   # the login token (adlc ui token --rotate signs everyone out)
 adlc ui up --host adlc.example.com   # later: also answer to a name your reverse proxy forwards
+adlc ui host-token <host> [--rotate|--remove]   # a CI-only host's report token (see the CI-only host setup)
 ```
 - **LAN only by default.** To reach it from outside, publish it through your own reverse proxy over **HTTPS**, with that proxy's authentication in front, and add the name with `--host`. The token login and `SameSite=Strict` cookies stay on (the cookie is marked `Secure` when the proxy forwards HTTPS).
-- **Safe by construction:** the dashboard has no Docker socket and no GitHub or Claude credentials, and it reads project state and logs read-only. GitHub data comes from a snapshot the poller writes every minute. Pause and resume are requests the poller applies within a minute and logs.
+- **Safe by construction:** the dashboard has no Docker socket and no GitHub or Claude credentials, and it reads project state and logs read-only. The only thing it accepts without a login is a CI-only host's stats report, checked against that host's own token and reduced to a few numbers. GitHub data comes from a snapshot the poller writes every minute. Pause and resume are requests the poller applies within a minute and logs.
 - Update it after `git -C ~/adlc pull` with `adlc ui up`.
 
 | Situation | What you do |
@@ -807,6 +813,7 @@ Situations from real projects, with the steps that resolve them. The [Field Guid
 
 **Dashboard and access**
 - **The dashboard lacks something new, or the dev server seems to run old code.** `adlc restart` reloads only the plugins; the poller, queue, merge train and CI registrar are built into the runner image. `adlc doctor` says whether each runner's image is older than your checkout. To update: `adlc pause <slug>`, wait until `adlc status <slug>` shows no active run, then `cd ~/adlc && git pull && adlc up <slug> && adlc ui up && adlc resume <slug>`. A CI-only host needs `git pull && adlc up <slug>` too (its roles are remembered).
+- **A CI host is missing from Machines, or its tile says "No report".** The main host is sampled by the dashboard; a CI-only host shows up only once linked, and dims after 3 minutes without a report. On the CI host, `adlc logs <slug> hoststats`: 200 is fine, 401 means a wrong or rotated token (`adlc ui host-token <host>` on the main host, then `adlc ui report <url>` again), 000 means it can't reach the dashboard URL.
 - **The dashboard opens in Chrome but not in Safari (or not on another device).** DNS-rebind protection in your router (e.g. pfSense) drops `nip.io` answers that point to private IPs; Chrome's secure DNS bypasses the router, Safari uses it. Allow `nip.io` as a private domain in the router, or use your own name (`adlc ui up --host adlc.example.com`). Then flush the Mac's DNS cache: `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.
 
 ---

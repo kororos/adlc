@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
-import { eventsFromLine, parseEnv, runSummary, runTotals, stripAnsi, tailLines } from "../lib.js"
+import { cpuPct, eventsFromLine, hostReport, memInfo, parseEnv, procStat, runSummary, runTotals, stripAnsi, tailLines } from "../lib.js"
 
 test("parseEnv keeps values and strips quotes", () => {
   assert.deepEqual(parseEnv("ADLC_REPO=kororos/diet\nADLC_REGISTRY_USER='robot$x'\n# c\n"), { ADLC_REPO: "kororos/diet", ADLC_REGISTRY_USER: "robot$x" })
@@ -63,4 +63,22 @@ test("runTotals sums cost and time over all runs and the last 30 days", () => {
     { started: "2026-08-02T10:00:00Z", result: { costUsd: null, durationMs: null } },
   ], now)
   assert.deepEqual(t, { runs: 4, finished: 3, costUsd: 6.5, durationMs: 4000, last30: { runs: 2, costUsd: 2.5 } })
+})
+
+test("procStat, cpuPct and memInfo read /proc", () => {
+  const a = procStat("cpu  100 0 100 700 100 0 0 0 0 0\ncpu0 1 2 3 4\n")
+  const b = procStat("cpu  200 0 200 1300 100 0 0 0 0 0\n")
+  assert.deepEqual(a, { idle: 800, total: 1000 })
+  assert.equal(cpuPct(a, b), 25)
+  assert.equal(cpuPct(null, b), null)
+  assert.equal(procStat("garbage"), null)
+  assert.deepEqual(memInfo("MemTotal:       8388608 kB\nMemFree: 1 kB\nMemAvailable:   2097152 kB\n"), { totalGb: 8, usedPct: 75 })
+})
+
+test("hostReport keeps known numbers and drops the rest", () => {
+  assert.deepEqual(hostReport({ cpuPct: 12.5, load1: 0.7, cores: 4, mem: { totalGb: 16, usedPct: 40 }, disk: { freeGb: 87, totalGb: 144 }, evil: "<x>" }),
+    { cpuPct: 12.5, load1: 0.7, cores: 4, mem: { totalGb: 16, usedPct: 40 }, disk: { freeGb: 87, totalGb: 144 } })
+  assert.equal(hostReport({ cpuPct: 400 }), null)
+  assert.equal(hostReport("x"), null)
+  assert.equal(hostReport({ cpuPct: 5, disk: { freeGb: "1" } }).disk, null)
 })

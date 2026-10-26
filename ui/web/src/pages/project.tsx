@@ -7,6 +7,7 @@ import {
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
 import { AutomationCard } from "@/components/automation"
+import { HostsCard } from "@/components/hosts"
 import { CiTab } from "@/components/ci"
 import { DependencyGraph } from "@/components/dependency-graph"
 import { EpicRunNext, EpicsTab } from "@/components/epics"
@@ -526,6 +527,7 @@ function HealthTab({ p }: { p: Project }) {
     <div className="grid gap-4">
       <AutomationCard p={p} />
       <DiskCard dockerUsage={p.dockerUsage} />
+      <HostsCard />
       <div className="grid gap-3 md:grid-cols-3">
         {COMPONENTS.map((c) => (
           <button key={c.id} type="button" onClick={() => setLog(c.id)}
