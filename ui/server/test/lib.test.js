@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
-import { eventsFromLine, parseEnv, runSummary, stripAnsi, tailLines } from "../lib.js"
+import { eventsFromLine, parseEnv, runSummary, runTotals, stripAnsi, tailLines } from "../lib.js"
 
 test("parseEnv keeps values and strips quotes", () => {
   assert.deepEqual(parseEnv("ADLC_REPO=kororos/diet\nADLC_REGISTRY_USER='robot$x'\n# c\n"), { ADLC_REPO: "kororos/diet", ADLC_REGISTRY_USER: "robot$x" })
@@ -52,4 +52,15 @@ test("tailLines and stripAnsi", () => {
   assert.deepEqual(tailLines(f, 2), ["b", "c"])
   assert.deepEqual(tailLines(f + "missing", 2), [])
   assert.equal(stripAnsi("\x1b[32mok\x1b[0m\r"), "ok")
+})
+
+test("runTotals sums cost and time over all runs and the last 30 days", () => {
+  const now = Date.parse("2026-10-26T12:00:00Z")
+  const t = runTotals([
+    { started: "2026-10-25T10:00:00Z", result: { costUsd: 2.5, durationMs: 1000 } },
+    { started: "2026-10-24T10:00:00Z", result: null },
+    { started: "2026-08-01T10:00:00Z", result: { costUsd: 4, durationMs: 3000 } },
+    { started: "2026-08-02T10:00:00Z", result: { costUsd: null, durationMs: null } },
+  ], now)
+  assert.deepEqual(t, { runs: 4, finished: 3, costUsd: 6.5, durationMs: 4000, last30: { runs: 2, costUsd: 2.5 } })
 })

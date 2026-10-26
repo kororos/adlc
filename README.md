@@ -645,7 +645,7 @@ ADLC builds many images (every verify attempt rebuilds a run's images) and would
 - **Now:** `adlc prune [slug]` does all of the above immediately and prints free space before and after.
 
 ### Dashboard (`adlc ui`)
-A web page for all projects on the dev server: what's running now with its **live log**, the queue in order of precedence, what **needs you** (PRs to review, blocked runs and questions, your next owner tasks), run history with duration and cost, component health and logs, and **pause/resume**. It works on a phone.
+A web page for all projects on the dev server: what's running now with its **live log**, the queue in order of precedence, what **needs you** (PRs to review, blocked runs and questions, your next owner tasks), run history with duration and cost (plus the all-time and last-30-days total), component health and logs, and **pause/resume**. It works on a phone.
 
 ```bash
 adlc ui up                      # build and start it → http://adlc.<base>[:port]

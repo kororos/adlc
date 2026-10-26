@@ -147,6 +147,8 @@ export type RunResult = {
   text: string
 }
 
+export type RunTotals = { runs: number; finished: number; costUsd: number; durationMs: number; last30: { runs: number; costUsd: number } }
+
 export type Run = { file: string; issue: number; started: string; updated: string | null; result: RunResult | null }
 
 export type Component = "poller" | "deployer" | "rc"
@@ -217,6 +219,7 @@ export const api = {
   projects: () => request<ProjectSummary[]>("GET", "/api/projects"),
   project: (slug: string) => request<Project>("GET", `/api/projects/${slug}`),
   runs: (slug: string) => request<Run[]>("GET", `/api/projects/${slug}/runs?limit=100`),
+  runTotals: (slug: string) => request<RunTotals>("GET", `/api/projects/${slug}/runs/totals`),
   disk: () => request<Disk | null>("GET", "/api/disk"),
   action: (slug: string, action: ProjectAction) => request<{ ok: true }>("POST", `/api/projects/${slug}/actions`, { action }),
 }
@@ -226,5 +229,6 @@ export const queryKeys = {
   projects: ["projects"] as const,
   project: (slug: string) => ["project", slug] as const,
   runs: (slug: string) => ["runs", slug] as const,
+  runTotals: (slug: string) => ["runs", slug, "totals"] as const,
   disk: ["disk"] as const,
 }

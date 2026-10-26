@@ -103,3 +103,21 @@ export function runSummary(dir, file) {
   }
   return { file, issue: Number(issue), started, updated: mtime(path.join(dir, file)), result }
 }
+
+// All-time and last-30-days totals over run summaries (cost is API-equivalent; unfinished runs count as runs only).
+export function runTotals(summaries, now = Date.now()) {
+  const since = now - 30 * 24 * 3600 * 1000
+  const t = { runs: 0, finished: 0, costUsd: 0, durationMs: 0, last30: { runs: 0, costUsd: 0 } }
+  for (const s of summaries) {
+    const recent = Date.parse(s.started) >= since
+    t.runs++
+    if (recent) t.last30.runs++
+    if (!s.result) continue
+    const cost = s.result.costUsd ?? 0
+    t.finished++
+    t.costUsd += cost
+    t.durationMs += s.result.durationMs ?? 0
+    if (recent) t.last30.costUsd += cost
+  }
+  return t
+}

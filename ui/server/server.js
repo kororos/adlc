@@ -15,7 +15,7 @@ import readline from "node:readline"
 import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import fastifyStatic from "@fastify/static"
-import { COMPONENTS, RUN_FILE_RE, SLUG_RE, eventsFromLine, mtime, parseEnv, readJson, runSummary, stripAnsi, tailLines } from "./lib.js"
+import { COMPONENTS, RUN_FILE_RE, SLUG_RE, eventsFromLine, mtime, parseEnv, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
 
 const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
@@ -118,7 +118,20 @@ function runs(slug, limit = 50) {
   let files = []
   try { files = fs.readdirSync(dir).filter((f) => RUN_FILE_RE.test(f)) } catch { /* none */ }
   files.sort((a, b) => b.split("-")[1].localeCompare(a.split("-")[1]))
-  return files.slice(0, limit).map((f) => runSummary(dir, f)).filter(Boolean)
+  return files.slice(0, limit).map((f) => cachedSummary(dir, f)).filter(Boolean)
+}
+
+// A finished run's log no longer changes, so its summary is kept until the file's mtime moves.
+const summaryCache = new Map()
+function cachedSummary(dir, f) {
+  const file = path.join(dir, f)
+  let m = 0
+  try { m = fs.statSync(file).mtimeMs } catch { return null }
+  const hit = summaryCache.get(file)
+  if (hit && hit.m === m) return hit.s
+  const s = runSummary(dir, f)
+  summaryCache.set(file, { m, s })
+  return s
 }
 
 function state(p) {
@@ -200,6 +213,13 @@ app.get("/api/projects/:slug/runs", async (req, reply) => {
   const p = project(req.params.slug)
   if (!p) return reply.code(404).send({ error: "unknown project" })
   return runs(p.slug, Math.min(Number(req.query.limit ?? 50) || 50, 500))
+})
+
+// Totals over every run on disk (the runs list is capped).
+app.get("/api/projects/:slug/runs/totals", async (req, reply) => {
+  const p = project(req.params.slug)
+  if (!p) return reply.code(404).send({ error: "unknown project" })
+  return runTotals(runs(p.slug, Infinity))
 })
 
 app.post("/api/projects/:slug/actions", async (req, reply) => {

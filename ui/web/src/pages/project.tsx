@@ -15,7 +15,7 @@ import { Freshness, PauseControl, PipelineBadge, StateBadge } from "@/components
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useSidebar } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, queryKeys, type Component, type MergeTrain, type MergeTrainStatus, type Project, type PullRequest, type EpicItem, type QueueItem, type TriageItem } from "@/lib/api"
@@ -432,6 +432,7 @@ function Section({ icon: Icon, title, count, empty, children }: { icon: typeof I
 
 function HistoryTab({ slug }: { slug: string }) {
   const q = useQuery({ queryKey: queryKeys.runs(slug), queryFn: () => api.runs(slug), refetchInterval: 30_000 })
+  const totals = useQuery({ queryKey: queryKeys.runTotals(slug), queryFn: () => api.runTotals(slug), refetchInterval: 60_000 })
   if (q.isPending) return <Skeleton className="h-40 w-full" />
   if (q.isError) return <p className="text-destructive">{q.error.message}</p>
   if (!q.data.length) return <EmptyState icon={History} title="No delivery runs yet" />
@@ -445,7 +446,8 @@ function HistoryTab({ slug }: { slug: string }) {
         <Stat icon={History} label="Runs" value={q.data.length} hint={`${q.data.length - finished.length} running or interrupted`} />
         <Stat icon={CircleCheck} label="Succeeded" tone="ok" value={finished.length ? `${Math.round((ok / finished.length) * 100)}%` : "–"} hint={`${ok} of ${finished.length} finished`} />
         <Stat icon={Clock} label="Agent time" value={duration(time)} hint={finished.length ? `${duration(time / finished.length)} per run` : undefined} />
-        <Stat icon={Rocket} label="API-equiv. cost" value={usd(cost)} hint="not billed on a subscription" />
+        <Stat icon={Rocket} label="Total cost (API-equiv.)" value={usd(totals.data?.costUsd ?? cost)}
+          hint={totals.data ? `${totals.data.runs} runs all-time · ${usd(totals.data.last30.costUsd)} last 30 days · not billed on a subscription` : "not billed on a subscription"} />
       </div>
       <Card className="py-0">
         <Table>
@@ -471,6 +473,11 @@ function HistoryTab({ slug }: { slug: string }) {
               )
             })}
           </TableBody>
+          <TableFooter><TableRow>
+            <TableCell className="pl-4" colSpan={3}>Total, {q.data.length} runs shown</TableCell>
+            <TableCell className="text-right tabular-nums">{duration(time)}</TableCell>
+            <TableCell className="pr-4 text-right tabular-nums">{usd(cost)}</TableCell>
+          </TableRow></TableFooter>
         </Table>
       </Card>
     </div>
