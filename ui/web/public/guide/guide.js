@@ -54,7 +54,7 @@ const PHASE_NOTE = [
   "feature-architect writes design.md and tasks, and sets the risk tier",
   "test-designer writes failing acceptance tests",
   "implementers work in parallel, each in its own worktree",
-  "build-runner runs lint, typecheck, arch checks and tests; debugger fixes, up to 3 attempts",
+  "build-runner runs lint, typecheck, arch checks and tests; debugger fixes, up to 3 attempts (re-checks run only the failures; one full run before release)",
   "qa-engineer runs the e2e flows on web and Android",
   "code-reviewer and security-reviewer, in parallel",
   "release-manager opens the PR with the evidence",

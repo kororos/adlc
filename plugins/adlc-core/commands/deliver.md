@@ -50,24 +50,24 @@ test-designer → failing acceptance tests committed on the feature branch.
 - A blocked implementer → run the feature-architect once to revise that task. If it is blocked again, go to **Abort**.
 
 ## 5. Verify (attempt a = 1..retries.build)
-build-runner → `verify-<a>.md` (starts the env if needed, runs lint/typecheck/arch_check/build/test).
+build-runner → `verify-<a>.md` (starts the env if needed, runs lint/typecheck/arch_check/build/test). The first verify is **full**.
 - pass → step 6.
-- fail → debugger (last attempt: pass `model: "opus"`), then re-verify.
+- fail → debugger (last attempt: pass `model: "opus"`), then re-verify in **focused** mode (the previous failures and the changed code only).
 - Still failing, or the debugger says it's environmental → **Abort**.
 
 ## 6. QA (only if design.md has e2e ACs or the change touches UI; attempt q = 1..2)
 qa-engineer → `qa-<q>.md`, with exploratory = `adlc.build.yaml testing.exploratory`.
-- Blocking failures → debugger with the QA report → build-runner → qa-engineer again.
+- Blocking failures → debugger with the QA report → build-runner (focused) → qa-engineer again.
 - Flaky flows reported → open a follow-up issue labelled `adlc:flaky` (title + flow name + run link) and continue.
 - Still failing after q=2 → **Abort**.
 
 ## 7. Review (round r = 1..retries.review)
 - Run code-reviewer, plus security-reviewer if risk ≥ medium or the spec/design flags auth, input, storage or dependency changes. Launch both in one message. For risk = high, pass `model: "opus"` to code-reviewer.
-- Any `blocking` finding → debugger with the findings file(s) → build-runner (→ qa-engineer if UI changed) → review again.
+- Any `blocking` finding → debugger with the findings file(s) → build-runner (focused) (→ qa-engineer if UI changed) → review again.
 - Still blocking after the last round → **Abort**.
 
 ## 8. Release
-Run `env.down`. Then release-manager with the risk tier and the auto-merge policy (`autonomy.auto_merge`, default `[low, medium]`). If a proposed ADR exists, the release-manager notes it at the top of the PR body.
+**Final full verify:** if any commit landed after the last **full** verify (focused verifies, QA or review fixes), run build-runner in full mode first. Fail → debugger → step 5 (it counts as a verify attempt). Then run `env.down` and the release-manager with the risk tier and the auto-merge policy (`autonomy.auto_merge`, default `[low, medium]`). If a proposed ADR exists, the release-manager notes it at the top of the PR body.
 
 ## Abort
 Run `env.down`. Commit and push what exists. Record `<phase>-aborted` in `state.json`. Comment on the issue with phase, reason, what a person needs to do, and the last report paths (≤ 10 lines). **Never set `adlc:blocked` without that comment.** Set label `adlc:blocked`, remove `adlc:in-progress`. Stop.

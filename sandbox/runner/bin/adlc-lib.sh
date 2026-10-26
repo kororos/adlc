@@ -64,6 +64,13 @@ sync_repo() {
   git -C "$REPO_DIR" clean --quiet -fd --exclude=.claude/worktrees/
 }
 
+# Settings for every claude the runner starts: the project's .claude/settings.json declares the "adlc"
+# marketplace from GitHub (for people's own clones). Here it's the local copy (ADLC_MARKETPLACE); without
+# this override each run tries to clone the GitHub repo, which fails for a private repo.
+claude_settings() {
+  jq -cn --arg p "${ADLC_MARKETPLACE:-/opt/adlc}" '{extraKnownMarketplaces: {adlc: {source: {source: "directory", path: $p}}}}'
+}
+
 ensure_dirs() {
   mkdir -p "$RUNS_DIR" "$STATE_DIR/running" "$LOG_DIR/runs" "$ADLC_WS/sessions" "$ADLC_WS/locks"
 }

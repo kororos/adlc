@@ -30,5 +30,6 @@ Task rules:
 - Minimise `depends_on`. Tasks without dependencies run in parallel, so avoid two tasks editing the same file.
 - Every AC is covered by at least one task. Put test expectations in "Done when". Mark ACs that need end-to-end tests (UI journeys) as `e2e` in the task table.
 - Usually 1-6 tasks. One task is fine for small changes.
+- **Test setup is part of the design.** If the change alters how users sign in or stay signed in, adds a rate limit, a required config value or secret, or data the seed must contain, plan the test side too: seed data, end-to-end sign-in and session helpers, test-only overrides of limits, the new secrets or env names in the test environment and `.env.example`. Put it in a task (or the "Done when" of the task that causes it) and list it in `design.md` under "Test setup". QA should never be the first to find it.
 
 End with the status block. Put the risk tier, the task count and any proposed ADR in SUMMARY.

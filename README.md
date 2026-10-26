@@ -313,7 +313,7 @@ cd ~/adlc
 /plugin marketplace add https://github.com/kororos/adlc.git
 /plugin install adlc-core@adlc
 ```
-Projects created by `/adlc-core:init` also contain a `.claude/settings.json` that registers the marketplace. Anyone who clones the project and trusts the folder gets the plugins automatically.
+Projects created by `/adlc-core:init` also contain a `.claude/settings.json` that registers the marketplace. Anyone who clones the project and trusts the folder gets the plugins automatically. Inside the runner, delivery runs and sessions use the runner's local copy of ADLC instead of that GitHub entry, so a private ADLC repository works without giving the runner access to it.
 
 > Use **Opus** as the session model for `/init`, `/discover`, `/architect` and `/plan-backlog`. Those roles run in your main session, and their quality sets the ceiling for everything downstream.
 
@@ -532,13 +532,13 @@ Unattended: the poller runs the same command for each `adlc:ready` issue, in tha
 |---|---|---|---|
 | 0 | Setup | lead | branch `adlc/<n>-<slug>`, label `adlc:in-progress` |
 | 1 | Understand | codebase-scout (Haiku) → requirements-analyst (Opus) | `context-map.md`, `spec.md` |
-| 2 | Design | feature-architect (Opus) | `design.md`, `tasks/`, risk tier |
+| 2 | Design | feature-architect (Opus), including the test setup a change needs (seed data, e2e helpers, limits, secrets) | `design.md`, `tasks/`, risk tier |
 | 3 | Tests first | test-designer (Sonnet) | failing acceptance tests |
 | 4 | Build | implementer ×N in parallel (Sonnet), each in its own git worktree | task branches merged into the feature branch |
-| 5 | Verify | build-runner (Haiku) ⇄ debugger (Sonnet → Opus on the last attempt), up to 3 attempts | `verify-*.md` |
+| 5 | Verify | build-runner (Haiku) ⇄ debugger (Sonnet → Opus on the last attempt), up to 3 attempts. The first verify runs everything; after a fix only the failures and changed code (focused) | `verify-*.md` |
 | 6 | QA | qa-engineer (Sonnet): e2e flows on web and Android, iOS in CI | `qa-*.md` |
 | 7 | Review | code-reviewer (Sonnet; Opus for high risk) ∥ security-reviewer (Sonnet) | `review.md`, `security.md` |
-| 8 | Release | release-manager (Haiku) | PR with summary, AC → test mapping, risk, evidence |
+| 8 | Release | a final full verify if anything changed since the last one, then release-manager (Haiku) | PR with summary, AC → test mapping, risk, evidence |
 
 ### Labels
 ```

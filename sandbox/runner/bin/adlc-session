@@ -59,7 +59,7 @@ if ! tmux list-windows -t adlc -F '#{window_name}' | grep -qx "$window"; then
   tmux new-window -d -t adlc -n "$window" -c "$dir" \
     "env -u CLAUDE_CODE_OAUTH_TOKEN -u ADLC_MODE ADLC_RUN='$run' \
        ADLC_PROJECT_DOMAIN='$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}' \
-       claude --remote-control '$title'; echo; echo 'Claude exited. Shell in $dir (exit closes this window).'; exec bash -l"
+       claude --remote-control '$title' --settings '$(claude_settings)'; echo; echo 'Claude exited. Shell in $dir (exit closes this window).'; exec bash -l"
 fi
 echo "Attaching to '$window'. Detach: Ctrl-b d · switch windows: Ctrl-b w"
 [ -t 1 ] && exec tmux attach -t "adlc:$window"

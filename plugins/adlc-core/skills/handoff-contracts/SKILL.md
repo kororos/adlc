@@ -90,6 +90,7 @@ Source: #<n>, prd.md F<k> (if any)
 ## Approach            ≤ 15 lines; reference existing modules by path and ADRs by number
 ## Data / API changes  schemas, endpoints, migrations (or "none")
 ## Architecture        "conforms" | "deviates — see ADR NNNN (proposed)"
+## Test setup          seed data, e2e sign-in/session helpers, test-only limit overrides, new secrets/env names, and the task that does each (or "none")
 ## Risk: low | medium | high — <one-line reason>
 ## Tasks
 | id | title | depends_on | files (expected) | ACs | e2e ACs |

@@ -249,6 +249,7 @@ launch() { # launch <n> <title>
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
       timeout --kill-after=60 "$RUN_TIMEOUT" \
       claude -p "/adlc-core:deliver $n$mode" \
+        --settings "$(claude_settings)" \
         --permission-mode bypassPermissions \
         --model "$LEAD_MODEL" \
         --output-format stream-json --verbose \
