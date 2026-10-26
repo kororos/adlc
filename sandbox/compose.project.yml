@@ -65,6 +65,11 @@ services:
       ADLC_LOCK_DIR: ${ADLC_ROOT}/projects/${ADLC_SLUG}/locks
       ADLC_SUBNET_PREFIX: ${ADLC_SUBNET_PREFIX}
       ADLC_MAX_PARALLEL_RUNS: ${ADLC_MAX_PARALLEL_RUNS:-1}
+      ADLC_RUN_TIMEOUT: ${ADLC_RUN_TIMEOUT:-4h}           # a delivery run is stopped after this (timeout(1) duration: 4h, 360m)
+      ADLC_POLL_INTERVAL: ${ADLC_POLL_INTERVAL:-60}
+      ADLC_DEPLOY_INTERVAL: ${ADLC_DEPLOY_INTERVAL:-120}
+      ADLC_LOG_RETENTION_DAYS: ${ADLC_LOG_RETENTION_DAYS:-7}
+      ADLC_CI_REWORK_MAX: ${ADLC_CI_REWORK_MAX:-2}         # adlc.yaml autonomy.ci_rework_max wins
       # disk housekeeping (README: Disk housekeeping)
       ADLC_HOUSEKEEP_HOURS: ${ADLC_HOUSEKEEP_HOURS:-6}
       ADLC_IMAGE_MAX_IDLE_H: ${ADLC_IMAGE_MAX_IDLE_H:-48}
