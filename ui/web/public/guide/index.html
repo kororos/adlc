@@ -152,6 +152,35 @@ section > .wrap > header { display: grid; gap: 10px; margin-bottom: 28px }
 .note { border-left: 3px solid var(--l-info); padding: 6px 12px; background: color-mix(in srgb, var(--l-info) 8%, transparent); border-radius: 0 6px 6px 0; font-size: 0.88rem }
 .tut-foot { display: flex; justify-content: space-between; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--line) }
 
+/* lifecycle diagram */
+.life { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 20px; align-items: start }
+.life-chart { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px; overflow-x: auto }
+.life-chart svg { display: block; width: 100%; min-width: 560px; height: auto }
+.life-chart .node { cursor: pointer }
+.life-chart .node rect { fill: var(--surface); stroke-width: 2 }
+.life-chart .node .t { font: 600 15px var(--f-mono); fill: currentColor }
+.life-chart .node .s { font: 13px var(--f-body); fill: var(--muted) }
+.life-chart .node:hover rect, .life-chart .node:focus-visible rect { fill: var(--sunk) }
+.life-chart .node.sel rect { fill: color-mix(in srgb, currentColor 12%, var(--surface)); stroke-width: 3 }
+.life-chart .node:focus { outline: none }
+.life-chart .note rect { fill: none; stroke: var(--line); stroke-dasharray: 5 4 }
+.life-chart .note text { font: 13px var(--f-body); fill: var(--muted) }
+.life-chart .edge path { fill: none; stroke: var(--muted); stroke-width: 1.6; marker-end: url(#arr) }
+.life-chart .edge.you path { stroke: var(--l-review); stroke-dasharray: 6 4; marker-end: url(#arr-you) }
+.life-chart .edge text { font: 13px var(--f-body); fill: var(--ink) }
+.life-chart .edge.you text { fill: var(--l-review) }
+.life-chart.focus .edge { opacity: 0.4 } .life-chart.focus .node:not(.sel):not(.near) { opacity: 0.6 }
+.life-chart.focus .edge.on { opacity: 1 } .life-chart .edge.on path { stroke-width: 2.6 }
+.life-key { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 0.82rem; color: var(--muted) }
+.life-key span { display: inline-flex; align-items: center; gap: 6px }
+.life-key i { width: 26px; border-top: 2px solid var(--muted) } .life-key i.you { border-top: 2px dashed var(--l-review) }
+.life-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 12px }
+.life-panel h3 { font-size: 0.95rem } .life-panel p { font-size: 0.9rem }
+.life-panel ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px }
+.life-panel li { font-size: 0.88rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: baseline }
+.life-panel li .who.you { background: color-mix(in srgb, var(--l-review) 18%, transparent); color: var(--l-review) }
+.life-panel .to { font: 500 0.8rem var(--f-mono) }
+
 /* labels guide */
 .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px }
 .lcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; align-content: start }
@@ -189,7 +218,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
 @media (max-width: 820px) {
   .flow { grid-template-columns: minmax(0, 1fr) }
   .flow button { border-right: 0; border-bottom: 1px solid var(--line) }
-  .flow-detail, .sim, .tut { grid-template-columns: minmax(0, 1fr) }
+  .flow-detail, .sim, .tut, .life { grid-template-columns: minmax(0, 1fr) }
   .tut-list { position: static; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) }
   .log li { grid-template-columns: minmax(0, 1fr) }
   td.c { white-space: normal; word-break: break-word }
@@ -202,7 +231,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
 <nav class="bar"><div class="wrap">
   <span class="brand">ADLC Field Guide</span>
   <div class="links">
-    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#labels">Labels</a><a href="#fixes">Fix it</a><a href="#commands">Commands</a>
+    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#lifecycle">Lifecycle</a><a href="#labels">Labels</a><a href="#fixes">Fix it</a><a href="#commands">Commands</a>
   </div>
 </div></nav>
 
@@ -260,6 +289,21 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
   <div class="tut">
     <div class="tut-list" role="tablist" id="tut-list" aria-label="Tutorials"></div>
     <article class="tut-body" id="tut-body" role="tabpanel"></article>
+  </div>
+</div></section>
+
+<section id="lifecycle"><div class="wrap">
+  <header>
+    <p class="eyebrow">Reference</p>
+    <h2>What happens to an issue</h2>
+    <p class="lede">Each state is a label on the issue. Click one to see how an issue gets there, how it leaves, and who moves it. Solid arrows are ADLC (the poller or the delivery run); dashed ones are yours.</p>
+  </header>
+  <div class="life">
+    <div>
+      <div class="life-chart" id="life-chart"></div>
+      <div class="life-key"><span><i></i>ADLC does it</span><span><i class="you"></i>you do it</span></div>
+    </div>
+    <div class="life-panel" id="life-panel" aria-live="polite"></div>
   </div>
 </div></section>
 

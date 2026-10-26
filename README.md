@@ -542,13 +542,16 @@ Unattended: the poller runs the same command for each `adlc:ready` issue, in tha
 
 ### Labels
 ```
-adlc:queued ──► adlc:ready ──► adlc:in-progress ──► adlc:pr-open ──► (merged, issue closed)
-                                   │
-                                   ├──► adlc:needs-info          questions posted on the issue
-                                   ├──► adlc:blocked             retry budget exhausted, summary posted
-                                   └──► adlc:needs-human-review  high risk, proposed ADR, or untrusted author
-adlc:pr-open ──(checks fail)──► adlc:ready (rework)       at most autonomy.ci_rework_max times per PR
+(no state) ─► adlc:queued ─► adlc:ready ─► adlc:in-progress ─► adlc:pr-open ─► merged (issue closed)
 ```
+- **Into the pipeline:** **Start** on the dashboard (queued while blockers are open, else ready); a regression starts by itself, once. Queued becomes ready when every "blocked by" issue is closed.
+- **Back to ready, by ADLC:** the runner restarted mid-run, or Claude's usage limit hit (it resumes from the last pushed phase); a PR's checks failed or it conflicts with `main` (a rework, at most `autonomy.ci_rework_max` times per PR).
+- **To `adlc:needs-info`:** the agent needs a decision. You answer and relabel `adlc:ready`.
+- **To `adlc:blocked`:** retries used up, the environment failed, or the run crashed; a summary is on the issue. You fix the cause and relabel `adlc:ready`.
+- **To `adlc:needs-human-review`:** reworks used up, or an issue from an outside author. High risk or a proposed ADR keeps the issue `adlc:pr-open` and the PR waits for your approval; approved PRs are merged by the merge train.
+- **PR closed without merging** (from pr-open, blocked or needs-human-review): the branch is archived, the issue goes back to `adlc:queued` and the next run starts from `main`.
+
+The Field Guide's **Lifecycle** section (dashboard → Guide) draws the same states; click one to see every way in and out.
 
 ### When checks fail
 - **An agent's PR:** when all checks on its latest commit have finished and one has failed, the poller comments the failed checks on the PR and relabels the issue `adlc:ready`. The delivery agent then reworks the same PR. It classifies each failure first:

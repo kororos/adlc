@@ -373,6 +373,75 @@ $("#fq").addEventListener("input", renderFixes)
 $("#fchips").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; fcat = b.dataset.c; $("#fchips").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b)); renderFixes() })
 renderFixes()
 
+/* ── Lifecycle: the issue's states and every move between them ──── */
+// Nodes: [id, label, colour class, x, y, w, caption, meaning]. Edges: [from, to, who, svg path, label at [x, y, anchor, rotate],
+// short label, detail]. An edge with no path is listed in the panel but not drawn.
+const LIFE_NODES = [
+  ["none", "no state", "queued", 280, 20, 200, "new · flaky · spike · regression", "Not in the pipeline yet: issues you or the agents opened (flaky tests, spikes, regressions) wait for triage on the dashboard's Needs you tab."],
+  ["queued", "adlc:queued", "queued", 280, 150, 200, "waits for its blockers", "Planned, but an issue it's blocked by (GitHub relationships) is still open."],
+  ["ready", "adlc:ready", "ready", 280, 280, 200, "waits for a run slot", "Can start. Order: Run next, regressions, the Run-next epic, reworks, milestone due date, then oldest first."],
+  ["in-progress", "adlc:in-progress", "in-progress", 280, 410, 200, "a delivery run works on it", "A run in its own worktree: understand, spec, design, build, test, review, release. The branch is pushed after every phase."],
+  ["pr-open", "adlc:pr-open", "pr-open", 280, 560, 200, "PR open, checks running", "The PR is open. Low and medium risk get auto-merge; high risk (or a proposed ADR) waits for your approval, the PR labelled adlc:needs-human-review."],
+  ["merged", "merged", "done", 280, 720, 200, "issue closed", "The PR merged and closed the issue. The poller removes the workspace and its test environment; what this issue blocked can start."],
+  ["needs-info", "adlc:needs-info", "needs-info", 520, 410, 180, "questions on the issue", "The agent needs a decision before it can write the spec. Its questions are an issue comment."],
+  ["blocked", "adlc:blocked", "blocked", 20, 480, 180, "summary on the issue", "The run gave up: retries used up, an environment failure, or it crashed. The issue comment says why and what you need to do."],
+  ["needs-human-review", "adlc:needs-human-review", "needs-human-review", 530, 640, 230, "waits for you", "A person has to look: reworks used up on a PR, or an issue from someone who isn't a collaborator."],
+]
+const LIFE_EDGES = [
+  ["none", "queued", "you", "M380,76 V150", [390, 118], "Start · blockers open", "Start on the dashboard (Needs you). It still has open blockers, so it queues."],
+  ["none", "ready", "you", "M280,48 H230 V296 H280", [224, 232, "end"], "Start · no blockers", "Start on the dashboard, or relabel adlc:ready. A regression (adlc:regression) starts by itself, once."],
+  ["queued", "ready", "adlc", "M380,206 V280", [390, 248], "all blockers closed", "Every issue it's blocked by is closed: the poller promotes it within a minute."],
+  ["ready", "in-progress", "adlc", "M360,336 V410", [352, 378, "end"], "run slot free", "A run slot is free (max_parallel_runs) and it's next in order. Run next puts it first; max_open_prs can hold new issues (not reworks) back."],
+  ["in-progress", "ready", "adlc", "M420,410 V336", [428, 378], "restart · usage limit", "Back to ready, resuming from the last pushed phase: the runner restarted mid-run, Claude's usage limit hit (backoff), or plugins failed to load (the poller also pauses)."],
+  ["in-progress", "needs-info", "adlc", "M480,438 H520", [610, 486, "middle"], "needs a decision", "The requirements analyst can't write the spec without a decision: it posts its questions on the issue and stops."],
+  ["needs-info", "ready", "you", "M610,410 V308 H480", [618, 360], "you answer → ready", "Answer on the issue, then relabel adlc:ready (removing needs-info alone leaves it with no state). The run resumes with your answer."],
+  ["in-progress", "blocked", "adlc", "M280,450 H110 V480", [272, 442, "end"], "gave up · crashed", "Retries used up (tests, review), the environment failed, or the run ended without a result. The issue comment says why."],
+  ["blocked", "ready", "you", "M60,480 V320 H280", [68, 400], "you fix → ready", "Fix the cause, then relabel adlc:ready: the run resumes from its last pushed phase. A merge conflict on a blocked issue's PR also sends it back for a rework (ADLC)."],
+  ["in-progress", "pr-open", "adlc", "M380,466 V560", [390, 518], "PR opened", "The release step opens the PR (or a rework pushes its fixes) and labels the issue pr-open."],
+  ["pr-open", "merged", "adlc", "M380,616 V720", [390, 660], "green → merged", "Checks pass: auto-merge for low/medium risk. High risk: you approve, then the merge train updates and merges it."],
+  ["pr-open", "ready", "adlc", "M480,575 H800 V296 H480", [812, 440, "middle", 90], "checks failed or conflicts → rework (max 2)", "A required check failed or the PR conflicts with main: the poller comments on the PR and sends the issue back for a rework, at most twice per PR (ci_rework_max). You can also relabel ready yourself after a review with requests."],
+  ["pr-open", "needs-human-review", "adlc", "M480,600 H640 V640", [488, 592], "reworks used up", "Checks still fail or conflicts remain after the automatic reworks: it's left to you."],
+  ["needs-human-review", "merged", "you", "M640,696 V748 H480", [648, 728], "you approve → train", "Review and approve the PR: the merge train brings it up to date and merges it. Changes after your approval need a new approval."],
+  ["pr-open", "queued", "you", "M280,600 H10 V178 H280", [18, 622], "PR closed unmerged → start over", "Close the PR without merging (also from blocked or needs-human-review): the branch is archived as adlc-closed/<n>-pr<PR>, the workspace removed, and the next run starts from main."],
+  ["ready", "needs-human-review", "adlc", null, null, "", "The author isn't a collaborator: it isn't run automatically."],
+  ["needs-human-review", "ready", "you", null, null, "", "Remove needs-human-review and add adlc:ready to approve an outside author's issue, or to give a PR another rework."],
+]
+let lifeSel = store.get("life-sel", "pr-open")
+if (!LIFE_NODES.some((n) => n[0] === lifeSel)) lifeSel = "pr-open"
+function renderLife() {
+  const byId = Object.fromEntries(LIFE_NODES.map((n) => [n[0], n]))
+  const near = new Set(LIFE_EDGES.filter((e) => e[0] === lifeSel || e[1] === lifeSel).flatMap((e) => [e[0], e[1]]))
+  const edges = LIFE_EDGES.filter((e) => e[3]).map(([f, t, who, d, at, text]) => {
+    const [x, y, anchor = "start", rot] = at
+    return `<g class="edge ${who === "you" ? "you" : ""} ${f === lifeSel || t === lifeSel ? "on" : ""}"><path d="${d}"/>` +
+      `<text x="${x}" y="${y}" text-anchor="${anchor}"${rot ? ` transform="rotate(${rot} ${x} ${y})"` : ""}>${esc(text)}</text></g>`
+  }).join("")
+  const nodes = LIFE_NODES.map(([id, label, c, x, y, w, cap]) =>
+    `<g class="node c-${c} ${id === lifeSel ? "sel" : near.has(id) ? "near" : ""}" data-id="${id}" tabindex="0" role="button" aria-pressed="${id === lifeSel}" aria-label="${esc(label)}">` +
+    `<rect x="${x}" y="${y}" width="${w}" height="56" rx="10" stroke="currentColor"${id === "none" ? ' stroke-dasharray="5 4"' : ""}/>` +
+    `<text class="t" x="${x + w / 2}" y="${y + 24}" text-anchor="middle">${esc(label)}</text>` +
+    `<text class="s" x="${x + w / 2}" y="${y + 43}" text-anchor="middle">${esc(cap)}</text></g>`).join("")
+  const marker = (id, color) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${color}"/></marker>`
+  $("#life-chart").innerHTML = `<svg viewBox="0 0 840 790" role="group" aria-label="Issue lifecycle">` +
+    `<defs>${marker("arr", "var(--muted)")}${marker("arr-you", "var(--l-review)")}</defs>${edges}${nodes}` +
+    `<g class="note"><rect x="20" y="700" width="220" height="62" rx="10"/><text x="34" y="726">adlc:owner tasks and epics</text><text x="34" y="746">are never run by agents.</text></g></svg>`
+  $("#life-chart").classList.add("focus")
+  const n = byId[lifeSel]
+  const item = (e, other) => `<li><span class="who ${e[2] === "you" ? "you" : ""}">${e[2] === "you" ? "you" : "ADLC"}</span><span><span class="to">${esc(byId[other][1])}</span>: ${inline(e[6])}</span></li>`
+  const out = LIFE_EDGES.filter((e) => e[0] === lifeSel), inc = LIFE_EDGES.filter((e) => e[1] === lifeSel)
+  $("#life-panel").innerHTML = `<span class="lbl c-${n[2]}" style="justify-self:start">${esc(n[1])}</span><p>${inline(n[7])}</p>` +
+    (inc.length ? `<h3>Gets here from</h3><ul>${inc.map((e) => item(e, e[0])).join("")}</ul>` : "") +
+    (out.length ? `<h3>Leaves to</h3><ul>${out.map((e) => item(e, e[1])).join("")}</ul>` : `<p class="lede">The end: nothing moves it from here.</p>`)
+}
+function pickLife(id) { if (!id) return; lifeSel = id; store.set("life-sel", id); renderLife() }
+$("#life-chart").addEventListener("click", (e) => pickLife(e.target.closest(".node")?.dataset.id))
+$("#life-chart").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return
+  const id = e.target.closest(".node")?.dataset.id
+  if (id) { e.preventDefault(); pickLife(id); $(`#life-chart .node[data-id="${id}"]`)?.focus() }
+})
+renderLife()
+
 /* ── Commands ──────────────────────────────────────────────────── */
 const CMDS = [
   ["adlc doctor", "host", "Host checks: Docker, /dev/kvm, disk, secrets, and whether each runner runs this checkout's scripts."],
