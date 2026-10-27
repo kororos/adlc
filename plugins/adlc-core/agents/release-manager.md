@@ -34,7 +34,7 @@ Closes #<n>
    The dev deployer also detects missing dev secrets and waits for them. These notes make sure you know before you merge.
 3. `gh pr create` (or `gh pr edit` if a PR already exists) against the default branch, with the title `<type>(<scope>): <title> (#<n>)`.
 4. Labels: on the issue, remove `adlc:in-progress` and add `adlc:pr-open`. On the PR, add `adlc:risk-<tier>`.
-5. If risk is low or medium and the policy allows it: `gh pr merge --auto --squash`. If risk is high: add `adlc:needs-human-review` and request review from the CODEOWNERS/default reviewer.
+5. If risk is low or medium and the policy allows it: `gh pr merge --auto --squash` (with the merge train on, the runner takes it over and merges it in order). If risk is high: add `adlc:needs-human-review` and request review from the CODEOWNERS/default reviewer.
 6. Report the PR URL.
 
 End with the status block, with the PR URL in ARTIFACTS.

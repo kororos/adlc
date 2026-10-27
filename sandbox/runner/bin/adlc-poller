@@ -327,7 +327,8 @@ SETTINGS="merge_train|.autonomy.merge_train|dry-run|on dry-run off
 ci_auto_rework|.autonomy.ci_auto_rework|on|on off
 keep_prs_current|.autonomy.keep_prs_current|on|on off
 rework_first|.autonomy.rework_first|on|on off
-max_open_prs|.autonomy.max_open_prs|off|off 2 3 4 5 6 8"
+max_open_prs|.autonomy.max_open_prs|off|off 2 3 4 5 6 8
+update_before_merge|.autonomy.update_before_merge|always|always overlap"
 setting_def() { grep "^$1|" <<<"$SETTINGS"; }
 norm_value() { case $1 in true|on|yes) echo on ;; false|off|no) echo off ;; *) echo "$1" ;; esac; }
 setting() { # setting <key> → effective value
@@ -376,6 +377,13 @@ keep_current() { # keep_current <pr> <issue> <head sha>
   base=$(gh pr view "$pr" -R "$R" --json baseRefName --jq .baseRefName 2>/dev/null) || return 0
   behind=$(gh api "repos/$R/compare/$base...$sha" --jq .behind_by 2>/dev/null) || return 0
   [ "${behind:-0}" -gt 0 ] || return 0
+  # update_before_merge overlap: only when the base changed what this PR's checks didn't see (re-checked every
+  # cycle, as the base moves). GitHub's BEHIND means branch protection still requires up-to-date branches.
+  if [ "$(setting update_before_merge)" = overlap ] \
+     && [ "$(gh pr view "$pr" -R "$R" --json mergeStateStatus --jq .mergeStateStatus 2>/dev/null)" != BEHIND ] \
+     && [ -z "$(untested_overlap "$sha" "$base" "$(checks_started "$sha")")" ]; then
+    return 0
+  fi
   if gh pr update-branch "$pr" -R "$R" >/dev/null 2>&1; then
     echo "$sha" >>"$f"
     log "#$n: PR #$pr was $behind commit(s) behind $base with green checks; merged $base into it"
@@ -483,6 +491,75 @@ TRAIN_FILE="$STATE_DIR/merge_train.json"
 # The mode (see "Automation switches"): dashboard or `adlc train` override, ADLC_MERGE_TRAIN, adlc.yaml
 # autonomy.merge_train, else dry-run.
 train_mode() { case $(setting merge_train) in on) echo on ;; off) echo off ;; *) echo dry-run ;; esac; }
+# ── Update before merge, or not (update_before_merge) ─────────────────────────
+# always (default): a PR behind its base is updated and re-checked before it merges (branch protection with
+# "require branches to be up to date"). overlap: only when the base changed, since the PR's checks started,
+# a file the PR changes too, or a path in always_update_paths (lockfiles, migrations, CI config: they can
+# break other code without touching it). Needs that protection setting off; main's own CI is the safety net.
+always_update_paths() {
+  local v; v=$(cfg '.autonomy.merge_train_always_update // [] | join(" ")')
+  echo "${ADLC_TRAIN_ALWAYS_UPDATE:-${v:-pnpm-lock.yaml package-lock.json yarn.lock *migrations/* .github/*}}"
+}
+# When the checks of <sha> started: the earliest of each workflow's latest pull_request run. Their merge ref
+# was the base of that moment, so later base commits are untested with this PR. Empty if unknown.
+checks_started() {
+  gh run list -R "$R" --commit "$1" --event pull_request --limit 50 --json name,createdAt \
+    --jq '[group_by(.name)[] | max_by(.createdAt) | .createdAt] | min // ""' 2>/dev/null
+}
+# The base's files that the PR's checks didn't see and that make it update first (one per line, at most 5;
+# empty = merge as it is). Base commits from 10 minutes before the checks started count, as a margin.
+untested_overlap() { # untested_overlap <head sha> <base> <checks started>
+  local head=$1 base=$2 since mb f p pats out=() ; local -A mine=()
+  since=$(date -u -d "$3" +%s 2>/dev/null) || since=0
+  [ -n "$3" ] && [ "$since" -gt 0 ] || { echo "(start of its checks unknown)"; return; }
+  since=$(date -u -d "@$((since - 600))" +%FT%TZ)
+  git -C "$REPO_DIR" cat-file -e "$head^{commit}" 2>/dev/null || { echo "(head ${head:0:7} not fetched yet)"; return; }
+  mb=$(git -C "$REPO_DIR" merge-base "origin/$base" "$head" 2>/dev/null) || { echo "(no merge base with $base)"; return; }
+  while IFS= read -r f; do [ -n "$f" ] && mine[$f]=1; done < <(git -C "$REPO_DIR" diff --name-only "$mb" "$head")
+  read -ra pats <<<"$(always_update_paths)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ -n "${mine[$f]:-}" ]; then out+=("$f"); continue; fi
+    # shellcheck disable=SC2053  # $p is a glob
+    for p in "${pats[@]}"; do [[ $f == $p ]] && { out+=("$f (always updates)"); break; }; done
+  done < <(git -C "$REPO_DIR" log --first-parent --diff-merges=first-parent --since="$since" --format= --name-only \
+             "origin/$base" "^$head" 2>/dev/null | sort -u)
+  [ "${#out[@]}" -eq 0 ] || printf '%s\n' "${out[@]:0:5}"
+}
+# State of the checks of <sha>: "PENDING", "GREEN", or the failed workflows' names (each workflow's latest run).
+pr_checks() {
+  gh run list -R "$R" --commit "$1" --event pull_request --limit 50 --json name,status,conclusion,createdAt --jq '
+    if length == 0 or any(.[]; .status != "completed") then "PENDING" else
+    ([group_by(.name)[] | max_by(.createdAt)
+      | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure" or .conclusion == "cancelled")
+      | .name] | join(", ")) as $f | if $f == "" then "GREEN" else $f end end' 2>/dev/null || echo PENDING
+}
+# Files whose conflict resolution keeps your approval (autonomy.reapprove_ignore, ADLC_REAPPROVE_IGNORE;
+# globs, default none): e.g. a lockfile the agent regenerated.
+reapprove_ignore() {
+  local v; v=$(cfg '.autonomy.reapprove_ignore // [] | join(" ")')
+  echo "${ADLC_REAPPROVE_IGNORE:-$v}"
+}
+only_ignored() { # only_ignored <file>... : every file matches reapprove_ignore
+  local pats f p ok; read -ra pats <<<"$(reapprove_ignore)"
+  [ "${#pats[@]}" -gt 0 ] || return 1
+  for f in "$@"; do
+    ok=""
+    # shellcheck disable=SC2053  # $p is a glob
+    for p in "${pats[@]}"; do [[ $f == $p ]] && { ok=1; break; }; done
+    [ -n "$ok" ] || return 1
+  done
+}
+# What the conflict resolutions in <approved>..<head> changed compared with git's own merge (git's
+# --remerge-diff), for the re-approval comment: usually a few lines. Empty when there were none.
+resolution_diff() { # resolution_diff <approved> <head>
+  local c d txt=""
+  for c in $(git -C "$REPO_DIR" rev-list --merges --first-parent "$1..$2" 2>/dev/null); do
+    d=$(git -C "$REPO_DIR" show --remerge-diff --format='── merge %h: %s' "$c" -- . ':!.adlc' 2>/dev/null)
+    grep -q '^@@' <<<"$d" && txt+="$d"$'\n'
+  done
+  printf '%s' "$txt"
+}
 # Is every commit in <approved>..<head> a clean merge of the base branch or a .adlc/-only record?
 # (1 = new changes since approval)
 approval_holds() { # approval_holds <approved sha> <head sha> <base>
@@ -500,44 +577,99 @@ approval_holds() { # approval_holds <approved sha> <head sha> <base>
     fi
     git -C "$REPO_DIR" rev-parse --verify --quiet "$c^3" >/dev/null && return 1 # octopus
     git -C "$REPO_DIR" merge-base --is-ancestor "$p2" "origin/$base" 2>/dev/null || return 1
-    tree=$(git -C "$REPO_DIR" merge-tree --write-tree "$p1" "$p2" 2>/dev/null) || return 1  # conflicted
-    [ "$tree" = "$(git -C "$REPO_DIR" rev-parse "$c^{tree}")" ] || return 1     # edited by hand
+    # git's own merge (with conflict markers if it conflicted); the commit must match it, except in files
+    # listed in reapprove_ignore (and ADLC's .adlc/ records).
+    tree=$(git -C "$REPO_DIR" merge-tree --write-tree "$p1" "$p2" 2>/dev/null | head -1)
+    [ -n "$tree" ] || return 1
+    if [ "$tree" != "$(git -C "$REPO_DIR" rev-parse "$c^{tree}")" ]; then
+      local changed; mapfile -t changed < <(git -C "$REPO_DIR" diff --name-only "$tree" "$c^{tree}" -- . ':!.adlc')
+      [ "${#changed[@]}" -eq 0 ] || only_ignored "${changed[@]}" || return 1
+    fi
   done
+}
+# Risk tiers that merge without a person's approval (autonomy.auto_merge, default [low, medium]), as a jq array.
+auto_tiers_json() {
+  local t; t=$(cfg_raw '"[" + ((.autonomy.auto_merge // ["low", "medium"]) | join(" ")) + "]"' "[low medium]")
+  t=${t#[}; t=${t%]}
+  # shellcheck disable=SC2086  # one tier per word
+  jq -cn '$ARGS.positional | map(select(test("^[a-z]+$")))' --args $t
 }
 train_entry() { jq -cn --argjson pr "$1" --argjson issue "$2" --arg status "$3" --arg detail "${4:-}" '{pr:$pr,issue:$issue,status:$status,detail:$detail}'; }
 merge_train() {
-  local mode rows pr branch head base mergeable hold approved approvedAt changes n front="" entries=() status detail behind failed f
+  local mode rows pr branch head base mergeable hold approved approvedAt changes risk automerge tiers n front="" entries=() status detail behind checks overlap f
   mode=$(train_mode)
   [ "$mode" != off ] || { rm -f "$TRAIN_FILE"; return 0; }
   # latestOpinionatedReviews(writersOnly): each reviewer's latest approve/request-changes, people with write
-  # access only. Bots (the agents' App) never count as approval.
+  # access only. Bots (the agents' App) never count as approval. A PR whose risk tier is in autonomy.auto_merge
+  # (and that isn't labelled adlc:needs-human-review) joins without one ("policy"), once its checks are green.
+  tiers=$(auto_tiers_json); [[ "$tiers" == \[* ]] || tiers='[]'
   rows=$(gh api graphql -f query='query($o:String!,$r:String!){repository(owner:$o,name:$r){pullRequests(states:OPEN,first:50){nodes{
-      number headRefName headRefOid baseRefName mergeable labels(first:20){nodes{name}}
+      number headRefName headRefOid baseRefName mergeable createdAt autoMergeRequest{enabledAt} labels(first:20){nodes{name}}
       latestOpinionatedReviews(first:20,writersOnly:true){nodes{author{__typename login} state submittedAt commit{oid}}}}}}}' \
       -f o="${R%%/*}" -f r="${R##*/}" --jq '
       .data.repository.pullRequests.nodes[] | select(.headRefName | test("^adlc/[0-9]+-")) |
       ([.latestOpinionatedReviews.nodes[] | select(.author.__typename != "Bot")]) as $rv |
       ([$rv[] | select(.state == "APPROVED")] | sort_by(.submittedAt) | last) as $ok |
-      select($ok != null) |
-      [.number, .headRefName, .headRefOid, .baseRefName, .mergeable,
-       ([.labels.nodes[].name] | index("adlc:hold") != null),
-       $ok.commit.oid, $ok.submittedAt, ([$rv[] | select(.state == "CHANGES_REQUESTED")] | length > 0)] | @tsv' 2>/dev/null) \
+      ([.labels.nodes[].name]) as $l |
+      ([$l[] | select(startswith("adlc:risk-")) | ltrimstr("adlc:risk-")] | first) as $risk |
+      (($risk != null) and ('"$tiers"' | any(.[]; . == $risk)) and (($l | index("adlc:needs-human-review")) == null)) as $policy |
+      select($ok != null or $policy) |
+      [.number, .headRefName, .headRefOid, .baseRefName, .mergeable, (($l | index("adlc:hold")) != null),
+       (if $ok != null then $ok.commit.oid else "policy" end), (if $ok != null then $ok.submittedAt else .createdAt end),
+       ([$rv[] | select(.state == "CHANGES_REQUESTED")] | length > 0), ($risk // "-"), (.autoMergeRequest != null)] | @tsv' 2>/dev/null) \
     || return 0   # GitHub unreachable: keep the last train state rather than writing an empty one
   rows=$(sort -t$'\t' -k8 <<<"$rows")
   mkdir -p "$CI_DIR"
-  while IFS=$'\t' read -r pr branch head base mergeable hold approved approvedAt changes; do
+  while IFS=$'\t' read -r pr branch head base mergeable hold approved approvedAt changes risk automerge; do
     [ -n "$pr" ] || continue
     n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
     if [ "$hold" = true ]; then entries+=("$(train_entry "$pr" "$n" hold "adlc:hold on the PR")"); continue; fi
     if [ "$changes" = true ]; then entries+=("$(train_entry "$pr" "$n" changes-requested "a review requests changes")"); continue; fi
-    if ! approval_holds "$approved" "$head" "$base"; then
+    if [ "$approved" = policy ]; then
+      # Low/medium risk: no approval needed. GitHub's auto-merge would merge it on green without the train's
+      # order and overlap check, so with the train on, the train merges it instead.
+      if [ "$automerge" = true ] && [ "$mode" = on ]; then
+        gh pr merge "$pr" -R "$R" --disable-auto >/dev/null 2>&1 && log "merge train: took PR #$pr (risk $risk) over from GitHub auto-merge"
+      fi
+      # It joins once its checks are green; until then it doesn't hold up the PRs behind it.
+      if [ -z "$front" ]; then
+        status=""
+        if [ "$mergeable" = CONFLICTING ]; then status=conflicts; detail="risk $risk; conflicts with $base: the agent resolves them"
+        else
+          checks=$(pr_checks "$head")
+          if [ "$checks" = PENDING ]; then status=checks; detail="risk $risk (no approval needed): joins once its checks are green"
+          elif [ "$checks" != GREEN ]; then status=failed; detail="risk $risk; checks failed ($checks): the agent reworks it"; fi
+        fi
+        if [ -n "$status" ]; then
+          if [ "$status" != checks ] && has_label "$n" adlc:needs-human-review; then
+            if [ "$status" = conflicts ]; then detail="conflicts with $base"; else detail="checks failed ($checks)"; fi
+            status=needs-you; detail="risk $risk; $detail; automatic reworks used up: fix it on the branch, or relabel #$n adlc:ready for another agent rework"
+          fi
+          entries+=("$(train_entry "$pr" "$n" "$status" "$detail")"); continue
+        fi
+      else
+        entries+=("$(train_entry "$pr" "$n" queued "risk $risk (no approval needed); waits for #$front")"); continue
+      fi
+    elif ! approval_holds "$approved" "$head" "$base"; then
       entries+=("$(train_entry "$pr" "$n" needs-reapproval "new changes since your approval (${approved:0:7}..${head:0:7})")")
       f="$CI_DIR/reapprove-$pr"
       if ! grep -qx "$head" "$f" 2>/dev/null && [ "$mode" = on ]; then
         # GitHub keeps the (stale) approval since "dismiss stale approvals" is off: make sure its auto-merge
         # (enabled by the agents for low/medium risk) can't merge on it either.
         gh pr merge "$pr" -R "$R" --disable-auto >/dev/null 2>&1 || true
-        gh pr comment "$pr" -R "$R" --body "ADLC merge train: this PR changed after your approval (beyond clean merges of \`$base\` and ADLC run records): https://github.com/$R/compare/${approved:0:7}...${head:0:7}
+        local rdiff rbody=""
+        rdiff=$(resolution_diff "$approved" "$head")
+        if [ -n "$rdiff" ]; then
+          if [ "$(wc -l <<<"$rdiff")" -gt 200 ]; then rdiff="$(head -200 <<<"$rdiff")"$'\n'"… (cut at 200 lines; the compare link has everything)"; fi
+          rbody="
+
+**Conflict resolutions**: only what the agent's merges of \`$base\` changed compared with git's own merge (\`git show --remerge-diff\`). The rest of a clean merge of \`$base\` needs no review:
+\`\`\`diff
+$rdiff
+\`\`\`"
+        fi
+        gh pr comment "$pr" -R "$R" --body "ADLC merge train: this PR changed after your approval (beyond clean merges of \`$base\` and ADLC run records): https://github.com/$R/compare/${approved:0:7}...${head:0:7}${rbody}
+
 Please review those changes and approve again to put it back in the merge train (auto-merge, if it was on, is off until then)." >/dev/null 2>&1 && echo "$head" >>"$f"
       fi
       continue
@@ -550,22 +682,38 @@ Please review those changes and approve again to put it back in the merge train 
     elif [ "$mergeable" = UNKNOWN ]; then status=checking; detail="GitHub is computing mergeability"
     else
       behind=$(gh api "repos/$R/compare/$base...$head" --jq .behind_by 2>/dev/null || echo 0)
+      checks=$(pr_checks "$head")
+      # Behind the base: update and re-check it, unless update_before_merge is overlap, its checks are
+      # green and the base changed nothing they didn't see that matters to it (see untested_overlap).
+      overlap=""
       if [ "${behind:-0}" -gt 0 ]; then
+        if [ "$(setting update_before_merge)" != overlap ]; then overlap="(update_before_merge: always)"
+        elif [ "$checks" = GREEN ]; then overlap=$(untested_overlap "$head" "$base" "$(checks_started "$head")")
+        elif [ "$checks" != PENDING ]; then overlap="(checks failed)"; fi
+      fi
+      if [ -n "$overlap" ]; then
         status=updating; detail="$behind commit(s) behind $base"
+        [[ $overlap == \(* ]] || detail="$detail, changed on both: $(paste -sd, <<<"$overlap" | sed 's/,/, /g')"
         if [ "$mode" = on ]; then
           gh pr update-branch "$pr" -R "$R" >/dev/null 2>&1 && log "merge train: updated PR #$pr with $base" || log "WARN: merge train: could not update PR #$pr"
         else detail="$detail (dry run: would update it)"; fi
+      elif [ "$checks" = PENDING ]; then status=checks; detail="waiting for checks"
+      elif [ "$checks" != GREEN ]; then status=failed; detail="checks failed ($checks): rework, then you re-approve if code changed"
       else
-        failed=$(gh run list -R "$R" --commit "$head" --event pull_request --limit 50 --json status,conclusion,name --jq '
-          if length == 0 or any(.[]; .status != "completed") then "PENDING" else
-          [.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | .name] | join(", ") end' 2>/dev/null || echo PENDING)
-        if [ "$failed" = PENDING ]; then status=checks; detail="waiting for checks"
-        elif [ -n "$failed" ]; then status=failed; detail="checks failed ($failed): rework, then you re-approve if code changed"
-        elif [ "$mode" = on ]; then
+        local how="green and up to date"
+        [ "${behind:-0}" -gt 0 ] && how="green; $behind commit(s) behind $base, none touching its changes"
+        if [ "$mode" = on ]; then
           if gh pr merge "$pr" -R "$R" --squash >/dev/null 2>&1; then
-            status=merged; detail="merged"; log "merge train: merged PR #$pr (#$n)"; front=""
+            status=merged; detail="merged ($how)"; log "merge train: merged PR #$pr (#$n): $how"; front=""
+            # The next PR's overlap check needs this merge in the local base; without it, wait a cycle.
+            git -C "$REPO_DIR" fetch --quiet origin "$base" 2>/dev/null || front=$pr
+          elif [ "${behind:-0}" -gt 0 ]; then
+            # Most likely branch protection still requires up-to-date branches: update it the old way.
+            status=updating; detail="$behind commit(s) behind $base; GitHub refused to merge it without an update (turn off \"Require branches to be up to date\" for update_before_merge: overlap)"
+            log "WARN: merge train: GitHub refused to merge PR #$pr while behind $base (branch protection requires up-to-date branches?); updating it"
+            gh pr update-branch "$pr" -R "$R" >/dev/null 2>&1 || log "WARN: merge train: could not update PR #$pr"
           else status=blocked; detail="GitHub refused the merge (branch protection?)"; log "WARN: merge train: GitHub refused to merge PR #$pr"; fi
-        else status=ready; detail="green and up to date (dry run: would merge it now)"; log "merge train (dry run): would merge PR #$pr (#$n)"; fi
+        else status=ready; detail="$how (dry run: would merge it now)"; log "merge train (dry run): would merge PR #$pr (#$n)"; fi
       fi
     fi
     # Conflicts or failed checks after the automatic reworks: no agent acts on it until a person does, so it

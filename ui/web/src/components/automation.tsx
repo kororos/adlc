@@ -30,6 +30,11 @@ const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<st
     what: "No new issue starts while this many agent PRs are open (waiting for your review, a merge or a rework). Reworks still run.",
     values: { off: "no limit" },
   },
+  update_before_merge: {
+    title: "Update before merge",
+    what: "A PR behind main is updated and re-checked before it merges (always), or only when main changed files it changes too, or lockfiles, migrations or CI config (overlap). Overlap needs \"Require branches to be up to date\" off in branch protection.",
+    values: { always: "always", overlap: "only on overlap" },
+  },
 }
 const SOURCE: Record<Setting["source"], string> = {
   dashboard: "set here", env: "set on the dev server", "adlc.yaml": "from adlc.yaml", default: "default",
