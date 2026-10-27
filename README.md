@@ -304,7 +304,7 @@ cd ~/adlc
 | `adlc audit <slug>` | domains reached through the egress proxy and whether each is allowlisted |
 | `adlc restart <slug> [--force]` | restart the runner: reloads the ADLC **plugins** (commands, agents, skills) after `git pull`. The runner's **scripts** (poller, merge train, queue, CI registrar, Remote Control loop) are built into its image: load those with `adlc up <slug>` (pause and let running deliveries finish first). `restart` and `adlc doctor` warn when the image is older than the checkout. Refuses while delivery runs are active unless `--force` |
 | `adlc down <slug>` | stop the project (workspace, volumes and login are kept) |
-| `adlc doctor` | host checks |
+| `adlc doctor` | host checks: Docker, /dev/kvm, disk, secrets, whether each runner runs this checkout's scripts, and each project's CI roles and slots on this host. Warns when the test runner would stop during Android jobs (too few slots) or when the running registrars use a different slot count than the config (`adlc up <slug>`) |
 | `adlc ui host-token <host> [--rotate\|--remove]` | on the main host: the token a CI-only host reports its CPU, memory and disk with ([setup](#a-second-machine-for-ci-ci-only-host)) |
 | `adlc ui report <dashboard url>` | on a CI-only host: start reporting to the dashboard (asks for that token) |
 
@@ -816,7 +816,7 @@ Situations from real projects, with the steps that resolve them. The [Field Guid
 **CI**
 - **Many CI jobs wait, none seem to run.** Each host runs one runner per role at a time, and runners are single-use: between two jobs there is a 20–90 s gap while a new one registers, so a snapshot can show none. Check the dashboard's CI tab or `adlc logs <slug> ci`. If the queue really is longer than your capacity, add a CI host or raise its slots (next item).
 - **CI tests time out (5 s limits, "completes in < 2 s") on PRs, but pass on a rerun or locally.** The job ran on the main host while an agent's delivery run used the CPU. Check the job's runner name: `adlc-<slug>-test-…` (no host) is the main host. With a CI-only host, take `test` off the main host (`adlc up <slug> --ci-roles publish`) and give the CI-only host room for Android and a test job (`ADLC_CI_SLOTS=3` there). Then re-run the failed jobs.
-- **A CI host sits idle while test jobs wait.** CI capacity is `ADLC_CI_SLOTS` per host (default 2). An Android (`kvm`) job takes 2, so while one runs or waits, that host's test runner holds back (its log says "waiting: other CI jobs use the capacity"). On a host with 4+ CPUs: `echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>` on that host.
+- **A CI host sits idle while test jobs wait.** CI capacity is `ADLC_CI_SLOTS` per host (default 2; `adlc doctor` on that host shows it). An Android (`kvm`) job takes 2, so while one runs or waits, that host's test runner holds back (its log says "waiting: other CI jobs use the capacity"). On a host with 4+ CPUs: `echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>` on that host.
 - **Publish fails with "findings at or above CRITICAL, or the scan failed".** Read the scan's `Total:` lines first. `CRITICAL: 0` plus `FATAL … failed to download vulnerability DB` means Trivy's database mirror failed: re-run the failed job. Real CRITICAL findings need a newer base image or package upgrade in the Dockerfile: open an issue for it.
 
 **Dashboard and access**

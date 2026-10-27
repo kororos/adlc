@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # adlc: manage ADLC project runners on the dev server.
 #
-#   adlc doctor                      check the host
+#   adlc doctor                      check the host (and each project's CI roles and slots)
 #   adlc secrets <slug>              store the project's credentials (prompted, never echoed)
 #   adlc up <slug> [options]         build images and start/update the project's runner
 #       --repo <owner/name>          GitHub repository (required the first time)
@@ -183,8 +183,8 @@ cmd_doctor() {
     [ -e "$f" ] || continue
     slug=$(basename "$f" .env)
     if grep -qs '^ADLC_CI_ONLY=1$' "$f"; then
-      ci_enabled "$slug" && ok "$slug: CI-only host (roles: $(grep '^ADLC_CI_ROLES=' "$f" | cut -d= -f2))" \
-        || bad "$slug: CI-only host without ci_admin_pat (adlc secrets $slug)"
+      ci_enabled "$slug" && ok "$slug: CI-only host" || bad "$slug: CI-only host without ci_admin_pat (adlc secrets $slug)"
+      doctor_ci "$slug"
       doctor_image "$slug"
       continue
     fi
@@ -192,9 +192,23 @@ cmd_doctor() {
     elif [ -s "$ADLC_ROOT/secrets/$slug/gh_pat" ]; then warn "$slug: agents act as your account via gh_pat (prefer: adlc app $slug …)"
     else bad "$slug: no GitHub credentials for agents (adlc app $slug … or adlc secrets $slug)"; fi
     [ -s "$ADLC_ROOT/secrets/$slug/claude_oauth_token" ] && ok "$slug: secret claude_oauth_token" || bad "$slug: secret claude_oauth_token missing (adlc secrets $slug)"
-    ci_enabled "$slug" && ok "$slug: CI runner enabled" || warn "$slug: CI runner disabled (no ci_admin_pat)"
+    ci_enabled "$slug" && doctor_ci "$slug" || warn "$slug: CI runner disabled (no ci_admin_pat)"
     doctor_image "$slug"
   done
+}
+doctor_ci() { # roles and slots (CI capacity) on this host, and whether the running registrars use them
+  (load_cfg "$1"; local roles slots kw svc c have
+   roles=$(ci_roles "$1" | paste -sd, -); slots=${ADLC_CI_SLOTS:-2}; kw=${ADLC_CI_WEIGHT_KVM:-2}
+   [ -n "$roles" ] || { warn "$1: no CI roles on this host"; return 0; }
+   ok "$1: CI roles $roles, $slots slot(s) on $(nproc 2>/dev/null || echo ?) CPUs$(ci_kvm "$1" && echo ", an Android job takes $kw")"
+   if ci_kvm "$1" && has_ci_role "$1" test && [ "$slots" -lt $((kw + 1)) ]; then
+     warn "$1: the test runner stops while an Android job runs ($slots slots): ADLC_CI_SLOTS=$((kw + 1)) in $(cfg_file "$1"), then adlc up $1"
+   fi
+   for svc in $(ci_registrars "$1"); do
+     c=$(compose "$1" ps -q "$svc" 2>/dev/null | head -1); [ -n "$c" ] || continue
+     have=$(docker inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^ADLC_CI_SLOTS=//p')
+     [ "${have:-2}" = "$slots" ] || { warn "$1: the CI registrars run with ${have:-2} slot(s), the config says $slots: adlc up $1"; break; }
+   done)
 }
 doctor_image() { # in a subshell: load_cfg sets this project's variables
   (load_cfg "$1"; local stale; stale=$(runner_stale "$1")

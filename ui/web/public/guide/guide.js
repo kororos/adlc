@@ -352,7 +352,7 @@ const FIXES = [
     "adlc up <slug> --ci-roles publish                                  # on the main host\necho 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>   # on the CI-only host\ngh run rerun <run-id> --failed -R <owner>/<repo>"],
   ["CI", "A CI host sits idle while test jobs wait",
     "CI capacity is `ADLC_CI_SLOTS` per host (default 2). An Android (kvm) job takes 2, so while one runs or waits, that host's test runner holds back. Its log says \"waiting: other CI jobs use the capacity\".",
-    ["On a host with 4+ CPUs, raise the slots on that host so Android and one test job run side by side."],
+    ["Check the host's slots: `adlc doctor` lists them per project.", "On a host with 4+ CPUs, raise the slots on that host so Android and one test job run side by side."],
     "echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>"],
   ["Dashboard", "A CI host is missing from Machines, or shows \"No report\"",
     "The main host is sampled by the dashboard itself. A CI-only host appears only after it's linked, and its tile dims when no report arrived for 3 minutes (the host is down, the reporter stopped, or its token was rotated or removed).",
@@ -456,7 +456,7 @@ renderLife()
 
 /* ── Commands ──────────────────────────────────────────────────── */
 const CMDS = [
-  ["adlc doctor", "host", "Host checks: Docker, /dev/kvm, disk, secrets, and whether each runner runs this checkout's scripts."],
+  ["adlc doctor", "host", "Host checks: Docker, /dev/kvm, disk, secrets, whether each runner runs this checkout's scripts, and each project's CI roles and slots on this host (warns when the test runner would stop during Android jobs, or the running registrars use another slot count)."],
   ["adlc secrets <slug>", "host", "Enter or update the project's secrets (stored mode 600, never shown)."],
   ["adlc up <slug> [--repo o/r] [--ci-roles …]", "host", "Build the runner image and start or update everything. Loads new ADLC scripts. Remembers CI roles."],
   ["adlc up <slug> --ci-only --ci-roles test,kvm --ci-host ci2", "CI host", "Run only CI registrars and their engines on a second machine."],
