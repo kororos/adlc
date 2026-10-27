@@ -713,8 +713,9 @@ cmd_logs() {
   case $what in
     poller|deployer|rc) tail -n 100 -f "$d/$what.log" ;;
     egress) tail -n 100 -f "$d/egress/access.log" ;;
-    # shellcheck disable=SC2046  # one service per word
-    ci) load_cfg "$slug"; compose "$slug" logs -f --tail 100 $(ci_registrars "$slug") ;;
+    ci) load_cfg "$slug"
+        # shellcheck disable=SC2046  # one service per word
+        compose "$slug" logs -f --tail 100 $(ci_registrars "$slug") ;;
     hoststats) load_cfg "$slug"; compose "$slug" logs -f --tail 100 hoststats ;;
     run)
       [ -n "${3:-}" ] || die "usage: adlc logs <slug> run <issue>"
