@@ -573,7 +573,7 @@ The Field Guide's **Lifecycle** section (dashboard → Guide) draws the same sta
 A feature that adds a secret needs you to create it per environment. Values are never in the repo, and agents never see them. Three things make sure that doesn't slip through:
 1. The agent's PR lists it under **Owner setup needed**, with the command to create it.
 2. The agent opens an owner task, **"[owner] Create the dev secret <name>"**.
-3. The dev deployer checks the dev stack's secret files before every deploy. If one is missing, it doesn't deploy. It logs which secret is missing and how to create it, and `adlc status` and the dashboard's **Needs you** tab show the same. After you create it, the next attempt (within 2 minutes) deploys.
+3. The dev deployer checks the dev stack's secret files before every deploy. If one is missing, it doesn't deploy. It logs which secret is missing, the PR that added it (whose owner notes say how to create it) and a create command, and `adlc status` and the dashboard's **Needs you** tab show the same, with links to that PR and to the commit waiting to deploy. After you create it, the next attempt (within 2 minutes) deploys.
 
 ### Merge train: you approve, ADLC merges
 When several agent PRs wait for your review (high risk, or overnight runs), merging one makes all the others stale, so each one needs updating and a new CI run before it can merge. With the merge train you only **review and approve**. The poller then merges the approved agent PRs **one after another**, in approval order:

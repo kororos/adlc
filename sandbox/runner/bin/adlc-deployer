@@ -14,7 +14,8 @@ ensure_dirs
 # dashboard) and one log line per new set; returns 1 while any is missing.
 missing_logged=""
 check_dev_secrets() {
-  local paths p name missing=() hint lines=() fmt
+  local paths p name missing=() hint lines=() fmt cfiles=() a origin pr
+  for a in "$@"; do [ "$a" = -f ] || cfiles+=("$a"); done
   paths=$(IMAGE_TAG=check ADLC_PROJECT_DOMAIN="$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}" \
     docker compose -p "$ADLC_SLUG-dev" --project-directory "$REPO_DIR" "$@" config --format json 2>/dev/null \
     | jq -r '(.secrets // {})[] | .file // empty') || return 0      # can't tell: let the deploy report it
@@ -31,13 +32,20 @@ check_dev_secrets() {
       "hex "*) hint="openssl rand -hex ${fmt#hex } > $p && chmod 444 $p   (chmod 600 instead if only a root container reads it and refuses world-readable files, like Garage)" ;;
       *) hint="create $p (format: see deploy/test/secrets.sh or the PR's owner notes), then chmod 444 (600 if only a root container reads it)" ;;
     esac
-    lines+=("$(jq -cn --arg name "$name" --arg path "$p" --arg hint "$hint" '{name:$name,path:$path,hint:$hint}')")
+    # The merged change that added it: the newest commit whose diff adds or removes the name in the
+    # dev stack's compose files; a squash merge's subject ends with "(#<PR>)". Its owner notes say how.
+    origin=$(git -C "$REPO_DIR" log -1 --format='%h%x09%s' -S"$name" -- "${cfiles[@]}" 2>/dev/null)
+    pr=$(cut -f2- <<<"$origin" | grep -oE '\(#[0-9]+\)' | tail -1 | tr -dc '0-9')
+    lines+=("$(jq -cn --arg name "$name" --arg path "$p" --arg hint "$hint" --arg commit "${origin%%$'\t'*}" \
+      --arg title "$(cut -f2- <<<"$origin")" --arg pr "$pr" \
+      '{name:$name,path:$path,hint:$hint} + (if $commit == "" then {} else {commit:$commit, title:$title} end)
+       + (if $pr == "" then {} else {pr:($pr|tonumber)} end)')")
   done
   printf '%s\n' "${lines[@]}" | jq -s --arg tag "$tag" --arg at "$(date -u +%FT%TZ)" '{tag:$tag, since:$at, missing:.}' \
     >"$STATE_DIR/dev_missing_secrets.json.tmp" && mv "$STATE_DIR/dev_missing_secrets.json.tmp" "$STATE_DIR/dev_missing_secrets.json"
   if [ "$missing_logged" != "${missing[*]}" ]; then
     log "ERROR: $tag needs dev secret(s) that don't exist yet, so it isn't deployed:"
-    printf '%s\n' "${lines[@]}" | jq -r '"  \(.name): \(.hint)"' | while IFS= read -r l; do log "$l"; done
+    printf '%s\n' "${lines[@]}" | jq -r '"  \(.name)\(if .pr then " (added by PR #\(.pr))" else "" end): \(.hint)"' | while IFS= read -r l; do log "$l"; done
     missing_logged="${missing[*]}"
   fi
   return 1

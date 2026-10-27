@@ -308,11 +308,40 @@ function AttentionTab({ p }: { p: Project }) {
     <div className="grid gap-6">
       {secrets.length > 0 && (
         <Section icon={KeyRound} title={`Dev deploy of ${p.devMissingSecrets!.tag} waits for dev secrets`} count={secrets.length} empty="">
-          <div className="grid gap-2 rounded-xl border border-amber-500/50 bg-card p-4" data-testid="dev-missing-secrets">
-            <p className="text-sm text-muted-foreground">A merged change needs these secret files on the dev server (since {ago(p.devMissingSecrets!.since)}). Create them there; the deployer retries every 2 minutes.</p>
+          <div className="grid gap-3 rounded-xl border border-amber-500/50 bg-card p-4" data-testid="dev-missing-secrets">
+            <p className="text-sm text-muted-foreground">
+              Deploying{" "}
+              <a className="font-mono text-primary hover:underline" target="_blank" rel="noreferrer"
+                href={`https://github.com/${p.repo}/commit/${p.devMissingSecrets!.tag.replace(/^sha-/, "")}`}>{p.devMissingSecrets!.tag}</a>
+              {" "}(the newest commit on main) needs these secret files on the dev server, since {ago(p.devMissingSecrets!.since)}. Create them there; the deployer retries every 2 minutes.
+            </p>
             {secrets.map((m) => (
               <div key={m.name} className="grid gap-1">
                 <p className="font-mono text-sm font-medium">{m.name}</p>
+                {m.pr ? (
+                  <p className="text-sm text-muted-foreground">
+                    Added by{" "}
+                    <a className="text-primary hover:underline" target="_blank" rel="noreferrer" href={`https://github.com/${p.repo}/pull/${m.pr}`}>PR #{m.pr}</a>
+                    {m.title ? <>: {m.title}</> : null}. Its owner notes say how to create it.
+                  </p>
+                ) : m.commit ? (
+                  <p className="text-sm text-muted-foreground">
+                    Added in{" "}
+                    <a className="font-mono text-primary hover:underline" target="_blank" rel="noreferrer" href={`https://github.com/${p.repo}/commit/${m.commit}`}>{m.commit}</a>
+                    {m.title ? <>: {m.title}</> : null}.
+                  </p>
+                ) : null}
+                {(() => {
+                  // The owner task the agent opened for it ("[owner] Create the dev secret <name>"); closing it is yours.
+                  const task = s.queue.find((i) => i.state === "owner" && i.title.toLowerCase().includes(`dev secret ${m.name}`.toLowerCase()))
+                  return task ? (
+                    <p className="text-sm text-muted-foreground">
+                      Owner task:{" "}
+                      <a className="text-primary hover:underline" target="_blank" rel="noreferrer" href={task.url}>#{task.number}</a>
+                      {" "}(close it once the file exists).
+                    </p>
+                  ) : null
+                })()}
                 <code className="rounded-md bg-muted px-2 py-1 text-xs break-all">{m.hint}</code>
               </div>
             ))}
