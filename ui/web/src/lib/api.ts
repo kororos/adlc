@@ -116,7 +116,7 @@ export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}` | `pr
 
 export type MergeTrainStatus =
   | "queued" | "updating" | "checks" | "ready" | "merged" | "agent" | "conflicts" | "checking"
-  | "failed" | "blocked" | "needs-reapproval" | "changes-requested" | "hold"
+  | "failed" | "blocked" | "needs-reapproval" | "changes-requested" | "hold" | "needs-you"
 export type MergeTrain = {
   mode: "on" | "dry-run"
   updated: string
