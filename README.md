@@ -154,7 +154,7 @@ Delete the downloaded `.pem` on your Mac (a new key can always be generated on t
 Limitation: apps can't edit Project boards owned by a personal account.
 
 ### CI runner (self-hosted, sandboxed)
-Jobs run on GitHub-hosted runners unless a repository variable sends them to the **ADLC CI runners** on your dev server. Jobs that need your network, such as **publishing images to an internal registry**, always run there (`[self-hosted, adlc-publish]`). They're enabled per project by setting `ci_admin_pat`. There is one runner per role, so a publish never waits behind a test job, and an Android job doesn't hold up the checks:
+Jobs run on GitHub-hosted runners unless a repository variable sends them to the **ADLC CI runners** on your dev server. Jobs that need your network, such as **publishing images to an internal registry**, always run there (`[self-hosted, adlc-publish]`). They're enabled per project by setting `ci_admin_pat`. Each role has its own runners, so a publish never waits behind a test job, and an Android job doesn't hold up the checks:
 
 | Role | Registrar + Docker engine | Labels | Jobs |
 |---|---|---|---|
@@ -162,13 +162,19 @@ Jobs run on GitHub-hosted runners unless a repository variable sends them to the
 | publish | `ci-publish` + `ci-docker-publish` | `self-hosted,linux,adlc-publish` | publish |
 | kvm | `ci-kvm` + `ci-docker-kvm` (only with `adlc up <slug> --ci-kvm on` or `--ci-roles …,kvm`) | `self-hosted,linux,adlc-kvm` | e2e-android |
 
-- Each **registrar** holds `ci_admin_pat` and starts **one single-use (JIT) runner at a time** in its own engine. It never runs workflow code.
-- Each role has its **own Docker engine**, which agents can't reach, behind the same egress proxy. Before each new job, everything the previous job in that engine left behind is removed. Jobs that run at the same time never share an engine, so a pull-request job can't reach a running publish job or leave anything behind for it.
-- **Shared capacity:** the roles share the dev server's CPU. `ADLC_CI_SLOTS` (default 2) is the capacity. A test or publish job takes 1 slot, an Android job takes 2 (`ADLC_CI_WEIGHT_KVM`). So by default an Android job runs alone, and test and publish jobs can run side by side.
-  - A registrar starts its runner only when its job fits next to the other roles' running jobs, and removes an idle runner that no longer fits.
+- Each **registrar** holds `ci_admin_pat` and keeps **one single-use (JIT) runner waiting** in its own engine. It never runs workflow code.
+  - **test** starts the next runner as soon as the waiting one takes a job, so several test jobs run at once: up to `ADLC_CI_PARALLEL` (default: the host's slots), within the shared capacity below.
+  - **publish** and **kvm** run one job at a time.
+- Each role has its **own Docker engine**, which agents can't reach, behind the same egress proxy.
+  - publish and kvm: before each new job, everything the previous job left behind is removed.
+  - test: parallel test jobs share the engine. Their containers are kept apart by run: compose project `adlc-ci-<run id>`, its own edge aliases, no host ports. Before each new runner, the registrar removes what finished runs left (their `adlc-ci-<run id>` projects and work folders). When no test job runs, the engine is wiped completely.
+  - A pull-request job can never reach a publish job or leave anything behind for it. Test jobs hold no secrets.
+- **Shared capacity:** the roles share the host's CPU. `ADLC_CI_SLOTS` (default 2) is the capacity. A test or publish job takes 1 slot, an Android job takes 2 (`ADLC_CI_WEIGHT_KVM`). So by default an Android job runs alone, and two test jobs, or a test and a publish job, can run side by side.
+  - A registrar starts a runner only when its job fits next to the running jobs (all roles, its own included), and removes an idle runner that no longer fits.
+  - To run fewer test jobs at once than the slots allow, set `ADLC_CI_PARALLEL` (e.g. `1`) in `/srv/adlc/config/<slug>.env`, then `adlc up <slug>`.
   - This is best effort: two idle runners can get jobs in the same second.
   - **Role priority on each host:** `ADLC_CI_PRIORITY` (default `kvm,publish,test`). While a job of an earlier role that the same host runs waits on GitHub and wouldn't fit next to a new job, the later roles start no new runner and give up their idle one; running jobs finish, then the waiting job starts. E.g. on a host with `test,kvm`, a waiting Android job isn't held back by a stream of short test jobs (those continue on other hosts). It only looks at the host's own roles (`--ci-roles`), never at host names.
-  - On a bigger host, raise the slots in `/srv/adlc/config/<slug>.env`. With `ADLC_CI_SLOTS=4`, everything runs in parallel.
+  - On a bigger host, raise the slots in `/srv/adlc/config/<slug>.env`. With `ADLC_CI_SLOTS=4`, an Android job and two test jobs run side by side, or four test jobs.
   - Why: on a 4-vCPU dev server, three jobs at once plus the agents pushed tests with fixed time limits over them.
 - **Job time limit:** a registrar stops its runner when a job has run longer than `ADLC_CI_JOB_MAX_MIN` minutes (default 60; `0` turns it off). GitHub then ends the job, the poller treats it as a failed check, and the next job gets a cleaned engine.
   - Why: a job without `timeout-minutes` gets GitHub's 6 hours, so one hung step blocks every later job of that role. (2026-10-22: an Android diagnostics step hung for 2 hours.)
@@ -223,7 +229,7 @@ adlc doctor                                   # docker, /dev/kvm, disk
 adlc secrets <slug>                           # only ci_admin_pat (add Contents: read to it); Enter for the others
 adlc up <slug> --ci-only --repo <owner/name> --ci-roles test,kvm [--ci-host ci2] \
                [--registry harbor.example.com --registry-ca /path/ca.crt]   # same registry flags as the main host
-echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>   # Android (2) + one test job (1)
+echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>   # Android (2) + one test job (1), or three test jobs
 adlc logs <slug> ci                           # each registrar: "runner … waiting for a job"
 
 # CPU, memory and disk on the dashboard
@@ -304,7 +310,7 @@ cd ~/adlc
 | `adlc audit <slug>` | domains reached through the egress proxy and whether each is allowlisted |
 | `adlc restart <slug> [--force]` | restart the runner: reloads the ADLC **plugins** (commands, agents, skills) after `git pull`. The runner's **scripts** (poller, merge train, queue, CI registrar, Remote Control loop) are built into its image: load those with `adlc up <slug>` (pause and let running deliveries finish first). `restart` and `adlc doctor` warn when the image is older than the checkout. Refuses while delivery runs are active unless `--force` |
 | `adlc down <slug>` | stop the project (workspace, volumes and login are kept) |
-| `adlc doctor` | host checks: Docker, /dev/kvm, disk, secrets, whether each runner runs this checkout's scripts, and each project's CI roles and slots on this host. Warns when the test runner would stop during Android jobs (too few slots) or when the running registrars use a different slot count than the config (`adlc up <slug>`) |
+| `adlc doctor` | host checks: Docker, /dev/kvm, disk, secrets, whether each runner runs this checkout's scripts, and each project's CI roles, slots and test jobs at once on this host. Warns when the test runner would stop during Android jobs (too few slots) or when the running registrars use a different slot count than the config (`adlc up <slug>`) |
 | `adlc ui host-token <host> [--rotate\|--remove]` | on the main host: the token a CI-only host reports its CPU, memory and disk with ([setup](#a-second-machine-for-ci-ci-only-host)) |
 | `adlc ui report <dashboard url>` | on a CI-only host: start reporting to the dashboard (asks for that token) |
 
@@ -826,9 +832,9 @@ Situations from real projects, with the steps that resolve them. The [Field Guid
 - **A required check fails on a PR that didn't touch that code.** Usually a flaky test (e.g. a UI test waiting 1 s for data on a loaded runner). Re-run the failed jobs: `gh run rerun <run-id> --failed`. Open an issue labelled `adlc:flaky` with the failing test and log so it gets fixed for good.
 
 **CI**
-- **Many CI jobs wait, none seem to run.** Each host runs one runner per role at a time, and runners are single-use: between two jobs there is a 20–90 s gap while a new one registers, so a snapshot can show none. Check the dashboard's CI tab or `adlc logs <slug> ci`. If the queue really is longer than your capacity, add a CI host or raise its slots (next item).
+- **Many CI jobs wait, none seem to run.** Runners are single-use: between two jobs there is a 20–90 s gap while a new one registers, so a snapshot can show none. Check the dashboard's CI tab or `adlc logs <slug> ci`. A host runs as many test jobs at once as its slots allow (`adlc doctor` shows "up to N test job(s) at once"). If the queue really is longer than your capacity, add a CI host or raise its slots (next item).
 - **CI tests time out (5 s limits, "completes in < 2 s") on PRs, but pass on a rerun or locally.** The job ran on the main host while an agent's delivery run used the CPU. Check the job's runner name: `adlc-<slug>-test-…` (no host) is the main host. With a CI-only host, take `test` off the main host (`adlc up <slug> --ci-roles publish`) and give the CI-only host room for Android and a test job (`ADLC_CI_SLOTS=3` there). Then re-run the failed jobs.
-- **A CI host sits idle while test jobs wait.** CI capacity is `ADLC_CI_SLOTS` per host (default 2; `adlc doctor` on that host shows it). An Android (`kvm`) job takes 2, so while one runs or waits, that host's test runner holds back (its log says "waiting: other CI jobs use the capacity"). On a host with 4+ CPUs: `echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>` on that host.
+- **A CI host sits idle while test jobs wait.** CI capacity is `ADLC_CI_SLOTS` per host (default 2; `adlc doctor` on that host shows it). An Android (`kvm`) job takes 2, so while one runs or waits, that host's test runner holds back (its log says "waiting: running CI jobs use the capacity"). On a host with 4+ CPUs: `echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>` on that host.
 - **Publish fails with "findings at or above CRITICAL, or the scan failed".** Read the scan's `Total:` lines first. `CRITICAL: 0` plus `FATAL … failed to download vulnerability DB` means Trivy's database mirror failed: re-run the failed job. Real CRITICAL findings need a newer base image or package upgrade in the Dockerfile: open an issue for it.
 
 **Dashboard and access**

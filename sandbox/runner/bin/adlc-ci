@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# ADLC CI registrar: keeps one ephemeral GitHub Actions runner available for the project's repo.
+# ADLC CI registrar: keeps one ephemeral GitHub Actions runner waiting for the project's repo, and for
+# the test role starts more while jobs run, up to the host's CI capacity (see Shared CI capacity).
 #
 # - Only this container holds ci_admin_pat (repo Administration: write, needed to create
 #   just-in-time runner configs). It never runs workflow code.
 # - Each job runs in a fresh runner container inside the CI Docker engine (ci-docker), which
 #   agents can't reach. A JIT runner takes exactly one job and exits.
-# - Before every new runner, everything the previous job left in ci-docker is removed, so a
-#   pull-request job can't plant anything for a later main-branch publish job.
+# - Before every new runner, everything finished jobs left in the role's engine is removed, so a
+#   pull-request job can't plant anything for a later main-branch publish job. Only test jobs share
+#   their engine with other jobs running at the same time (they hold no secrets).
 set -uo pipefail
 ROLE=${ADLC_CI_ROLE:-test}
 ADLC_COMPONENT=ci-$ROLE
@@ -38,17 +40,18 @@ EOF
 for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done
 docker info >/dev/null 2>&1 || die "cannot reach the CI Docker engine at ${DOCKER_HOST:-?}"
 
-runner_running() { [ -n "$(docker ps -q --filter label=adlc.ci=runner)" ]; }
+my_runners() { docker ps --filter label=adlc.ci=runner --format '{{.Names}}'; }
 
 # A waiting runner lives in ci-docker and survives restarts of this container. One registered
 # with other labels (ADLC_CI_LABELS changed) would wait forever for jobs nobody sends it: remove
 # it and its GitHub registration. A runner that has started a job is left to finish.
 # A waiting runner started from an older CI image (the image was rebuilt) is replaced the same way,
 # so jobs always get the current image.
-# The runner's work folder (work_folder=_work under its home); see start_runner.
-WORK=/home/runner/_work
+# Each runner's work folder is _work-<runner name> under its home, so runners in one engine don't share it;
+# see start_runner.
+RUNNER_HOME=/home/runner
 # Bump when start_runner changes how runners are started, so idle runners are replaced.
-SPEC=7
+SPEC=8
 # Caches that survive between jobs (named volumes labelled org.adlc.ci.cache, which reset_engine
 # keeps): Gradle (dependencies, wrapper, build cache) and the Android SDK/NDK, so Android builds
 # don't start from cold. A volume above ADLC_CI_CACHE_MAX_GB is emptied by the daily housekeeping.
@@ -115,7 +118,16 @@ replace_stale_runners() {
   done
 }
 
-# Remove everything except running runner containers; keep image layers (build cache).
+# Work folders on the engine whose runner is gone (all of them when no runner runs). The shared _work of
+# runners started before SPEC 8 goes only then: such a runner may still run a job in it.
+clean_work_dirs() {
+  docker run --rm --user root --entrypoint sh -v "$RUNNER_HOME":/h -e LIVE=" $(my_runners | tr '\n' ' ') " "$IMAGE" \
+    -c 'for d in /h/_work*; do [ -d "$d" ] || continue; [ "$d" != /h/_work ] || [ -z "$(echo $LIVE)" ] || continue
+        case "$LIVE" in *" ${d#/h/_work-} "*) ;; *) rm -rf "$d" ;; esac; done' \
+    >/dev/null 2>&1 || true
+}
+
+# No runner left in the engine: remove everything except runner containers; keep image layers (build cache).
 reset_engine() {
   local ids
   ids=$(docker ps -aq | grep -vxF -f <(docker ps -q --filter label=adlc.ci=runner) || true)
@@ -130,6 +142,30 @@ reset_engine() {
   # build cache, which is capped here too. Pulled images (postgres, …) stay for speed; see prune_engine.
   ADLC_BUILT_IMAGE_MAX_IDLE_H=0 ADLC_IMAGE_MAX_IDLE_H=876000 prune_finished_runs "$IMAGE $BASE"
   docker image prune -f >/dev/null 2>&1 || true
+  prune_build_cache "${ADLC_CI_BUILD_CACHE_KEEP:-4GB}"
+  clean_work_dirs
+}
+
+# Other jobs still run in this engine: remove only what finished runs left. A job's containers, networks
+# and volumes belong to compose projects adlc-<ci|nightly>-<run id>[-…] (ADLC_RUN in the workflow
+# templates); those of runs no longer queued or in progress go. Anything else waits for reset_engine,
+# the next time the engine has no runner. Skipped when GitHub can't be asked.
+tidy_engine() {
+  local token active p ids
+  token=$(secret ci_admin_pat)
+  active=$( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=100" --jq '.workflow_runs[].id' \
+              && GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=100" --jq '.workflow_runs[].id'; } 2>/dev/null) \
+    || return 0
+  for p in $(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u); do
+    [[ $p =~ ^adlc-(ci|nightly)-([0-9]+)(-.*)?$ ]] || continue
+    grep -qx "${BASH_REMATCH[2]}" <<<"$active" && continue
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=$p")
+    [ -z "$ids" ] || xargs docker rm -f <<<"$ids" >/dev/null 2>&1
+    docker network ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker network rm >/dev/null 2>&1
+    docker volume ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker volume rm >/dev/null 2>&1
+    log "removed what finished run ${BASH_REMATCH[2]} left in the engine ($p)"
+  done
+  clean_work_dirs
   prune_build_cache "${ADLC_CI_BUILD_CACHE_KEEP:-4GB}"
 }
 
@@ -157,12 +193,13 @@ ensure_image() {
 }
 
 start_runner() {
-  local token name jit gid start label_args=() l
+  local token name jit gid start label_args=() l work
   token=$(secret ci_admin_pat)
   name="adlc-$ADLC_SLUG${HOST:+-$HOST}-$ROLE-$(date +%s)"
+  work=$RUNNER_HOME/_work-$name
   for l in ${LABELS//,/ }; do label_args+=(-f "labels[]=$l"); done
   jit=$(GH_TOKEN=$token $GH api -X POST "repos/$R/actions/runners/generate-jitconfig" \
-          -f name="$name" -F runner_group_id=1 -f work_folder=_work "${label_args[@]}" \
+          -f name="$name" -F runner_group_id=1 -f work_folder="_work-$name" "${label_args[@]}" \
           --jq .encoded_jit_config 2>&1) || {
     log "ERROR: cannot create a JIT runner config ($jit). ci_admin_pat needs Administration: read and write on $R"
     return 1
@@ -173,17 +210,17 @@ start_runner() {
   gid=$(docker run --rm --entrypoint stat -v /var/run/docker.sock:/s "$IMAGE" -c %g /s 2>/dev/null || echo 0)
   # Jobs talk to this engine, so the paths in their bind mounts (docker compose with ./files)
   # are looked up on the engine, not in the runner. Give the engine the job workspace at the
-  # same path, fresh for each runner.
-  docker run --rm --user root --entrypoint sh -v "$(dirname "$WORK")":/h "$IMAGE" \
-    -c "rm -rf /h/$(basename "$WORK") && mkdir -p /h/$(basename "$WORK") && chown runner:runner /h/$(basename "$WORK")" >/dev/null 2>&1 \
-    || { log "ERROR: cannot prepare the job workspace $WORK on the CI engine"; return 1; }
+  # same path, fresh for each runner and its own (other runners may run in the same engine).
+  docker run --rm --user root --entrypoint sh -v "$RUNNER_HOME":/h "$IMAGE" \
+    -c "rm -rf /h/${work##*/} && mkdir -p /h/${work##*/} && chown runner:runner /h/${work##*/}" >/dev/null 2>&1 \
+    || { log "ERROR: cannot prepare the job workspace $work on the CI engine"; return 1; }
   ensure_caches || log "WARN: cannot prepare the build caches; this job starts cold"
   # RUNNER_MANUALLY_TRAP_SIG: run.sh passes SIGTERM on to the listener, which cancels the job and
   # reports it, so `docker stop` (watch_job_time) ends the job on GitHub at once instead of after the
   # runner is declared lost.
   # shellcheck disable=SC2046  # cache_mounts prints -v options
   docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" --label "adlc.ci.spec=$SPEC" \
-    -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$WORK:$WORK" $(cache_mounts) \
+    -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$work:$work" $(cache_mounts) \
     -e NO_PROXY="$JOB_NO_PROXY" -e no_proxy="$JOB_NO_PROXY" -e ADLC_JOB_NO_PROXY="$JOB_NO_PROXY" \
     -e RUNNER_MANUALLY_TRAP_SIG=1 \
     "$IMAGE" "$start" --jitconfig "$jit" >/dev/null \
@@ -213,17 +250,25 @@ prune_engine() {
 }
 
 # ── Shared CI capacity ───────────────────────────────────────────────────────
-# The roles' runners share the dev server's CPU. Capacity is ADLC_CI_SLOTS (default 2); a job of this
+# The roles' runners share the host's CPU. Capacity is ADLC_CI_SLOTS (default 2); a job of this
 # role takes ADLC_CI_WEIGHT (test and publish 1, kvm 2: an Android build plus emulator runs alone).
 # GitHub's runner list (same token for all registrars) says which runners are busy; host and role are in
 # the name (adlc-<slug>[-<host>]-<role>-<time>). Capacity is per host: only this host's runners count. A
-# registrar starts a runner only if its job fits next to the other roles' busy jobs, and removes its
-# idle runner when it no longer fits. Best effort: two idle runners can still get jobs in the same second.
+# registrar starts a runner only if its job fits next to the busy jobs (all roles, its own included), and
+# removes its idle runner when it no longer fits. Best effort: two idle runners can still get jobs in the
+# same second.
+# Runners per role: the test registrar keeps one runner waiting and starts the next as soon as that one
+# takes a job, up to ADLC_CI_PARALLEL test jobs at once (default: the slots). Test jobs keep their
+# containers apart by run (compose project adlc-ci-<run id>, no host ports). publish (registry
+# credentials) and kvm (one emulator, shared caches) run one job at a time in their engine.
 SLOTS=${ADLC_CI_SLOTS:-2}
 WEIGHT=${ADLC_CI_WEIGHT:-$([ "$ROLE" = kvm ] && echo 2 || echo 1)}
+PARALLEL=1
+[ "$ROLE" = test ] && PARALLEL=${ADLC_CI_PARALLEL:-$SLOTS}
+[[ $PARALLEL =~ ^[1-9][0-9]*$ ]] || PARALLEL=1
 role_weight() { case $1 in kvm) echo "${ADLC_CI_WEIGHT_KVM:-2}" ;; *) echo 1 ;; esac; }
-# Weight of the other roles' busy runners; "?" when GitHub can't be asked (then don't block).
-others_busy() {
+# Weight of this host's busy runners, all roles; "?" when GitHub can't be asked (then don't block).
+host_load() {
   local names n r h sum=0
   names=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
             --jq ".runners[] | select(.busy) | .name" 2>/dev/null) || { echo "?"; return; }
@@ -231,7 +276,6 @@ others_busy() {
     if [[ "$n" =~ ^adlc-$ADLC_SLUG-(([a-z0-9]+)-)?(test|publish|kvm)-[0-9]+$ ]]; then
       h=${BASH_REMATCH[2]} r=${BASH_REMATCH[3]}
       [ "$h" = "$HOST" ] || continue                     # another host's runner: its own capacity
-      [ "$r" = "$ROLE" ] && continue
     else
       [ -z "$HOST" ] || continue                         # unknown runners count on the main host only
       r=other
@@ -240,15 +284,21 @@ others_busy() {
   done
   echo "$sum"
 }
-capacity_ok() { local b; b=$(others_busy); [ "$b" = "?" ] || [ $((b + WEIGHT)) -le "$SLOTS" ]; }
-# This registrar's runner, if it is registered and idle on GitHub.
-my_idle_runner() {
-  local c token
-  c=$(docker ps --filter label=adlc.ci=runner --format '{{.Names}}' | head -1); [ -n "$c" ] || return 1
-  token=$(secret ci_admin_pat)
-  GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
-    --jq ".runners[] | select(.name == \"$c\") | select(.busy | not) | \"$c \\(.id)\"" 2>/dev/null
+capacity_ok() { local b; b=$(host_load); [ "$b" = "?" ] || [ $((b + WEIGHT)) -le "$SLOTS" ]; }
+# This registrar's runners without a job: "<name> <runner id>" per line, the id empty while the runner is
+# still registering. Fails when GitHub can't be asked.
+idle_runners() {
+  local list c line
+  list=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
+           --jq '.runners[] | "\(.name) \(.busy) \(.id)"' 2>/dev/null) || return 1
+  for c in $(my_runners); do
+    line=$(awk -v n="$c" '$1 == n' <<<"$list")
+    [ "$(cut -d' ' -f2 <<<"$line")" = true ] && continue
+    echo "$c $(cut -s -d' ' -f3 <<<"$line")"
+  done
 }
+# One registered idle runner of this registrar ("<name> <runner id>"), if any.
+my_idle_runner() { idle_runners 2>/dev/null | awk 'NF == 2' | head -1; }
 # ── Role priority on this host ───────────────────────────────────────────────
 # Roles in ADLC_CI_PRIORITY order (default kvm,publish,test: the slowest required check and the one that
 # needs most slots first, then publish, which the dev deploy waits for, then the short test jobs).
@@ -330,7 +380,8 @@ yield_capacity() { # remove our idle runner when other roles' jobs fill the capa
 # removes what the job started. The clock starts at the job's started_at (or when this registrar first
 # saw the runner busy, if GitHub can't say), so a registrar restart doesn't reset it.
 JOB_MAX_MIN=${ADLC_CI_JOB_MAX_MIN:-60}
-job_runner="" job_since=0 job_desc="" last_watch=0
+declare -A job_since=() job_desc=()
+last_watch=0
 # The job a runner is running: "<started_at>\t<workflow / job>\t<url>", empty if not found.
 runner_job() { # runner_job <runner name> <token>
   local id
@@ -343,28 +394,31 @@ runner_job() { # runner_job <runner name> <token>
 }
 watch_job_time() {
   [ "${JOB_MAX_MIN:-0}" -gt 0 ] 2>/dev/null || return 0
-  local now c token busy job started id
+  local now c token busy job started id live
   now=$(date +%s); [ $((now - last_watch)) -ge 60 ] || return 0; last_watch=$now
-  c=$(docker ps --filter label=adlc.ci=runner --format '{{.Names}}' | head -1)
-  [ -n "$c" ] || { job_runner=""; return 0; }
+  live=$(my_runners)
+  for c in "${!job_since[@]}"; do grep -qx "$c" <<<"$live" || unset "job_since[$c]" "job_desc[$c]"; done
+  [ -n "$live" ] || return 0
   token=$(secret ci_admin_pat)
   busy=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
-           --jq ".runners[] | select(.name == \"$c\") | .busy" 2>/dev/null) || return 0
-  [ "$busy" = true ] || return 0
-  if [ "$job_runner" != "$c" ]; then
-    job_runner=$c job_since=$now job_desc="its job"
-    job=$(runner_job "$c" "$token")
-    if [ -n "$job" ]; then
-      started=$(date -d "$(cut -f1 <<<"$job")" +%s 2>/dev/null) && job_since=$started
-      job_desc="$(cut -f2 <<<"$job") <$(cut -f3 <<<"$job")>"
+           --jq '.runners[] | select(.busy) | .name' 2>/dev/null) || return 0
+  for c in $live; do
+    grep -qx "$c" <<<"$busy" || continue
+    if [ -z "${job_since[$c]:-}" ]; then
+      job_since[$c]=$now job_desc[$c]="its job"
+      job=$(runner_job "$c" "$token")
+      if [ -n "$job" ]; then
+        started=$(date -d "$(cut -f1 <<<"$job")" +%s 2>/dev/null) && job_since[$c]=$started
+        job_desc[$c]="$(cut -f2 <<<"$job") <$(cut -f3 <<<"$job")>"
+      fi
     fi
-  fi
-  [ $((now - job_since)) -ge $((JOB_MAX_MIN * 60)) ] || return 0
-  log "WARN: runner $c has run $job_desc for $(((now - job_since) / 60)) min (limit ADLC_CI_JOB_MAX_MIN=$JOB_MAX_MIN): stopping it; GitHub ends the job and the next one gets a fresh engine"
-  docker stop -t 60 "$c" >/dev/null 2>&1 || docker rm -f "$c" >/dev/null 2>&1
-  id=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" --jq ".runners[] | select(.name == \"$c\") | .id" 2>/dev/null)
-  [ -z "$id" ] || GH_TOKEN=$token $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
-  job_runner=""
+    [ $((now - job_since[$c])) -ge $((JOB_MAX_MIN * 60)) ] || continue
+    log "WARN: runner $c has run ${job_desc[$c]} for $(((now - job_since[$c]) / 60)) min (limit ADLC_CI_JOB_MAX_MIN=$JOB_MAX_MIN): stopping it; GitHub ends the job and what it left in the engine is removed"
+    docker stop -t 60 "$c" >/dev/null 2>&1 || docker rm -f "$c" >/dev/null 2>&1
+    id=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" --jq ".runners[] | select(.name == \"$c\") | .id" 2>/dev/null)
+    [ -z "$id" ] || GH_TOKEN=$token $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
+    unset "job_since[$c]" "job_desc[$c]"
+  done
 }
 
 # ── Network policy (CI-only host) ────────────────────────────────────────────
@@ -390,30 +444,36 @@ sync_policy() {
   fi
 }
 
-log "registrar ($ROLE${HOST:+ on $HOST}) started: one runner at a time with labels $LABELS, image $IMAGE; CI capacity $SLOTS slot(s), this role takes $WEIGHT${HIGHER:+, makes room for: $HIGHER}; job limit ${JOB_MAX_MIN} min"
+log "registrar ($ROLE${HOST:+ on $HOST}) started: up to $PARALLEL runner(s) at a time with labels $LABELS, image $IMAGE; CI capacity $SLOTS slot(s), this role takes $WEIGHT${HIGHER:+, makes room for: $HIGHER}; job limit ${JOB_MAX_MIN} min"
 while :; do
   if [ -z "$(secret ci_admin_pat)" ]; then
     log "CI runner disabled: no ci_admin_pat (adlc secrets $ADLC_SLUG)"; sleep 300; continue
   fi
   # Image first (cheap when current), then retire idle runners that are outdated, then make sure
-  # one runner waits for the next job.
+  # one runner waits for the next job (while the others run theirs, up to PARALLEL).
   sync_policy
   ensure_image
   replace_stale_runners
-  if runner_running; then
+  if [ -n "$(my_runners)" ]; then
     watch_job_time
     yield_capacity
+  fi
+  n=$(my_runners | grep -c .)
+  if [ "$n" -ge "$PARALLEL" ]; then
+    :                                                   # this role's limit on this host
+  elif [ "$n" -gt 0 ] && { ! idle=$(idle_runners) || [ -n "$idle" ]; }; then
+    :                                                   # one already waits for a job (or GitHub can't say)
   elif r=$(yield_to); then
     [ "$held_for" = "$r" ] || log "holding: a $r job is waiting and goes first on this host ($PRIORITY)"
     held_for=$r
   elif capacity_ok; then
     [ "$waiting_logged" = 0 ] && [ -z "$held_for" ] || log "CI capacity free again"
     waiting_logged=0 held_for=""
-    reset_engine
+    if [ "$n" = 0 ]; then reset_engine; else tidy_engine; fi
     prune_engine
     start_runner || sleep 60
   elif [ "$waiting_logged" = 0 ]; then
-    log "waiting: other CI jobs use the capacity ($SLOTS slots, this role takes $WEIGHT)"; waiting_logged=1
+    log "waiting: running CI jobs use the capacity ($SLOTS slots, this role takes $WEIGHT)"; waiting_logged=1
   fi
   sleep "$INTERVAL"
 done

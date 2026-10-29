@@ -1,16 +1,18 @@
 # Optional per-project CI runners (added by `adlc up` when the ci_admin_pat secret is set).
 #
 # One registrar + Docker engine pair per role, so jobs of different roles run in parallel and never
-# share an engine (each engine is wiped before every job; a pull-request job can't touch a running
-# or later publish job):
+# share an engine (what finished jobs left is removed before every new runner; a pull-request job can't
+# touch a running or later publish job):
 #   ci        + ci-docker          test     labels self-hosted,linux,adlc-test     (checks, e2e-web)
 #   ci-publish + ci-docker-publish publish  labels self-hosted,linux,adlc-publish  (image publishing)
 #   ci-kvm    + ci-docker-kvm      kvm      labels self-hosted,linux,adlc-kvm      (e2e-android)
 # Each role is a compose profile (test, publish, kvm); `adlc up <slug> --ci-roles …` picks the roles this host
 # runs (default test,publish; --ci-kvm on adds kvm). A CI-only host (adlc up <slug> --ci-only, see
 # compose.ci-host.yml) runs the roles it is given, e.g. only kvm; its runners carry ADLC_CI_HOST in their names.
-# A registrar holds ci_admin_pat and starts one ephemeral JIT runner at a time in its engine; it runs no
-# job code. Agents (runner service) can't reach these engines, so they can't inspect a running publish
+# A registrar holds ci_admin_pat and keeps one ephemeral JIT runner waiting in its engine; it runs no
+# job code. The test registrar starts the next runner as soon as one takes a job, up to ADLC_CI_PARALLEL
+# test jobs at once within the host's capacity (test jobs share ci-docker; their containers are kept
+# apart by run). publish and kvm run one job at a time. Agents (runner service) can't reach these engines, so they can't inspect a running publish
 # job and read its registry credentials. Network ci is internal; the only way out is the egress proxy.
 
 x-ci-docker: &ci-docker
@@ -40,6 +42,7 @@ x-ci-env: &ci-env
   ADLC_CI_CACHE_MAX_GB: ${ADLC_CI_CACHE_MAX_GB:-12}
   ADLC_CI_SLOTS: ${ADLC_CI_SLOTS:-2}               # shared CI capacity: test/publish take 1, kvm 2
   ADLC_CI_WEIGHT_KVM: ${ADLC_CI_WEIGHT_KVM:-2}
+  ADLC_CI_PARALLEL: ${ADLC_CI_PARALLEL:-}         # test jobs at once on this host (empty: the slots)
   ADLC_CI_HOST_ROLES: ${ADLC_CI_ROLES:-test,publish}  # this host's roles (adlc up --ci-roles), for the role priority
   ADLC_CI_PRIORITY: ${ADLC_CI_PRIORITY:-kvm,publish,test} # a waiting job of an earlier role goes first on its host
   ADLC_CI_HOST: ${ADLC_CI_HOST:-}                 # runner names adlc-<slug>[-<host>]-<role>-<time>; capacity is per host

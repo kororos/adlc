@@ -240,7 +240,7 @@ const TUTS = [
     { t: "Create the VM", w: "hypervisor", b: "On a different physical host: 8 vCPU (6 if the host has ≤ 8 cores), 24 GB RAM fully reserved, 150 GB SSD, hardware virtualisation exposed to the guest (for <code>/dev/kvm</code>), Ubuntu LTS with Docker CE. Outbound internet only; no inbound ports." },
     { t: "Install ADLC", w: "new VM", b: "Only <code>ci_admin_pat</code> is needed there (add Contents: read so the proxy can read adlc.yaml); press Enter for the other secrets.",
       c: "sudo mkdir -p /srv/adlc && sudo chown \"$USER\": /srv/adlc\ngit clone https://github.com/kororos/adlc ~/adlc && sudo ln -s ~/adlc/bin/adlc /usr/local/bin/adlc\nadlc doctor\nadlc secrets <slug>" },
-    { t: "Start the CI roles", w: "new VM", b: "Roles are <code>test</code>, <code>publish</code> and <code>kvm</code> (Android). Capacity is per host; an Android job counts 2.",
+    { t: "Start the CI roles", w: "new VM", b: "Roles are <code>test</code>, <code>publish</code> and <code>kvm</code> (Android). Capacity is per host; an Android job counts 2, a test job 1, and test jobs run side by side up to the slots (<code>ADLC_CI_PARALLEL</code> caps them).",
       c: "adlc up <slug> --ci-only --repo <owner>/<slug> --ci-roles test,kvm --ci-host ci2\necho 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>\nadlc logs <slug> ci     # each registrar: runner … waiting for a job" },
     { t: "Hand roles over on the main host", w: "dev server", b: "Once no Android job runs there, drop kvm and free its disk. The roles you pass are remembered; later updates need no flag.",
       c: "adlc up <slug> --ci-roles test,publish\ndocker volume rm adlc-<slug>_ci-data-kvm adlc-<slug>_ci-certs-kvm" },
@@ -351,7 +351,7 @@ const FIXES = [
     ["Re-run the failed jobs.", "Open an issue labelled `adlc:flaky` with the test name and the log lines, so it's fixed for good."],
     "gh run rerun <run-id> --failed"],
   ["CI", "Many CI jobs wait and none seem to run",
-    "Each host runs one runner per role at a time, and runners are single-use: between two jobs there's a 20–90 s gap while a new one registers, so a snapshot can show none.",
+    "Runners are single-use: between two jobs there's a 20–90 s gap while a new one registers, so a snapshot can show none. A host runs as many test jobs at once as its slots allow (`adlc doctor`: \"up to N test job(s) at once\"); Android and publish run one at a time.",
     ["Check the dashboard's CI tab, or the registrar log.", "If the queue really is longer than your capacity: raise a host's slots (next item) or add a CI-only host."],
     "adlc logs <slug> ci"],
   ["CI", "CI tests time out on PRs but pass when re-run",
@@ -359,7 +359,7 @@ const FIXES = [
     ["Take the test role off the main host, so test jobs run on the CI-only host.", "Give the CI-only host room for Android and a test job, so its test runner stays online.", "Re-run the failed jobs."],
     "adlc up <slug> --ci-roles publish                                  # on the main host\necho 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>   # on the CI-only host\ngh run rerun <run-id> --failed -R <owner>/<repo>"],
   ["CI", "A CI host sits idle while test jobs wait",
-    "CI capacity is `ADLC_CI_SLOTS` per host (default 2). An Android (kvm) job takes 2, so while one runs or waits, that host's test runner holds back. Its log says \"waiting: other CI jobs use the capacity\".",
+    "CI capacity is `ADLC_CI_SLOTS` per host (default 2). An Android (kvm) job takes 2, so while one runs or waits, that host's test runner holds back. Its log says \"waiting: running CI jobs use the capacity\".",
     ["Check the host's slots: `adlc doctor` lists them per project.", "On a host with 4+ CPUs, raise the slots on that host so Android and one test job run side by side."],
     "echo 'ADLC_CI_SLOTS=3' >>/srv/adlc/config/<slug>.env && adlc up <slug>"],
   ["Dashboard", "A CI host is missing from Machines, or shows \"No report\"",
@@ -464,7 +464,7 @@ renderLife()
 
 /* ── Commands ──────────────────────────────────────────────────── */
 const CMDS = [
-  ["adlc doctor", "host", "Host checks: Docker, /dev/kvm, disk, secrets, whether each runner runs this checkout's scripts, and each project's CI roles and slots on this host (warns when the test runner would stop during Android jobs, or the running registrars use another slot count)."],
+  ["adlc doctor", "host", "Host checks: Docker, /dev/kvm, disk, secrets, whether each runner runs this checkout's scripts, and each project's CI roles, slots and test jobs at once on this host (warns when the test runner would stop during Android jobs, or the running registrars use another slot count)."],
   ["adlc secrets <slug>", "host", "Enter or update the project's secrets (stored mode 600, never shown)."],
   ["adlc up <slug> [--repo o/r] [--ci-roles …]", "host", "Build the runner image and start or update everything. Loads new ADLC scripts. Remembers CI roles."],
   ["adlc up <slug> --ci-only --ci-roles test,kvm --ci-host ci2", "CI host", "Run only CI registrars and their engines on a second machine."],

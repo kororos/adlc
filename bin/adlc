@@ -197,10 +197,11 @@ cmd_doctor() {
   done
 }
 doctor_ci() { # roles and slots (CI capacity) on this host, and whether the running registrars use them
-  (load_cfg "$1"; local roles slots kw svc c have
+  (load_cfg "$1"; local roles slots kw par svc c have
    roles=$(ci_roles "$1" | paste -sd, -); slots=${ADLC_CI_SLOTS:-2}; kw=${ADLC_CI_WEIGHT_KVM:-2}
+   par=${ADLC_CI_PARALLEL:-$slots}; [ "$par" -le "$slots" ] 2>/dev/null || par=$slots
    [ -n "$roles" ] || { warn "$1: no CI roles on this host"; return 0; }
-   ok "$1: CI roles $roles, $slots slot(s) on $(nproc 2>/dev/null || echo ?) CPUs$(ci_kvm "$1" && echo ", an Android job takes $kw")"
+   ok "$1: CI roles $roles, $slots slot(s) on $(nproc 2>/dev/null || echo ?) CPUs$(has_ci_role "$1" test && echo ", up to $par test job(s) at once")$(ci_kvm "$1" && echo ", an Android job takes $kw")"
    if ci_kvm "$1" && has_ci_role "$1" test && [ "$slots" -lt $((kw + 1)) ]; then
      warn "$1: the test runner stops while an Android job runs ($slots slots): ADLC_CI_SLOTS=$((kw + 1)) in $(cfg_file "$1"), then adlc up $1"
    fi
