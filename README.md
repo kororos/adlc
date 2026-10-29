@@ -773,7 +773,7 @@ The orchestrating sessions never read code or logs. They receive at most 15-line
 - **Scoped credentials:** the agents' GitHub token covers only the project repo and has no admin rights. Admin actions go through `provision.sh`, which you run yourself.
 - **Guard hook** on every tool call. It blocks force-push, pushes to protected branches, direct merges (only `--auto` is allowed), repo administration, reading secret files, and (in unattended mode) edits to `adlc.yaml`, `CLAUDE.md` and `docs/project/`.
 - **GitHub branch protection** and required CI checks are the final merge gate.
-- **Only collaborators' issues and comments** are acted upon.
+- **Only collaborators' issues and comments** are acted upon. An issue from anyone else (including the nightly workflow's regression reports, filed by `github-actions`) runs once a collaborator labels it `adlc:ready`; that approval holds through its reworks.
 - **Humans approve** setup, architecture, and every high-risk change.
 
 ---

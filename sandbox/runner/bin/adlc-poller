@@ -55,13 +55,17 @@ identity_ok() {
 }
 
 # Who may start a delivery run: an issue written by a collaborator or by ADLC itself, or any
-# issue a collaborator labelled adlc:ready (that's how you approve an outsider's issue).
+# issue a collaborator labelled adlc:ready (that's how you approve an outsider's issue). ADLC's own
+# adlc:ready labels (a rework sends the issue back to ready) are skipped: the approval is the last
+# person who added it, so it holds through reworks.
 trusted_issue() { # trusted_issue <n> <author>
-  local actor
+  local actor a
   is_self "$2" || is_collaborator "$2" && return 0
-  actor=$(gh api --paginate "repos/$R/issues/$1/events?per_page=100" \
-            --jq '.[] | select(.event == "labeled" and .label.name == "adlc:ready") | .actor.login' 2>/dev/null | tail -n 1)
-  [ -n "$actor" ] && ! is_self "$actor" && is_collaborator "$actor"
+  while read -r a; do
+    is_self "$a" || { actor=$a; break; }
+  done < <(gh api --paginate "repos/$R/issues/$1/events?per_page=100" \
+             --jq '.[] | select(.event == "labeled" and .label.name == "adlc:ready") | .actor.login' 2>/dev/null | tac)
+  [ -n "${actor:-}" ] && is_collaborator "$actor"
 }
 
 # ── Backoff (shared Max quota) ────────────────────────────────────────────────
