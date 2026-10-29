@@ -285,7 +285,7 @@ renderTut()
 const LABELS = [
   ["queued", "adlc:queued", "Planned, but something it depends on is still open.", "Nothing. The poller promotes it when its blockers close."],
   ["ready", "adlc:ready", "Can start. The poller launches it when a run slot is free.", "Run next on the dashboard to put it first."],
-  ["in-progress", "adlc:in-progress", "A delivery run is working on it in its own worktree; the branch is pushed after every phase.", "Follow it on the Now tab or with adlc logs <slug> run <n>."],
+  ["in-progress", "adlc:in-progress", "A delivery run is working on it in its own worktree; the branch is pushed after every phase.", "Follow it on the Now tab or with adlc logs <slug> run <n>. A rework shows a Rework k badge and starts at Build."],
   ["pr-open", "adlc:pr-open", "Its PR is open. Failed checks or conflicts send it back to ready for a rework, at most twice.", "Low/medium risk: nothing, it merges itself. High risk: review and approve."],
   ["needs-info", "adlc:needs-info", "The agent needs a decision. The questions are on the issue.", "Answer, then relabel adlc:ready."],
   ["blocked", "adlc:blocked", "The run gave up: retries used up or the environment failed. A summary is on the issue.", "Fix the cause, then relabel adlc:ready."],

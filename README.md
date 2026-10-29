@@ -551,7 +551,7 @@ Unattended: the poller runs the same command for each `adlc:ready` issue, in tha
 (no state) ─► adlc:queued ─► adlc:ready ─► adlc:in-progress ─► adlc:pr-open ─► merged (issue closed)
 ```
 - **Into the pipeline:** **Start** on the dashboard (queued while blockers are open, else ready); a regression starts by itself, once. Queued becomes ready when every "blocked by" issue is closed.
-- **Back to ready, by ADLC:** the runner restarted mid-run, or Claude's usage limit hit (it resumes from the last pushed phase); a PR's checks failed or it conflicts with `main` (a rework, at most `autonomy.ci_rework_max` times per PR).
+- **Back to ready, by ADLC:** the runner restarted mid-run, or Claude's usage limit hit (it resumes from the last pushed phase); a PR's checks failed or it conflicts with `main` (a rework, at most `autonomy.ci_rework_max` times per PR). On the dashboard a rework shows a **Rework k** badge next to the phases and starts at Build.
 - **To `adlc:needs-info`:** the agent needs a decision. You answer and relabel `adlc:ready`.
 - **To `adlc:blocked`:** retries used up, the environment failed, or the run crashed; a summary is on the issue. You fix the cause and relabel `adlc:ready`.
 - **To `adlc:needs-human-review`:** reworks used up, or an issue from an outside author. High risk or a proposed ADR keeps the issue `adlc:pr-open` and the PR waits for your approval; approved PRs are merged by the merge train.

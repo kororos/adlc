@@ -147,7 +147,11 @@ function state(p) {
   // The run's own progress record, in its worktree: runs/<n>/.adlc/runs/<n>/state.json
   const runState = (n) => {
     const j = readJson(pdir(p.slug, "runs", String(n), ".adlc", "runs", String(n), "state.json"))
-    return j ? { phase: String(j.phase ?? ""), risk: j.risk ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null } : null
+    if (!j) return null
+    // A rework records its number in `rework` and the step in `phase`; older runs wrote phase "rework-<k>".
+    const phase = String(j.phase ?? "")
+    const rework = Number.isInteger(j.rework) ? j.rework : Number(/^rework-(\d+)/.exec(phase)?.[1] ?? 0) || null
+    return { phase, rework, risk: j.risk ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null }
   }
   const active = running.map((n) => ({ issue: n, title: titles.get(n) ?? "", run: all.find((r) => r.issue === n) ?? null, progress: runState(n) }))
   let backoffUntil = null

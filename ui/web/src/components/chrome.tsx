@@ -91,7 +91,15 @@ export function EmptyState({ icon: Icon, title, children }: { icon: typeof Sun; 
 export function PhaseStepper({ progress }: { progress: RunProgress | null }) {
   const current = currentPhaseIndex(progress)
   return (
-    <ol className="flex flex-wrap items-center gap-x-1 gap-y-2" aria-label="Delivery phases">
+    <ol className="flex flex-wrap items-center gap-x-1 gap-y-2" aria-label={progress?.rework ? `Rework ${progress.rework} phases` : "Delivery phases"}>
+      {progress?.rework ? (
+        <li className="mr-1">
+          <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-400"
+            title="Changes to an open PR: requests, failed checks or conflicts. It starts at Build.">
+            Rework {progress.rework}
+          </span>
+        </li>
+      ) : null}
       {PHASES.map((p, i) => {
         const state = i < current ? "done" : i === current ? "active" : "todo"
         return (
