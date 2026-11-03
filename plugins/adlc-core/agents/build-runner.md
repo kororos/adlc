@@ -28,7 +28,7 @@ The lead gives you the issue number, the attempt number and the mode: **full** (
   - in those packages, only the test files related to the change, when the test runner can select them (vitest `--changed <base>`, jest `--changedSince=<base>`); otherwise the package's whole suite;
   - always the test files the branch added or changed.
   Run them inside the same wrapper as `commands.test` (e.g. `bash deploy/test/in-env.sh pnpm --filter "...[<base>]" test -- --ci --changed <base>`).
-  A related-test selection follows imports only. When the branch changes something tests use without importing it (migrations, seed or fixture data, test setup, compose files, test or build config, lockfiles, `adlc.build.yaml`), run the affected packages' whole suites instead.
+  A related-test selection follows imports only. When the branch changes something tests use without importing it (migrations, seed or fixture data, test setup, test or build config), run the whole suite of **the package that contains that file** (e.g. a migration in `apps/api` → the whole `apps/api` suite) and keep the related-test selection in the other packages. Changes that reach every package (root lockfile, root test or build config, compose files used by the test environment, `adlc.build.yaml`) run the whole suites of all selected packages.
 - **A failure in a test file the branch didn't add or change** (and that isn't about the changed code): run that file once more on its own (`commands.test_file`). If it passes, list it under `## Flaky` with both results, not as a failure. If it fails again, it's a failure.
 - Report `MODE: affected` and the selection you ran (packages, test filter).
 
