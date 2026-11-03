@@ -110,9 +110,9 @@ export type CiRun = {
   jobs: CiJob[]
 }
 
-export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current" | "rework_first" | "max_open_prs" | "update_before_merge"
+export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current" | "rework_first" | "max_open_prs" | "update_before_merge" | "verify_scope"
 export type Setting = { key: SettingKey; value: string; source: "dashboard" | "env" | "adlc.yaml" | "default"; project: string; allowed: string[] }
-export type ProjectAction = "pause" | "resume" | `${SettingKey}:${string}` | `prioritize:${number}` | `deprioritize:${number}` | `start:${number}`
+export type ProjectAction = "pause" | "resume" | "run_nightly" | `${SettingKey}:${string}` | `prioritize:${number}` | `deprioritize:${number}` | `start:${number}`
 
 export type MergeTrainStatus =
   | "queued" | "updating" | "checks" | "ready" | "merged" | "agent" | "conflicts" | "checking"
@@ -167,7 +167,7 @@ export type Component = "poller" | "deployer" | "rc"
 
 export type Disk = { freeGb: number; totalGb: number; minFreeGb: number; warnPct: number }
 
-export type RunProgress = { phase: string; rework?: number | null; risk: "low" | "medium" | "high" | null; tasks: number | null }
+export type RunProgress = { phase: string; rework?: number | null; risk: "low" | "medium" | "high" | null; scope?: "affected" | "full" | null; tasks: number | null }
 
 export type ProjectSummary = {
   slug: string
@@ -191,8 +191,17 @@ export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention"
   mergeTrain: MergeTrain | null
   devMissingSecrets: { tag: string; since: string; missing: { name: string; path: string; hint: string; commit?: string; title?: string; pr?: number }[] } | null
   settings: Setting[] | null
+  nightly: Nightly | null
   health: Record<Component, { updated: string | null; last: string }>
   snapshot: Snapshot | null
+}
+
+// The project's nightly workflow: how the runner can start it, and its latest run.
+export type Nightly = {
+  workflow: string
+  trigger: "repository_dispatch" | "workflow_dispatch" | "none"
+  requested: string | null
+  last: { databaseId: number; status: string; conclusion: string; event: string; createdAt: string; updatedAt: string; url: string } | null
 }
 
 export type RunEvent =

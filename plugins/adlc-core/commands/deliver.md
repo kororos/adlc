@@ -1,6 +1,6 @@
 ---
 description: Deliver a GitHub issue end-to-end (spec → design → tests → build → verify → QA → review → PR) using ADLC subagents.
-argument-hint: <issue-number> [--rework [--conflicts]]
+argument-hint: <issue-number> [--rework [--conflicts]] [--scope affected|full]
 ---
 
 You are the **ADLC delivery lead** for issue #$ARGUMENTS. You orchestrate. You never read source files, diffs or logs yourself. Subagents do that and return status blocks (see the handoff-contracts skill). Keep your own context small.
@@ -10,6 +10,10 @@ Agents (subagent_type, all prefixed `adlc-core:`): `codebase-scout`, `requiremen
 **Foreground only:** run every subagent in the foreground and wait for its status block. Never use `run_in_background` for an Agent or Bash call. In unattended runs (`claude -p`) the run ends as soon as you end your turn, and anything still running in the background is killed. For parallel work, put several Agent calls in one message: they run at the same time and all return before you continue. Don't end your turn until the run reaches an end state with its labels set (PR opened, `adlc:needs-info`, `adlc:blocked`, or Abort).
 
 Every subagent prompt must contain the issue number, the run dir `.adlc/runs/<n>/`, the feature branch, the default branch and the attempt number where relevant. Nothing else is needed, because the files carry the context.
+
+**Verify scope** (`--scope` in the arguments; the poller passes it from the `verify_scope` switch or the issue's `adlc:verify-full` / `adlc:verify-affected` label; without it: `full`). Record it as `scope` in `state.json` at the start of every run, including reworks (the arguments win over an earlier value).
+- `full`: build-runner's verifies before Review and before release run in **full** mode, as below.
+- `affected`: wherever this command says **full** verify, use build-runner's **affected** mode instead (lint, typecheck, arch_check and build on everything; tests only for what the branch affects). There is no full-suite run in this session: the PR's CI runs the whole suite before anything merges, and a red CI comes back as a rework. qa-engineer runs only the `per_run` selection. Pass the scope to build-runner, qa-engineer and the release-manager.
 
 ## 0. Setup
 - `gh issue view <n> --json title,body,comments,labels,author` → write `.adlc/runs/<n>/issue.md`. **Trust check:** the issue is trusted if its author is a repo collaborator (`gh api repos/{owner}/{repo}/collaborators/<login>` succeeds), or is ADLC's own identity (`adlc-gh-token --identity` prints `<app>[bot]`; issue authors show as `app/<app>`, e.g. the backlog from `/adlc-core:plan-backlog`), or a collaborator added its `adlc:ready` label (issue events). Otherwise stop with label `adlc:needs-human-review`. Comments from anyone who isn't a collaborator or ADLC itself are left out of `issue.md`.
@@ -27,7 +31,7 @@ Every subagent prompt must contain the issue number, the run dir `.adlc/runs/<n>
       - any other test: don't change the code for it. Say so in the reply, with the evidence (which runs passed and failed).
 
     If only environment or flaky failures remain and there are no conflicts and no person's requests to act on, skip the fix loop, reply on the PR, set `adlc:blocked` with the reason (as in Abort, without `-aborted` in `state.json`), and stop.
-  2. Go through debugger (with `rework-<k>.md` as the findings) → build-runner (→ qa-engineer if UI changed) → Review (§7) → push to the **same** branch, so the PR updates. In `state.json`, set `rework: <k>` and keep `phase` on the step in progress, with the normal phase names, so the dashboard shows where the rework is: `build` while the debugger fixes, `verify` for build-runner, `qa` for qa-engineer, `review` for Review, `release` while pushing, `release-done` once pushed. Keep the other fields (`risk`, `waves`, `retries`). The phase commits stay `chore(adlc): rework-<k> for #<n>`. Do only what was asked plus what the checks need. A request that conflicts with the spec, the architecture or a policy is not applied: explain why in the reply.
+  2. Go through debugger (with `rework-<k>.md` as the findings) → build-runner (full mode, or affected with scope affected; plus the checks that failed in CI) (→ qa-engineer if UI changed) → Review (§7) → push to the **same** branch, so the PR updates. In `state.json`, set `rework: <k>` and keep `phase` on the step in progress, with the normal phase names, so the dashboard shows where the rework is: `build` while the debugger fixes, `verify` for build-runner, `qa` for qa-engineer, `review` for Review, `release` while pushing, `release-done` once pushed. Keep the other fields (`risk`, `waves`, `retries`). The phase commits stay `chore(adlc): rework-<k> for #<n>`. Do only what was asked plus what the checks need. A request that conflicts with the spec, the architecture or a policy is not applied: explain why in the reply.
   3. Reply on the PR with one line per request: done (with commit) or not done and why. Keep the PR open. Auto-merge policy and `adlc:needs-human-review` stay as they were. Set the label `adlc:pr-open`, remove `adlc:in-progress`. Final output `pr-open`.
 - Determine the default branch. Create `adlc/<n>-<slug>` from an up-to-date `origin/<default>`. If the branch already exists locally or on origin (and it is not a rework, see above), resume: fetch it, read `state.json` and continue from the recorded phase. **A recorded `<phase>-aborted` means a person relabelled the blocked issue `adlc:ready`: that is a retry, not a reason to stop.** Read the issue comments after the abort comment (the owner's notes, e.g. what was fixed in the environment), add 1 to `retries` in `state.json`, and restart that phase at attempt 1 with fresh attempt counters. If it aborts again for the same reason, the abort comment says so explicitly.
 - `gh issue edit <n> --remove-label adlc:ready --add-label adlc:in-progress`.
@@ -50,13 +54,13 @@ test-designer → failing acceptance tests committed on the feature branch.
 - A blocked implementer → run the feature-architect once to revise that task. If it is blocked again, go to **Abort**.
 
 ## 5. Verify (attempt a = 1..retries.build)
-build-runner → `verify-<a>.md` (starts the env if needed, runs lint/typecheck/arch_check/build/test). The first verify is **full**.
+build-runner → `verify-<a>.md` (starts the env if needed, runs lint/typecheck/arch_check/build/test). The first verify is **full** (`affected` with scope affected).
 - pass → step 6.
 - fail → debugger (last attempt: pass `model: "opus"`), then re-verify in **focused** mode (the previous failures and the changed code only).
 - Still failing, or the debugger says it's environmental → **Abort**.
 
 ## 6. QA (only if design.md has e2e ACs or the change touches UI; attempt q = 1..2)
-qa-engineer → `qa-<q>.md`, with exploratory = `adlc.build.yaml testing.exploratory`.
+qa-engineer → `qa-<q>.md`, with exploratory = `adlc.build.yaml testing.exploratory` and the scope.
 - Blocking failures → debugger with the QA report → build-runner (focused) → qa-engineer again.
 - Flaky flows reported → open a follow-up issue labelled `adlc:flaky` (title + flow name + run link) and continue.
 - Still failing after q=2 → **Abort**.
@@ -67,7 +71,7 @@ qa-engineer → `qa-<q>.md`, with exploratory = `adlc.build.yaml testing.explora
 - Still blocking after the last round → **Abort**.
 
 ## 8. Release
-**Final full verify:** if any commit landed after the last **full** verify (focused verifies, QA or review fixes), run build-runner in full mode first. Fail → debugger → step 5 (it counts as a verify attempt). Then run `env.down` and the release-manager with the risk tier and the auto-merge policy (`autonomy.auto_merge`, default `[low, medium]`). If a proposed ADR exists, the release-manager notes it at the top of the PR body.
+**Final full verify:** if any commit landed after the last **full** verify (focused verifies, QA or review fixes), run build-runner in full mode first (with scope affected: in affected mode, after the last affected verify). Fail → debugger → step 5 (it counts as a verify attempt). Then run `env.down` and the release-manager with the risk tier, the scope and the auto-merge policy (`autonomy.auto_merge`, default `[low, medium]`). If a proposed ADR exists, the release-manager notes it at the top of the PR body.
 
 ## Abort
 Run `env.down`. Commit and push what exists. Record `<phase>-aborted` in `state.json`. Comment on the issue with phase, reason, what a person needs to do, and the last report paths (≤ 10 lines). **Never set `adlc:blocked` without that comment.** Set label `adlc:blocked`, remove `adlc:in-progress`. Stop.

@@ -35,6 +35,11 @@ const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<st
     what: "A PR behind main is updated and re-checked before it merges (always), or only when main changed files it changes too, or lockfiles, migrations or CI config (overlap). Overlap needs \"Require branches to be up to date\" off in branch protection.",
     values: { always: "always", overlap: "only on overlap" },
   },
+  verify_scope: {
+    title: "Tests during delivery",
+    what: "What the agent's own verify runs: the tests the change affects, plus lint, typecheck, arch checks and build on everything (affected), or the whole suite (full). PR CI always runs the full suite before a merge. The label adlc:verify-full or adlc:verify-affected on an issue overrides this for that issue.",
+    values: { affected: "affected", full: "full" },
+  },
 }
 const SOURCE: Record<Setting["source"], string> = {
   dashboard: "set here", env: "set on the dev server", "adlc.yaml": "from adlc.yaml", default: "default",

@@ -14,6 +14,7 @@ commands:
   build:      pnpm -r build
   test:       pnpm -r test -- --ci       # unit + integration + component
   test_file:  pnpm --filter {package} test -- {file}
+  # test_affected: pnpm --filter "...[{base}]" test -- --ci --changed {base}   # optional: the tests a branch affects (verify_scope affected); without it the build-runner works the selection out
   audit:      pnpm audit --prod --json
 
 env:                                     # lifecycle per testing-contract; ADLC_RUN is exported

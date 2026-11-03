@@ -2,6 +2,9 @@ name: nightly
 on:
   schedule: [{ cron: "0 2 * * *" }]
   workflow_dispatch:
+  # "Run now" on the ADLC dashboard (Health → Nightly checks). The agents' token can send it (Contents
+  # write) but can't dispatch workflows (Actions read-only). Never add this trigger to a deploy workflow.
+  repository_dispatch: { types: [adlc-nightly] }
 permissions: { contents: read, issues: write }
 
 jobs:

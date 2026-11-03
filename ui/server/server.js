@@ -26,9 +26,9 @@ const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "public")
 const SWITCHES = {
   merge_train: ["on", "dry-run", "off"], ci_auto_rework: ["on", "off"], keep_prs_current: ["on", "off"],
   rework_first: ["on", "off"], max_open_prs: ["off", "2", "3", "4", "5", "6", "8"],
-  update_before_merge: ["always", "overlap"],
+  update_before_merge: ["always", "overlap"], verify_scope: ["affected", "full"],
 }
-const ACTIONS = new Set(["pause", "resume",
+const ACTIONS = new Set(["pause", "resume", "run_nightly",
   ...Object.entries(SWITCHES).flatMap(([k, vs]) => [...vs, "default"].map((v) => `${k}:${v}`))])
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" }, trustProxy: true, bodyLimit: 16 * 1024 })
@@ -151,7 +151,7 @@ function state(p) {
     // A rework records its number in `rework` and the step in `phase`; older runs wrote phase "rework-<k>".
     const phase = String(j.phase ?? "")
     const rework = Number.isInteger(j.rework) ? j.rework : Number(/^rework-(\d+)/.exec(phase)?.[1] ?? 0) || null
-    return { phase, rework, risk: j.risk ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null }
+    return { phase, rework, risk: j.risk ?? null, scope: j.scope ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null }
   }
   const active = running.map((n) => ({ issue: n, title: titles.get(n) ?? "", run: all.find((r) => r.issue === n) ?? null, progress: runState(n) }))
   let backoffUntil = null
@@ -172,6 +172,8 @@ function state(p) {
   // The merge train (approved agent PRs merged one after another), written by the poller.
   const mergeTrain = readJson(st("merge_train.json"))
   const settings = readJson(st("settings.json"))?.settings ?? null
+  // The nightly workflow and its latest run (started from the dashboard with run_nightly), written by the poller.
+  const nightly = readJson(st("nightly.json"))
   // Dev secrets the deployer found missing (the dev deploy waits for them), written by the deployer.
   const devMissingSecrets = readJson(st("dev_missing_secrets.json"))
   let dockerUsage = null
@@ -184,7 +186,7 @@ function state(p) {
     ...p,
     paused: fs.existsSync(st("paused")),
     loggedIn: fs.existsSync(st("logged_in")),
-    backoffUntil, pending, devDeployed, devMissingSecrets, dockerUsage, mergeTrain, settings, active, health,
+    backoffUntil, pending, devDeployed, devMissingSecrets, dockerUsage, mergeTrain, settings, nightly, active, health,
     snapshot,
   }
 }

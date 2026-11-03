@@ -8,6 +8,7 @@ import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
 import { AutomationCard } from "@/components/automation"
 import { HostsCard } from "@/components/hosts"
+import { NightlyCard } from "@/components/nightly"
 import { CiTab } from "@/components/ci"
 import { DependencyGraph } from "@/components/dependency-graph"
 import { EpicRunNext, EpicsTab } from "@/components/epics"
@@ -123,7 +124,14 @@ function NowTab({ p }: { p: Project }) {
                 {a.run && <Link to="/p/$slug/runs/$file" params={{ slug: p.slug, file: a.run.file }} className="text-primary hover:underline">open full log</Link>}
               </CardDescription>
             </div>
-            {a.progress?.risk && <RiskBadge risk={a.progress.risk} />}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {a.progress?.scope && (
+                <Badge variant="outline" title={a.progress.scope === "full" ? "The agent's verifies run the full test suite" : "The agent's verifies run the affected tests; CI runs the full suite"}>
+                  {a.progress.scope === "full" ? "full tests" : "affected tests"}
+                </Badge>
+              )}
+              {a.progress?.risk && <RiskBadge risk={a.progress.risk} />}
+            </div>
           </div>
           <PhaseStepper progress={a.progress} />
         </CardHeader>
@@ -556,6 +564,7 @@ function HealthTab({ p }: { p: Project }) {
   return (
     <div className="grid gap-4">
       <AutomationCard p={p} />
+      <NightlyCard p={p} />
       <DiskCard dockerUsage={p.dockerUsage} />
       <HostsCard />
       <div className="grid gap-3 md:grid-cols-3">

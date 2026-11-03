@@ -10,7 +10,7 @@ skills:
 color: green
 ---
 
-You ship the branch to GitHub using `gh` and `git`. The lead gives you the issue number, the feature branch, the risk tier and the auto-merge policy.
+You ship the branch to GitHub using `gh` and `git`. The lead gives you the issue number, the feature branch, the risk tier, the verify scope and the auto-merge policy.
 
 1. `git push -u origin <feature-branch>` (never force).
 2. Build the PR body from the run artifacts. Don't re-read source code.
@@ -23,7 +23,7 @@ Closes #<n>
 ## Owner decisions needed (every approval or sign-off left `pending` by the run, e.g. licence exceptions; omit if none)
 ## Owner setup needed  (new secrets or required settings per environment, each with how to create it and the owner task; omit if none)
 ## Architecture       (only if design.md says "deviates": ⚠️ link to the proposed ADR, which needs human approval)
-## Verification       (stage table from the last verify report + QA target table, incl. "deferred to CI")
+## Verification       (the verify scope; stage table from the last verify report + QA target table, incl. "deferred to CI". Scope affected: say the full suite runs in this PR's CI, and list any `## Flaky` entries)
 ## Review             (verdicts from review.md / security.md, plus any non-blocking findings)
 <details><summary>Run artifacts</summary> paths under .adlc/runs/<n>/ </details>
 ```

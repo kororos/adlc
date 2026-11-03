@@ -239,9 +239,20 @@ launch() { # launch <n> <title>
     mode=" --rework"
     [ "$pr_state" = CONFLICTING ] && mode=" --rework --conflicts"
   fi
+  # How much the run's own verifies test (verify_scope): adlc:verify-full / adlc:verify-affected on the
+  # issue win over the switch. Read at every start, so a relabel applies from the next rework on.
+  local scope labels
+  labels=",$(gh issue view "$n" -R "$R" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null),"
+  case $labels in
+    *,adlc:verify-full,*) scope=full ;;
+    *,adlc:verify-affected,*) scope=affected ;;
+    *) scope=$(setting verify_scope) ;;
+  esac
+  [ "$scope" = full ] || scope=affected
+  mode="$mode --scope $scope"
   label "$n" adlc:ready adlc:in-progress
   gh issue edit "$n" -R "$R" --remove-label "$PRIORITY_LABEL" >/dev/null 2>&1 || true
-  log "#$n: starting delivery${mode:+ (rework of its open PR)} in $wt"
+  log "#$n: starting delivery${pr_state:+ (rework of its open PR)}, $scope verify, in $wt"
   (
     cd "$wt" || exit 1
     ADLC_MODE=unattended ADLC_RUN=$n \
@@ -332,7 +343,8 @@ ci_auto_rework|.autonomy.ci_auto_rework|on|on off
 keep_prs_current|.autonomy.keep_prs_current|on|on off
 rework_first|.autonomy.rework_first|on|on off
 max_open_prs|.autonomy.max_open_prs|off|off 2 3 4 5 6 8
-update_before_merge|.autonomy.update_before_merge|always|always overlap"
+update_before_merge|.autonomy.update_before_merge|always|always overlap
+verify_scope|.autonomy.verify_scope|affected|affected full"
 setting_def() { grep "^$1|" <<<"$SETTINGS"; }
 norm_value() { case $1 in true|on|yes) echo on ;; false|off|no) echo off ;; *) echo "$1" ;; esac; }
 setting() { # setting <key> → effective value
@@ -734,6 +746,50 @@ Please review those changes and approve again to put it back in the merge train 
     && mv "$TRAIN_FILE.tmp" "$TRAIN_FILE"
 }
 
+# ── Nightly run on demand ────────────────────────────────────────────────────
+# The project's nightly workflow (adlc.yaml ci.nightly_workflow, default nightly.yml), started from the
+# dashboard. The agents' token has Actions read-only, so it sends a repository_dispatch (event type
+# adlc-nightly, needs Contents write only), which the workflow must list under `on:`. Without that trigger
+# it falls back to workflow_dispatch, which needs Actions read and write on the token.
+NIGHTLY_EVENT=adlc-nightly
+nightly_workflow() { cfg_raw '.ci.nightly_workflow' nightly.yml; }
+nightly_trigger() { # → repository_dispatch | workflow_dispatch | none (no such workflow on the default branch)
+  local f; f="$REPO_DIR/.github/workflows/$(nightly_workflow)"
+  [ -f "$f" ] || { echo none; return; }
+  if yq -e '.on.repository_dispatch' "$f" >/dev/null 2>&1; then echo repository_dispatch
+  elif yq -e '.on.workflow_dispatch' "$f" >/dev/null 2>&1; then echo workflow_dispatch
+  else echo none; fi
+}
+run_nightly() {
+  local wf trigger err
+  wf=$(nightly_workflow); trigger=$(nightly_trigger)
+  case $trigger in
+    repository_dispatch)
+      if err=$(gh api "repos/$R/dispatches" -f event_type="$NIGHTLY_EVENT" 2>&1 >/dev/null); then
+        log "nightly: started $wf (from the dashboard)"; date -u +%FT%TZ >"$STATE_DIR/nightly_requested"
+      else log "WARN: nightly: could not start $wf: ${err:-unknown error}"; fi ;;
+    workflow_dispatch)
+      if err=$(gh workflow run "$wf" -R "$R" --ref "$(default_branch)" 2>&1 >/dev/null); then
+        log "nightly: started $wf (from the dashboard)"; date -u +%FT%TZ >"$STATE_DIR/nightly_requested"
+      elif [[ $err == *"403"* || $err == *"Resource not accessible"* ]]; then
+        log "WARN: nightly: the agents' token can't start workflows (Actions is read-only). Add 'repository_dispatch: { types: [$NIGHTLY_EVENT] }' under 'on:' in $wf"
+      else log "WARN: nightly: could not start $wf: $err"; fi ;;
+    *) log "WARN: nightly: no workflow .github/workflows/$wf with a manual trigger on $(default_branch)" ;;
+  esac
+  write_nightly
+}
+# state/nightly.json for the dashboard: the workflow, how it can be started, and its latest run.
+write_nightly() {
+  local wf trigger last
+  wf=$(nightly_workflow); trigger=$(nightly_trigger)
+  last='null'
+  [ "$trigger" = none ] || last=$(gh run list -R "$R" --workflow "$wf" --limit 1 \
+    --json databaseId,status,conclusion,event,createdAt,updatedAt,url --jq '.[0] // null' 2>/dev/null) || return 0
+  jq -n --arg wf "$wf" --arg trigger "$trigger" --arg requested "$(cat "$STATE_DIR/nightly_requested" 2>/dev/null)" \
+    --argjson last "${last:-null}" '{workflow:$wf, trigger:$trigger, requested:(if $requested == "" then null else $requested end), last:$last}' \
+    >"$STATE_DIR/nightly.json.tmp" 2>/dev/null && mv "$STATE_DIR/nightly.json.tmp" "$STATE_DIR/nightly.json"
+}
+
 # ── ADLC dashboard ────────────────────────────────────────────────────────────
 # The dashboard (adlc ui) has no GitHub credentials and can't write runner state: it reads a
 # snapshot written here, and asks for actions by dropping request files that are applied here.
@@ -751,6 +807,7 @@ apply_ui_requests() {
     case $action in
       pause)  touch "$STATE_DIR/paused"; log "paused from the dashboard" ;;
       resume) rm -f "$STATE_DIR/paused"; log "resumed from the dashboard" ;;
+      run_nightly) run_nightly ;;
       prioritize:[0-9]*) prioritize "${action#*:}" ;;
       deprioritize:[0-9]*) deprioritize "${action#*:}" ;;
       start:[0-9]*) start_issue "${action#*:}" ;;
@@ -883,6 +940,14 @@ cleanup() {
   find "$LOG_DIR/runs" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
 }
 
+# The per-issue verify_scope overrides, created once so they can be picked in GitHub's label menu.
+ensure_scope_labels() {
+  gh label create adlc:verify-full -R "$R" --color 5319E7 \
+    --description "ADLC: this issue's run verifies with the full test suite (overrides verify_scope)" >/dev/null 2>&1 || true
+  gh label create adlc:verify-affected -R "$R" --color C5DEF5 \
+    --description "ADLC: this issue's run tests only what it affects; CI runs the full suite (overrides verify_scope)" >/dev/null 2>&1 || true
+}
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 ensure_dirs
 recovered=0
@@ -896,7 +961,7 @@ while :; do
     log "ERROR: GitHub rejects the gh_pat token (expired or wrong scope). Fix with 'adlc secrets $ADLC_SLUG' + 'adlc up $ADLC_SLUG'"
   fi
   if ! sync_repo; then log "WARN: fetch/sync failed"; sleep "$POLL_INTERVAL"; continue; fi
-  [ "$recovered" = 1 ] || { recover_interrupted; recovered=1; }
+  [ "$recovered" = 1 ] || { recover_interrupted; ensure_scope_labels; recovered=1; }
   apply_ui_requests
   if [ -f "$STATE_DIR/paused" ]; then
     [ $((i % 10)) = 0 ] && log "paused (adlc resume $ADLC_SLUG)"
@@ -907,6 +972,7 @@ while :; do
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup
+  [ $((i % 5)) = 0 ] && write_nightly
   [ $((i % HOUSEKEEP_EVERY)) = 1 ] && housekeep
   write_snapshot
   write_settings

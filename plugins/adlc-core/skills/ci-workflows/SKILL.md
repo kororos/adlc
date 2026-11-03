@@ -24,6 +24,6 @@ Templates are in `templates/`. Copy them to `.github/workflows/` and adapt. Rule
 | `ci.yml` | PR and main checks from `adlc.build.yaml` |
 | `publish.yml` | build and push images to the registry (`registry.namespace`, `registry.images` in adlc.yaml) |
 | `release.yml` | release-please release PR (when `release.tool` is release-please); dispatches the required-check workflows on it |
-| `nightly.yml` | full test and e2e suite on main; opens or updates an `adlc:regression` issue on failure |
+| `nightly.yml` | full test and e2e suite on main; opens or updates an `adlc:regression` issue on failure. `repository_dispatch` type `adlc-nightly` is the dashboard's "Run now" (the only workflow that may listen to it: the agents' token can send it) |
 
 Stack-specific e2e jobs (`e2e-web`, `e2e-android`, `e2e-ios`) are in the stack pack (for React Native: `stack-react-native:rn-test-env`, `templates/e2e.yml`).
