@@ -167,7 +167,7 @@ export type Component = "poller" | "deployer" | "rc"
 
 export type Disk = { freeGb: number; totalGb: number; minFreeGb: number; warnPct: number }
 
-export type RunProgress = { phase: string; rework?: number | null; risk: "low" | "medium" | "high" | null; scope?: "affected" | "full" | null; tasks: number | null }
+export type RunProgress = { phase: string; rework?: number | null; risk: "low" | "medium" | "high" | null; scope?: "affected" | "auto" | "full" | null; tasks: number | null }
 
 export type ProjectSummary = {
   slug: string

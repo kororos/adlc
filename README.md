@@ -549,6 +549,7 @@ Unattended: the poller runs the same command for each `adlc:ready` issue, in tha
 **How much the agent tests** (`verify_scope`, dashboard → Health → Automation → **Tests during delivery**, or `adlc.yaml → autonomy.verify_scope`):
 - `affected` (default): lint, typecheck, arch checks and build run on everything. Tests run only for what the branch affects: the packages it changed and the packages that depend on them, and in those only the test files related to the change (vitest `--changed`), plus every test file it added or changed. A change to something tests use without importing it (migrations, seed data, test setup, config) runs the whole suite of the package that contains it (a migration in `apps/api` → the whole API suite), and the related tests elsewhere. Root-level changes (lockfile, root config, the test environment's compose files, `adlc.build.yaml`) run every selected package's whole suite. QA runs the `@smoke` flows and the flows the change affects. A failure in a test file the branch didn't touch is run once more on its own; if it passes, it's reported as flaky instead of being debugged. The full suite runs in the PR's CI, which must be green before anything merges; a red CI goes back to the agent as a rework. A project can define its own selection as `commands.test_affected` in `adlc.build.yaml` (`{base}` is the default branch).
 - `full`: every verify before Review and before release runs the whole suite, as before.
+- `auto`: `full` for high-risk issues, `affected` for low and medium. A new issue's risk is known only after Design, so the run decides then (the Now tab shows "tests: auto" until it does); a rework uses the risk already recorded.
 - **Per issue:** the label `adlc:verify-full` or `adlc:verify-affected` on an issue overrides the switch for that issue (the runner creates both labels). The scope is read whenever a run starts, so a label added mid-run applies from the next rework. The dashboard's **Now** tab shows "affected tests" or "full tests" next to the risk, and the PR's Verification section says which ran.
 - The exhaustive runs are every PR's CI, `main`'s CI after each merge, and the nightly workflow (web e2e, Android, audit).
 
@@ -623,7 +624,7 @@ The re-approve comment also shows the **conflict resolutions** on their own: wha
 - `rework_first` (default on): issues whose PR needs work (conflicts, failed checks, your review) run before new issues. The Queue tab marks them "rework".
 - `max_open_prs` (default off; e.g. 3): no new issue starts while that many agent PRs are open, waiting for your review, a merge or a rework. Reworks still run. The Queue tab and `adlc status` say when new issues are held back.
 - `update_before_merge` (default always): `overlap` merges green PRs that fell behind without another CI run when the base didn't touch what they change. See the merge train above.
-- `verify_scope` (default affected): how much the agent's own verifies test. See **How much the agent tests** above.
+- `verify_scope` (default affected; also auto and full): how much the agent's own verifies test. See **How much the agent tests** above.
 
 ### Risk tiers and merging
 | Risk | Typical changes | Review | Merge |

@@ -1,6 +1,6 @@
 ---
 description: Deliver a GitHub issue end-to-end (spec → design → tests → build → verify → QA → review → PR) using ADLC subagents.
-argument-hint: <issue-number> [--rework [--conflicts]] [--scope affected|full]
+argument-hint: <issue-number> [--rework [--conflicts]] [--scope affected|auto|full]
 ---
 
 You are the **ADLC delivery lead** for issue #$ARGUMENTS. You orchestrate. You never read source files, diffs or logs yourself. Subagents do that and return status blocks (see the handoff-contracts skill). Keep your own context small.
@@ -12,6 +12,7 @@ Agents (subagent_type, all prefixed `adlc-core:`): `codebase-scout`, `requiremen
 Every subagent prompt must contain the issue number, the run dir `.adlc/runs/<n>/`, the feature branch, the default branch and the attempt number where relevant. Nothing else is needed, because the files carry the context.
 
 **Verify scope** (`--scope` in the arguments; the poller passes it from the `verify_scope` switch or the issue's `adlc:verify-full` / `adlc:verify-affected` label; without it: `full`). Record it as `scope` in `state.json` at the start of every run, including reworks (the arguments win over an earlier value).
+- `auto`: `full` if the risk is high, else `affected`. A new issue keeps `scope: auto` until Design records the risk, then sets `scope` to the result; a rework decides at the start from the recorded `risk` (or the PR's `adlc:risk-*` label). Every verify and the subagents get the resolved value.
 - `full`: build-runner's verifies before Review and before release run in **full** mode, as below.
 - `affected`: wherever this command says **full** verify, use build-runner's **affected** mode instead (lint, typecheck, arch_check and build on everything; tests only for what the branch affects). There is no full-suite run in this session: the PR's CI runs the whole suite before anything merges, and a red CI comes back as a rework. qa-engineer runs only the `per_run` selection. Pass the scope to build-runner, qa-engineer and the release-manager.
 
@@ -43,7 +44,7 @@ Every subagent prompt must contain the issue number, the run dir `.adlc/runs/<n>
 2. requirements-analyst → `spec.md`. If **blocked**: post the questions as an issue comment, swap the label to `adlc:needs-info`, commit, push, stop.
 
 ## 2. Design
-feature-architect → `design.md` + tasks. Record `risk` in `state.json`. A proposed ADR forces risk = high. That's expected, so continue.
+feature-architect → `design.md` + tasks. Record `risk` in `state.json` (with scope `auto`, also the resolved `scope`). A proposed ADR forces risk = high. That's expected, so continue.
 
 ## 3. Tests first
 test-designer → failing acceptance tests committed on the feature branch.

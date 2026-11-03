@@ -26,7 +26,7 @@ const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "public")
 const SWITCHES = {
   merge_train: ["on", "dry-run", "off"], ci_auto_rework: ["on", "off"], keep_prs_current: ["on", "off"],
   rework_first: ["on", "off"], max_open_prs: ["off", "2", "3", "4", "5", "6", "8"],
-  update_before_merge: ["always", "overlap"], verify_scope: ["affected", "full"],
+  update_before_merge: ["always", "overlap"], verify_scope: ["affected", "auto", "full"],
 }
 const ACTIONS = new Set(["pause", "resume", "run_nightly",
   ...Object.entries(SWITCHES).flatMap(([k, vs]) => [...vs, "default"].map((v) => `${k}:${v}`))])

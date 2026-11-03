@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Activity, CircleCheck, CircleUserRound, CircleX, ClipboardList, Clock, ExternalLink, GitPullRequest,
-  ArrowUpToLine, Bug, HardDrive, HeartPulse, History, Inbox, KeyRound, Layers, ListOrdered, Network, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
+  ArrowUpToLine, Bug, HeartPulse, History, Inbox, KeyRound, Layers, ListOrdered, Network, MessageCircleQuestion, OctagonAlert, PartyPopper, Radio, Rocket, Server, TrainFront, Workflow,
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
@@ -126,8 +126,10 @@ function NowTab({ p }: { p: Project }) {
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               {a.progress?.scope && (
-                <Badge variant="outline" title={a.progress.scope === "full" ? "The agent's verifies run the full test suite" : "The agent's verifies run the affected tests; CI runs the full suite"}>
-                  {a.progress.scope === "full" ? "full tests" : "affected tests"}
+                <Badge variant="outline" title={a.progress.scope === "full" ? "The agent's verifies run the full test suite"
+                  : a.progress.scope === "auto" ? "Full test suite if the design rates it high risk, else the affected tests"
+                  : "The agent's verifies run the affected tests; CI runs the full suite"}>
+                  {a.progress.scope === "full" ? "full tests" : a.progress.scope === "auto" ? "tests: auto" : "affected tests"}
                 </Badge>
               )}
               {a.progress?.risk && <RiskBadge risk={a.progress.risk} />}
@@ -529,33 +531,15 @@ const COMPONENTS: { id: Component; name: string; what: string; staleAfterMin: nu
   { id: "rc", name: "Remote Control", what: "your sessions from the Claude app", staleAfterMin: 24 * 60 },
 ]
 
-function DiskCard({ dockerUsage }: { dockerUsage: Project["dockerUsage"] }) {
-  const q = useQuery({ queryKey: queryKeys.disk, queryFn: api.disk, refetchInterval: 60_000 })
-  const d = q.data
-  if (!d) return null
-  const usedPct = Math.round(((d.totalGb - d.freeGb) / d.totalGb) * 100)
-  const low = d.freeGb < d.minFreeGb, warn = d.freeGb < d.minFreeGb * 2 || usedPct >= d.warnPct
+// The agents' Docker engine (images, build cache, volumes), from the poller's housekeeping. The machines'
+// own disk, CPU and memory are in the Machines tiles below.
+function DockerUsage({ dockerUsage }: { dockerUsage: Project["dockerUsage"] }) {
+  if (!dockerUsage) return null
   return (
-    <div className={cn("grid gap-2 rounded-xl border bg-card p-4", low && "border-red-500/50")} data-testid="disk-card">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 font-medium"><HardDrive className="size-4 text-primary" />Dev server disk</span>
-        <span className={cn("text-sm tabular-nums", low ? "text-red-600" : warn ? "text-amber-600" : "text-muted-foreground")}>{d.freeGb} GB free of {d.totalGb} GB</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full", low ? "bg-red-500" : warn ? "bg-amber-500" : "bg-primary")} style={{ width: `${usedPct}%` }} />
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {low ? <>Below {d.minFreeGb} GB no new runs start. On the dev server: <code>adlc prune</code>.</>
-          : warn ? <>{usedPct}% used, above the {d.warnPct}% warning level. On the dev server: <code>adlc status</code> shows what uses it, <code>adlc prune</code> frees it.</>
-          : <>Housekeeping runs every few hours; below {d.minFreeGb} GB new runs wait.</>}
-      </p>
-      {dockerUsage && (
-        <p className="text-xs text-muted-foreground" data-testid="docker-usage">
-          <span className="font-medium text-foreground">Agents' Docker:</span> {dockerUsage.text}{" "}
-          <span className="whitespace-nowrap">(<Freshness iso={dockerUsage.updated} staleAfterMin={12 * 60} />)</span>
-        </p>
-      )}
-    </div>
+    <p className="text-xs text-muted-foreground" data-testid="docker-usage">
+      <span className="font-medium text-foreground">Agents' Docker:</span> {dockerUsage.text}{" "}
+      <span className="whitespace-nowrap">(<Freshness iso={dockerUsage.updated} staleAfterMin={12 * 60} />)</span>
+    </p>
   )
 }
 
@@ -565,8 +549,8 @@ function HealthTab({ p }: { p: Project }) {
     <div className="grid gap-4">
       <AutomationCard p={p} />
       <NightlyCard p={p} />
-      <DiskCard dockerUsage={p.dockerUsage} />
       <HostsCard />
+      <DockerUsage dockerUsage={p.dockerUsage} />
       <div className="grid gap-3 md:grid-cols-3">
         {COMPONENTS.map((c) => (
           <button key={c.id} type="button" onClick={() => setLog(c.id)}
