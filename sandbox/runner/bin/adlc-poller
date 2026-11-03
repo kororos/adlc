@@ -888,6 +888,29 @@ watch_closed_prs() {
   done
 }
 
+# ── An agent PR merged, its issue still open ─────────────────────────────────
+# A PR that says "Refs #<n>" instead of "Closes #<n>" (e.g. its [dev] ACs can only be checked on the
+# deployed image) leaves the issue open and adlc:pr-open with no PR. Hand it to the owner: relabel it
+# adlc:owner (the dashboard's Needs you → Your next tasks) and say what's left. Closing it is the owner's.
+watch_merged_open() {
+  local n pr merged done_dir="$STATE_DIR/merged-open"
+  mkdir -p "$done_dir"
+  for n in $(gh issue list -R "$R" --label adlc:pr-open --state open --limit 100 --json number --jq '.[].number' 2>/dev/null); do
+    is_running "$n" && continue
+    [ -z "$(gh pr list -R "$R" --state open --json headRefName --jq ".[] | select(.headRefName | startswith(\"adlc/$n-\")) | .headRefName" 2>/dev/null)" ] || continue
+    read -r pr merged < <(gh pr list -R "$R" --state merged --limit 100 --json number,headRefName,mergedAt \
+      --jq "[.[] | select(.headRefName | startswith(\"adlc/$n-\"))] | sort_by(.mergedAt) | last | select(. != null) | \"\(.number) \(.mergedAt)\"" 2>/dev/null)
+    [ -n "${pr:-}" ] || continue
+    [ -e "$done_dir/$pr" ] && continue
+    # GitHub closes a "Closes #<n>" issue right after the merge: give it a few minutes first.
+    [ $(( $(date +%s) - $(date -d "$merged" +%s 2>/dev/null || date +%s) )) -ge 300 ] || continue
+    label "$n" adlc:pr-open adlc:owner
+    : >"$done_dir/$pr"
+    comment "$n" "ADLC: PR #$pr is merged, but it didn't close this issue (it says \`Refs\`, not \`Closes\`), usually because some acceptance criteria can only be checked on the deployed environment. Check what's left, then close the issue. Until then it's an owner task (\`adlc:owner\`), and issues it blocks keep waiting."
+    log "#$n: PR #$pr merged without closing the issue; handed to the owner (adlc:owner)"
+  done
+}
+
 # ── Cleanup after merge/close ─────────────────────────────────────────────────
 # An issue's workspace: its test environment (and built images), worktree and local branches. Fails when
 # the worktree can't be removed.
@@ -968,7 +991,7 @@ while :; do
   else
     start_regressions
     promote_queued
-    [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; watch_closed_prs; merge_train; }
+    [ $((i % 2)) = 0 ] && { watch_pr_checks; watch_main_checks; watch_closed_prs; watch_merged_open; merge_train; }
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup

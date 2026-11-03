@@ -429,6 +429,7 @@ const LIFE_EDGES = [
   ["pr-open", "needs-human-review", "adlc", "M480,600 H640 V640", [488, 592], "reworks used up", "Checks still fail or conflicts remain after the automatic reworks: it's left to you."],
   ["needs-human-review", "merged", "you", "M640,696 V748 H480", [648, 728], "you approve → train", "Review and approve the PR: the merge train brings it up to date and merges it. Changes after your approval need a new approval."],
   ["pr-open", "queued", "you", "M280,600 H10 V178 H280", [18, 622], "PR closed unmerged → start over", "Close the PR without merging (also from blocked or needs-human-review): the branch is archived as adlc-closed/<n>-pr<PR>, the workspace removed, and the next run starts from main."],
+  ["pr-open", "merged", "you", null, null, "", "A PR that merged with Refs #<n> (not Closes) leaves the issue open, e.g. when ACs can only be checked on dev: ADLC relabels it adlc:owner with a comment. Check what's left and close the issue."],
   ["ready", "needs-human-review", "adlc", null, null, "", "The author isn't a collaborator: it isn't run automatically."],
   ["needs-human-review", "ready", "you", null, null, "", "Remove needs-human-review and add adlc:ready to approve an outside author's issue, or to give a PR another rework."],
 ]
