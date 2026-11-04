@@ -18,7 +18,7 @@ R="$ADLC_REPO"
 
 label() { # label <issue> <remove> <add>
   gh issue edit "$1" -R "$R" ${2:+--remove-label "$2"} ${3:+--add-label "$3"} >/dev/null 2>&1 \
-    || log "WARN: could not relabel #$1 (-$2 +$3)"
+    || { log "WARN: could not relabel #$1 (-$2 +$3)"; return 1; }
 }
 comment() { gh issue comment "$1" -R "$R" --body "$2" >/dev/null 2>&1 || log "WARN: could not comment on #$1"; }
 has_label() { gh issue view "$1" -R "$R" --json labels --jq "[.labels[].name] | index(\"$2\") != null" 2>/dev/null | grep -q true; }
@@ -423,9 +423,11 @@ request_rework() { # request_rework <pr> <issue> <head sha> <what> <comment> [al
   grep -qx "$sha" "$f" 2>/dev/null && return 0         # this commit was handled already
   tried=$(grep -c . "$f" 2>/dev/null || true); tried=${tried:-0}
   if [ "$tried" -ge "$max" ]; then
+    # Recorded only once the issue carries the label: until then no agent and no person is asked to act,
+    # and the merge train would wait for a rework that never comes. A failed relabel is retried next cycle.
+    label "$n" "" adlc:needs-human-review || return 0
     echo "$sha" >>"$f"
     gh pr comment "$pr" -R "$R" --body "ADLC: $what on \`${sha:0:7}\` after $tried automatic rework(s). Leaving it to a person." >/dev/null 2>&1 || true
-    label "$n" "" adlc:needs-human-review
     log "#$n: PR #$pr: $what after $tried rework(s); needs human review"
     return 0
   fi
@@ -610,6 +612,13 @@ auto_tiers_json() {
   # shellcheck disable=SC2086  # one tier per word
   jq -cn '$ARGS.positional | map(select(test("^[a-z]+$")))' --args $t
 }
+# A PR's automatic reworks are used up: the issue says so, or the rework counter went past the limit
+# (request_rework then hands it to a person). Either way no agent acts on it until a person does.
+reworks_used_up() { # reworks_used_up <pr> <issue>
+  local max tried; max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
+  has_label "$2" adlc:needs-human-review && return 0
+  tried=$(grep -c . "$CI_DIR/$1" 2>/dev/null); [ "${tried:-0}" -gt "$max" ]
+}
 train_entry() { jq -cn --argjson pr "$1" --argjson issue "$2" --arg status "$3" --arg detail "${4:-}" '{pr:$pr,issue:$issue,status:$status,detail:$detail}'; }
 merge_train() {
   local mode rows pr branch head base mergeable hold approved approvedAt changes risk automerge tiers n front="" entries=() status detail behind checks overlap f
@@ -657,7 +666,7 @@ merge_train() {
           elif [ "$checks" != GREEN ]; then status=failed; detail="risk $risk; checks failed ($checks): the agent reworks it"; fi
         fi
         if [ -n "$status" ]; then
-          if [ "$status" != checks ] && has_label "$n" adlc:needs-human-review; then
+          if [ "$status" != checks ] && reworks_used_up "$pr" "$n"; then
             if [ "$status" = conflicts ]; then detail="conflicts with $base"; else detail="checks failed ($checks)"; fi
             status=needs-you; detail="risk $risk; $detail; automatic reworks used up: fix it on the branch, or relabel #$n adlc:ready for another agent rework"
           fi
@@ -734,7 +743,7 @@ Please review those changes and approve again to put it back in the merge train 
     fi
     # Conflicts or failed checks after the automatic reworks: no agent acts on it until a person does, so it
     # mustn't hold up the PRs behind it.
-    if { [ "$status" = conflicts ] || [ "$status" = failed ]; } && has_label "$n" adlc:needs-human-review; then
+    if { [ "$status" = conflicts ] || [ "$status" = failed ]; } && reworks_used_up "$pr" "$n"; then
       status=needs-you; front=""
       detail="$detail; automatic reworks used up: fix it on the branch, or relabel #$n adlc:ready for another agent rework, then re-approve. Later PRs go ahead meanwhile"
       detail=${detail/: the agent resolves them, then you re-approve;/;}
