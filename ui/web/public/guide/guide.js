@@ -217,7 +217,7 @@ const TUTS = [
       c: "/adlc-core:architect\n/adlc-core:architect --resume   # continue later" },
     { t: "Plan the backlog", w: "Claude session", b: "Review milestones, epics, the issue table and the dependency graph. Nothing is created until you approve. Use <code>--revise</code> to add work to an existing backlog.",
       c: "/adlc-core:plan-backlog" },
-    { t: "Let it deliver", w: "dashboard", b: "The walking skeleton comes first; the poller then takes ready issues in dependency order. Watch it on the dashboard's <b>Now</b> tab (<b>What's happening</b>: each issue's delivery run, merge-train step and CI jobs in one row, plus the dev deploy and the nightly) and the <b>Queue</b> tab.",
+    { t: "Let it deliver", w: "dashboard", b: "The walking skeleton comes first; the poller then takes ready issues in dependency order. Watch it on the dashboard's <b>Now</b> tab (<b>What's happening</b>: each issue's delivery run, merge-train step and CI jobs in one row, plus the dev deploy with its publish run, and the nightly) and the <b>Queue</b> tab.",
       n: "Finish or push open session work before <code>adlc up</code> or <code>adlc restart</code>: a restart ends every app session, and old sessions don't reconnect." },
   ] },
   { id: "steer", title: "Steer delivery", when: "Day to day · from the dashboard", steps: [
@@ -346,6 +346,9 @@ const FIXES = [
   ["PRs", "The train says \"GitHub refused the merge\", but the PR is merged",
     "GitHub merged it and still answered the merge call with an error, as during its incidents. Current runners check the PR's state after an error and record it as merged.",
     ["Nothing to do: the card disappears on the train's next pass."]],
+  ["CI", "Dev waits for CI to publish, and there's no publish run",
+    "No workflow ran for that push to main: GitHub dropped the push event, as during its incidents, so the images are never built. Now's dev deploy line says so.",
+    ["Wait a little: GitHub sometimes delivers it late.", "Otherwise push a new commit to main (the next merge does it too).", "To start it by hand next time, add workflow_dispatch: to the publish workflow's on: (a project issue), then Actions → publish → Run workflow."]],
   ["PRs", "Approved PRs merge slowly: after each merge the others wait for a full CI run",
     "Branch protection's \"Require branches to be up to date before merging\" makes the merge train update every approved PR with main and re-run its checks after each merge, although most PRs don't touch what the previous one changed.",
     ["Turn off \"Require branches to be up to date before merging\" on main (Settings → Branches). Keep the required checks.", "Health → Automation → Update before merge: only on overlap. Green PRs then merge as they are, unless main changed files they change too, or lockfiles, migrations or CI config (autonomy.merge_train_always_update).", "main's own CI still runs after every merge; a failure becomes a regression issue that runs first."],

@@ -21,7 +21,11 @@ export type Activity = {
   items: ActivityItem[]
   trainQueued: TrainEntry[] // approved, waiting behind the front of the train
   background: LiveJob[]     // CI not tied to an agent issue: main after a merge, the nightly, release
-  deploy: { at: string | null; state: "idle" | "deploying" | "waiting-secrets" | "waiting-ci" | "error"; detail: string; since: string | null }
+  deploy: {
+    at: string | null; state: "idle" | "deploying" | "waiting-secrets" | "waiting-ci" | "error"; detail: string; since: string | null
+    publish: CiRun | null   // the publish run of the commit being deployed (or waited for)
+    noPublishRun: boolean   // waiting for CI, but GitHub has no publish run for that commit (a dropped push event)
+  }
   nightlyRunning: boolean
 }
 
@@ -86,18 +90,33 @@ export function buildActivity(p: Project): Activity {
   return { items: sorted, trainQueued, background, deploy: deployState(p), nightlyRunning: !!p.nightly?.last && p.nightly.last.status !== "completed" }
 }
 
+// The workflow run that publishes a commit's images: a run of that commit with a job on a publish runner
+// (adlc-publish label), else one whose workflow is named publish. The newest one if it ran more than once.
+const isPublish = (r: CiRun) => r.jobs.some((j) => j.labels.includes("adlc-publish") || j.role === "publish") || /publish/i.test(r.workflow)
+function publishRun(p: Project, sha: string | undefined): CiRun | null {
+  if (!sha) return null
+  const runs = (p.snapshot?.actions?.runs ?? []).filter((r) => r.sha === sha && isPublish(r))
+  return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+}
+
 // The dev deployer from its state files and its log's last line.
 function deployState(p: Project): Activity["deploy"] {
   const at = p.devDeployed
+  const idle = { at, state: "idle" as const, since: null, detail: "", publish: null, noPublishRun: false }
   const missing = p.devMissingSecrets
   if (missing?.missing.length) {
-    return { at, state: "waiting-secrets", since: missing.since, detail: `${missing.tag} waits for dev secret${missing.missing.length > 1 ? "s" : ""} ${missing.missing.map((m) => m.name).join(", ")}` }
+    return { ...idle, state: "waiting-secrets", since: missing.since, publish: publishRun(p, /^sha-([0-9a-f]{7})/.exec(missing.tag)?.[1]), detail: `${missing.tag} waits for dev secret${missing.missing.length > 1 ? "s" : ""} ${missing.missing.map((m) => m.name).join(", ")}` }
   }
   const last = p.health.deployer?.last ?? ""
-  const fresh = !!p.health.deployer?.updated && Date.now() - new Date(p.health.deployer.updated).getTime() < 15 * 60_000
+  const since = p.health.deployer?.updated ?? null
+  const fresh = !!since && Date.now() - new Date(since).getTime() < 15 * 60_000
   const msg = last.replace(/^\S+ \[deployer\] /, "")
-  if (fresh && /^deploying /.test(msg)) return { at, state: "deploying", since: p.health.deployer.updated, detail: msg }
-  if (fresh && /^waiting for CI to publish/.test(msg)) return { at, state: "waiting-ci", since: p.health.deployer.updated, detail: msg }
-  if (fresh && /^ERROR/.test(msg)) return { at, state: "error", since: p.health.deployer.updated, detail: msg.replace(/^ERROR: /, "") }
-  return { at, state: "idle", since: null, detail: "" }
+  const publish = publishRun(p, /\bsha-([0-9a-f]{7})\b/.exec(msg)?.[1])
+  if (fresh && /^deploying /.test(msg)) return { ...idle, state: "deploying", since, detail: msg, publish }
+  if (fresh && /^waiting for CI to publish/.test(msg)) {
+    // The snapshot holds the active runs and those finished in the last 6 h, so a missing one never started.
+    return { ...idle, state: "waiting-ci", since, detail: msg, publish, noPublishRun: !publish && !!p.snapshot?.actions && !p.snapshot.actions.error }
+  }
+  if (fresh && /^ERROR/.test(msg)) return { ...idle, state: "error", since, detail: msg.replace(/^ERROR: /, ""), publish }
+  return idle
 }

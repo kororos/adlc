@@ -106,6 +106,16 @@ export function ActivityPanel({ p, onOpenRun }: { p: Project; onOpenRun: (issue:
               <p className={cn("flex flex-wrap items-center gap-1.5", a.deploy.state === "error" || a.deploy.state === "waiting-secrets" ? "text-amber-600" : "")}>
                 <Rocket className="size-4" />Dev deploy: {a.deploy.detail}
                 {a.deploy.since && <span className="inline-flex items-center gap-1 text-muted-foreground"><Clock className="size-3.5" />{ago(a.deploy.since)}</span>}
+                {a.deploy.publish && (
+                  <a href={a.deploy.publish.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                    {a.deploy.publish.workflow} run{a.deploy.publish.status === "completed" ? ` (${a.deploy.publish.conclusion ?? "finished"})` : a.deploy.publish.status === "in_progress" ? ` (running ${since(a.deploy.publish.startedAt, now)})` : " (queued)"}
+                  </a>
+                )}
+              </p>
+            )}
+            {a.deploy.noPublishRun && (
+              <p className="text-xs text-amber-600">
+                GitHub has no publish run for this commit: the push event was probably dropped (GitHub incident). Push a new commit to main, or add <code>workflow_dispatch:</code> to the publish workflow to start it by hand.
               </p>
             )}
             {a.nightlyRunning && p.nightly?.last && (
