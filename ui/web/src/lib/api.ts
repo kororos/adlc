@@ -120,7 +120,7 @@ export type MergeTrainStatus =
 export type MergeTrain = {
   mode: "on" | "dry-run"
   updated: string
-  prs: { pr: number; issue: number; status: MergeTrainStatus; detail: string }[]
+  prs: { pr: number; issue: number; title?: string; status: MergeTrainStatus; detail: string }[]
 }
 
 export type Snapshot = {

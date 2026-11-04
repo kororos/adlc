@@ -619,7 +619,9 @@ reworks_used_up() { # reworks_used_up <pr> <issue>
   has_label "$2" adlc:needs-human-review && return 0
   tried=$(grep -c . "$CI_DIR/$1" 2>/dev/null); [ "${tried:-0}" -gt "$max" ]
 }
-train_entry() { jq -cn --argjson pr "$1" --argjson issue "$2" --arg status "$3" --arg detail "${4:-}" '{pr:$pr,issue:$issue,status:$status,detail:$detail}'; }
+# The PR's title comes from merge_train's loop ($title): the dashboard keeps showing it after the merge,
+# when the PR is no longer in its list of open PRs.
+train_entry() { jq -cn --argjson pr "$1" --argjson issue "$2" --arg status "$3" --arg detail "${4:-}" --arg title "${title:-}" '{pr:$pr,issue:$issue,title:$title,status:$status,detail:$detail}'; }
 merge_train() {
   local mode rows pr branch head base mergeable hold approved approvedAt changes risk automerge tiers n front="" entries=() status detail behind checks overlap f
   mode=$(train_mode)
@@ -629,7 +631,7 @@ merge_train() {
   # (and that isn't labelled adlc:needs-human-review) joins without one ("policy"), once its checks are green.
   tiers=$(auto_tiers_json); [[ "$tiers" == \[* ]] || tiers='[]'
   rows=$(gh api graphql -f query='query($o:String!,$r:String!){repository(owner:$o,name:$r){pullRequests(states:OPEN,first:50){nodes{
-      number headRefName headRefOid baseRefName mergeable createdAt autoMergeRequest{enabledAt} labels(first:20){nodes{name}}
+      number title headRefName headRefOid baseRefName mergeable createdAt autoMergeRequest{enabledAt} labels(first:20){nodes{name}}
       latestOpinionatedReviews(first:20,writersOnly:true){nodes{author{__typename login} state submittedAt commit{oid}}}}}}}' \
       -f o="${R%%/*}" -f r="${R##*/}" --jq '
       .data.repository.pullRequests.nodes[] | select(.headRefName | test("^adlc/[0-9]+-")) |
@@ -641,11 +643,12 @@ merge_train() {
       select($ok != null or $policy) |
       [.number, .headRefName, .headRefOid, .baseRefName, .mergeable, (($l | index("adlc:hold")) != null),
        (if $ok != null then $ok.commit.oid else "policy" end), (if $ok != null then $ok.submittedAt else .createdAt end),
-       ([$rv[] | select(.state == "CHANGES_REQUESTED")] | length > 0), ($risk // "-"), (.autoMergeRequest != null)] | @tsv' 2>/dev/null) \
+       ([$rv[] | select(.state == "CHANGES_REQUESTED")] | length > 0), ($risk // "-"), (.autoMergeRequest != null), (.title | gsub("[\t\n]"; " "))] | @tsv' 2>/dev/null) \
     || return 0   # GitHub unreachable: keep the last train state rather than writing an empty one
   rows=$(sort -t$'\t' -k8 <<<"$rows")
   mkdir -p "$CI_DIR"
-  while IFS=$'\t' read -r pr branch head base mergeable hold approved approvedAt changes risk automerge; do
+  local title
+  while IFS=$'\t' read -r pr branch head base mergeable hold approved approvedAt changes risk automerge title; do
     [ -n "$pr" ] || continue
     n=$(sed -E 's#^adlc/([0-9]+)-.*#\1#' <<<"$branch")
     if [ "$hold" = true ]; then entries+=("$(train_entry "$pr" "$n" hold "adlc:hold on the PR")"); continue; fi

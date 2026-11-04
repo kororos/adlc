@@ -217,7 +217,7 @@ const TUTS = [
       c: "/adlc-core:architect\n/adlc-core:architect --resume   # continue later" },
     { t: "Plan the backlog", w: "Claude session", b: "Review milestones, epics, the issue table and the dependency graph. Nothing is created until you approve. Use <code>--revise</code> to add work to an existing backlog.",
       c: "/adlc-core:plan-backlog" },
-    { t: "Let it deliver", w: "dashboard", b: "The walking skeleton comes first; the poller then takes ready issues in dependency order. Watch it on the dashboard's <b>Now</b> and <b>Queue</b> tabs.",
+    { t: "Let it deliver", w: "dashboard", b: "The walking skeleton comes first; the poller then takes ready issues in dependency order. Watch it on the dashboard's <b>Now</b> tab (<b>What's happening</b>: each issue's delivery run, merge-train step and CI jobs in one row, plus the dev deploy and the nightly) and the <b>Queue</b> tab.",
       n: "Finish or push open session work before <code>adlc up</code> or <code>adlc restart</code>: a restart ends every app session, and old sessions don't reconnect." },
   ] },
   { id: "steer", title: "Steer delivery", when: "Day to day · from the dashboard", steps: [

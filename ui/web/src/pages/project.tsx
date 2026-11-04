@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
+import { ActivityPanel } from "@/components/activity"
 import { AutomationCard } from "@/components/automation"
 import { HostsCard } from "@/components/hosts"
 import { NightlyCard } from "@/components/nightly"
@@ -20,9 +21,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useSidebar } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { api, queryKeys, type Component, type MergeTrain, type MergeTrainStatus, type Project, type PullRequest, type EpicItem, type QueueItem, type TriageItem } from "@/lib/api"
+import { api, queryKeys, type Component, type MergeTrain, type Project, type PullRequest, type EpicItem, type QueueItem, type TriageItem } from "@/lib/api"
 import { ago, dateTime, duration, usd } from "@/lib/format"
 import { currentPhaseLabel } from "@/lib/phases"
+import { TRAIN_LABEL, TRAIN_TONE } from "@/lib/train"
 import { cn } from "@/lib/utils"
 
 export type ProjectTab = "now" | "queue" | "epics" | "deps" | "attention" | "ci" | "history" | "health"
@@ -95,24 +97,29 @@ function IssueLink({ item, className }: { item: Pick<QueueItem, "number" | "titl
 
 function NowTab({ p }: { p: Project }) {
   const [selected, setSelected] = useState(0)
-  if (!p.active.length) {
-    const next = p.snapshot?.queue.find((i) => i.state === "ready")
-    return (
-      <EmptyState icon={Rocket} title={p.paused ? "The pipeline is paused" : "No delivery run is active"}>
-        {next ? <>Next up: <IssueLink item={next} />{p.paused ? ", once you resume." : "."}</> : "Nothing is ready to start: everything is waiting for blockers or for you."}
-      </EmptyState>
-    )
+  // "agent: …" in the overview opens that issue's run card below.
+  const openRun = (issue: number) => {
+    const i = p.active.findIndex((x) => x.issue === issue)
+    if (i >= 0) setSelected(i)
+    document.getElementById("run-card")?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
-  const a = p.active[Math.min(selected, p.active.length - 1)]
+  const next = p.snapshot?.queue.find((i) => i.state === "ready")
+  const a = p.active.length ? p.active[Math.min(selected, p.active.length - 1)] : null
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
+      <ActivityPanel p={p} onOpenRun={openRun} />
+      {!a ? (
+        <EmptyState icon={Rocket} title={p.paused ? "The pipeline is paused" : "No delivery run is active"}>
+          {next ? <>Next up: <IssueLink item={next} />{p.paused ? ", once you resume." : "."}</> : "Nothing is ready to start: everything is waiting for blockers or for you."}
+        </EmptyState>
+      ) : (<>
       {p.active.length > 1 && (
         <div className="flex gap-2">{p.active.map((x, i) => (
           <button key={x.issue} onClick={() => setSelected(i)}
             className={cn("rounded-full px-3 py-1 text-sm", i === selected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>#{x.issue}</button>
         ))}</div>
       )}
-      <Card>
+      <Card id="run-card" className="scroll-mt-4">
         <CardHeader className="gap-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
@@ -139,6 +146,7 @@ function NowTab({ p }: { p: Project }) {
         </CardHeader>
         <CardContent>{a.run ? <RunLog slug={p.slug} file={a.run.file} /> : <p className="text-muted-foreground">Waiting for the first output…</p>}</CardContent>
       </Card>
+      </>)}
     </div>
   )
 }
@@ -258,24 +266,8 @@ function QueueTab({ p, items, wip, epics }: { p: Project; items: QueueItem[]; wi
   )
 }
 
-const TRAIN_TONE: Partial<Record<MergeTrainStatus, string>> = {
-  "needs-reapproval": "text-amber-600 dark:text-amber-400",
-  "changes-requested": "text-amber-600 dark:text-amber-400",
-  conflicts: "text-amber-600 dark:text-amber-400",
-  failed: "text-red-600 dark:text-red-400",
-  blocked: "text-red-600 dark:text-red-400",
-  "needs-you": "text-red-600 dark:text-red-400",
-  ready: "text-emerald-600 dark:text-emerald-400",
-  merged: "text-emerald-600 dark:text-emerald-400",
-}
-const TRAIN_LABEL: Record<MergeTrainStatus, string> = {
-  queued: "queued", updating: "updating", checks: "checks running", ready: "ready to merge", merged: "merged",
-  agent: "agent working", conflicts: "conflicts", checking: "checking", failed: "checks failed", blocked: "blocked",
-  "needs-reapproval": "re-approve", "changes-requested": "changes requested", hold: "on hold", "needs-you": "needs you",
-}
-
 // Approved agent PRs, merged one after another by ADLC (re-approval needed when code changed after approval).
-function MergeTrainSection({ train, pulls }: { train: MergeTrain; pulls: PullRequest[] }) {
+function MergeTrainSection({ train, pulls, repo }: { train: MergeTrain; pulls: PullRequest[]; repo: string }) {
   const title = (n: number) => pulls.find((p) => p.number === n)
   const you = train.prs.filter((t) => t.status === "needs-reapproval").length
   return (
@@ -283,19 +275,21 @@ function MergeTrainSection({ train, pulls }: { train: MergeTrain; pulls: PullReq
       title={`${train.mode === "on" ? "Merge train" : "Merge train (dry run: nothing is merged)"}${you ? ` · ${you} to re-approve` : ""}`}>
       <ol className="grid gap-2">
         {train.prs.map((t, i) => {
-          const pr = title(t.pr)
+          // Merged PRs drop out of the open-PR list: the train keeps their title, and the links go to GitHub.
+          const name = title(t.pr)?.title || t.title
           return (
-            <li key={t.pr}>
-              <a href={pr?.url ?? "#"} target="_blank" rel="noreferrer"
-                className={cn("group flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border bg-card p-3 transition-colors hover:border-primary/40",
-                  t.status === "needs-reapproval" && "border-amber-500/50")}>
-                <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-medium tabular-nums">{i + 1}</span>
-                <span className="min-w-0 flex-1 truncate font-medium group-hover:text-primary">
-                  <span className="font-mono text-muted-foreground">PR #{t.pr}</span> {pr?.title ?? `#${t.issue}`}
-                </span>
-                <span className={cn("text-sm font-medium", TRAIN_TONE[t.status] ?? "text-muted-foreground")}>{TRAIN_LABEL[t.status] ?? t.status}</span>
-                <span className="w-full text-xs text-muted-foreground sm:w-auto">{t.detail}</span>
-              </a>
+            <li key={t.pr}
+              className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border bg-card p-3 transition-colors hover:border-primary/40",
+                t.status === "needs-reapproval" && "border-amber-500/50")}>
+              <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-medium tabular-nums">{i + 1}</span>
+              <span className="min-w-0 flex-1 truncate font-medium">
+                <a href={`https://github.com/${repo}/pull/${t.pr}`} target="_blank" rel="noreferrer" className="hover:text-primary">
+                  <span className="font-mono text-muted-foreground">PR #{t.pr}</span> {name}
+                </a>{" "}
+                <a href={`https://github.com/${repo}/issues/${t.issue}`} target="_blank" rel="noreferrer" className="font-mono text-xs text-muted-foreground hover:text-primary">#{t.issue}</a>
+              </span>
+              <span className={cn("text-sm font-medium", TRAIN_TONE[t.status] ?? "text-muted-foreground")}>{TRAIN_LABEL[t.status] ?? t.status}</span>
+              <span className="w-full text-xs text-muted-foreground sm:w-auto">{t.detail}</span>
             </li>
           )
         })}
@@ -359,7 +353,7 @@ function AttentionTab({ p }: { p: Project }) {
           </div>
         </Section>
       )}
-      {p.mergeTrain && train.length > 0 && <MergeTrainSection train={p.mergeTrain} pulls={s.pullRequests} />}
+      {p.mergeTrain && train.length > 0 && <MergeTrainSection train={p.mergeTrain} pulls={s.pullRequests} repo={p.repo} />}
       <Section icon={GitPullRequest} title="Pull requests to review" count={reviews.length} empty="No PR is waiting for you.">
         {reviews.map((pr) => (
           <a key={pr.number} href={pr.url} target="_blank" rel="noreferrer"
