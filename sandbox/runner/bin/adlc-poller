@@ -613,10 +613,14 @@ auto_tiers_json() {
   jq -cn '$ARGS.positional | map(select(test("^[a-z]+$")))' --args $t
 }
 # A PR's automatic reworks are used up: the issue says so, or the rework counter went past the limit
-# (request_rework then hands it to a person). Either way no agent acts on it until a person does.
+# (request_rework then hands it to a person). Either way no agent acts on it until a person does, unless
+# that person relabelled the issue adlc:ready for another rework: queued or under way, it isn't used up.
 reworks_used_up() { # reworks_used_up <pr> <issue>
-  local max tried; max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
-  has_label "$2" adlc:needs-human-review && return 0
+  local max tried labels; max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
+  labels=,$(gh issue view "$2" -R "$R" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null),
+  [[ $labels == *,adlc:needs-human-review,* ]] && return 0
+  is_running "$2" && return 1
+  [[ $labels =~ ,adlc:(ready|queued|in-progress), ]] && return 1
   tried=$(grep -c . "$CI_DIR/$1" 2>/dev/null); [ "${tried:-0}" -gt "$max" ]
 }
 # The PR's title comes from merge_train's loop ($title): the dashboard keeps showing it after the merge,
@@ -731,7 +735,9 @@ Please review those changes and approve again to put it back in the merge train 
         local how="green and up to date"
         [ "${behind:-0}" -gt 0 ] && how="green; $behind commit(s) behind $base, none touching its changes"
         if [ "$mode" = on ]; then
-          if gh pr merge "$pr" -R "$R" --squash >/dev/null 2>&1; then
+          # GitHub can merge and still answer with an error (seen during its incidents): check before calling it refused.
+          if gh pr merge "$pr" -R "$R" --squash >/dev/null 2>&1 \
+             || [ "$(gh pr view "$pr" -R "$R" --json state --jq .state 2>/dev/null)" = MERGED ]; then
             status=merged; detail="merged ($how)"; log "merge train: merged PR #$pr (#$n): $how"; front=""
             # The next PR's overlap check needs this merge in the local base; without it, wait a cycle.
             git -C "$REPO_DIR" fetch --quiet origin "$base" 2>/dev/null || front=$pr
