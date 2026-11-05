@@ -612,22 +612,31 @@ auto_tiers_json() {
   # shellcheck disable=SC2086  # one tier per word
   jq -cn '$ARGS.positional | map(select(test("^[a-z]+$")))' --args $t
 }
-# A PR's automatic reworks are used up: the issue says so, or the rework counter went past the limit
-# (request_rework then hands it to a person). Either way no agent acts on it until a person does, unless
-# that person relabelled the issue adlc:ready for another rework: queued or under way, it isn't used up.
-reworks_used_up() { # reworks_used_up <pr> <issue>
+# No agent will act on this PR until a person does (sets $why, the advice for the train): its automatic
+# reworks are used up (the issue says so, or the rework counter went past the limit), or a rework gave up on
+# failed checks with adlc:blocked (e.g. only a flaky test failed, which it can't fix; conflicts still send a
+# blocked issue back, see request_rework). A person relabelling the issue adlc:ready for another rework,
+# queued or under way, clears both.
+agent_wont_rework() { # agent_wont_rework <pr> <issue> <conflicts|failed>
   local max tried labels; max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
+  why=""
   labels=,$(gh issue view "$2" -R "$R" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null),
-  [[ $labels == *,adlc:needs-human-review,* ]] && return 0
-  is_running "$2" && return 1
-  [[ $labels =~ ,adlc:(ready|queued|in-progress), ]] && return 1
-  tried=$(grep -c . "$CI_DIR/$1" 2>/dev/null); [ "${tried:-0}" -gt "$max" ]
+  if [[ $labels != *,adlc:needs-human-review,* ]]; then
+    is_running "$2" && return 1
+    [[ $labels =~ ,adlc:(ready|queued|in-progress), ]] && return 1
+    if [ "$3" = failed ] && [[ $labels == *,adlc:blocked,* ]]; then
+      why="#$2 is adlc:blocked, the agent found nothing to fix (its comment on #$2 says why): re-run the checks if they're flaky, or fix it on the branch, then relabel #$2 adlc:ready"
+      return 0
+    fi
+    tried=$(grep -c . "$CI_DIR/$1" 2>/dev/null); [ "${tried:-0}" -gt "$max" ] || return 1
+  fi
+  why="automatic reworks used up: fix it on the branch, or relabel #$2 adlc:ready for another agent rework"
 }
 # The PR's title comes from merge_train's loop ($title): the dashboard keeps showing it after the merge,
 # when the PR is no longer in its list of open PRs.
 train_entry() { jq -cn --argjson pr "$1" --argjson issue "$2" --arg status "$3" --arg detail "${4:-}" --arg title "${title:-}" '{pr:$pr,issue:$issue,title:$title,status:$status,detail:$detail}'; }
 merge_train() {
-  local mode rows pr branch head base mergeable hold approved approvedAt changes risk automerge tiers n front="" entries=() status detail behind checks overlap f
+  local why mode rows pr branch head base mergeable hold approved approvedAt changes risk automerge tiers n front="" entries=() status detail behind checks overlap f
   mode=$(train_mode)
   [ "$mode" != off ] || { rm -f "$TRAIN_FILE"; return 0; }
   # latestOpinionatedReviews(writersOnly): each reviewer's latest approve/request-changes, people with write
@@ -673,9 +682,9 @@ merge_train() {
           elif [ "$checks" != GREEN ]; then status=failed; detail="risk $risk; checks failed ($checks): the agent reworks it"; fi
         fi
         if [ -n "$status" ]; then
-          if [ "$status" != checks ] && reworks_used_up "$pr" "$n"; then
+          if [ "$status" != checks ] && agent_wont_rework "$pr" "$n" "$status"; then
             if [ "$status" = conflicts ]; then detail="conflicts with $base"; else detail="checks failed ($checks)"; fi
-            status=needs-you; detail="risk $risk; $detail; automatic reworks used up: fix it on the branch, or relabel #$n adlc:ready for another agent rework"
+            status=needs-you; detail="risk $risk; $detail; $why"
           fi
           entries+=("$(train_entry "$pr" "$n" "$status" "$detail")"); continue
         fi
@@ -752,9 +761,9 @@ Please review those changes and approve again to put it back in the merge train 
     fi
     # Conflicts or failed checks after the automatic reworks: no agent acts on it until a person does, so it
     # mustn't hold up the PRs behind it.
-    if { [ "$status" = conflicts ] || [ "$status" = failed ]; } && reworks_used_up "$pr" "$n"; then
+    if { [ "$status" = conflicts ] || [ "$status" = failed ]; } && agent_wont_rework "$pr" "$n" "$status"; then
       status=needs-you; front=""
-      detail="$detail; automatic reworks used up: fix it on the branch, or relabel #$n adlc:ready for another agent rework, then re-approve. Later PRs go ahead meanwhile"
+      detail="$detail; $why, then re-approve. Later PRs go ahead meanwhile"
       detail=${detail/: the agent resolves them, then you re-approve;/;}
       detail=${detail/: rework, then you re-approve if code changed;/;}
     fi

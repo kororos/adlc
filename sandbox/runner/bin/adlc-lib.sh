@@ -122,6 +122,16 @@ engine_usage() { # docker system df measures every layer: bounded, it can take m
     | awk -F'|' '$1 != "Containers" { sub(/ .*/, "", $3); printf "%s%s %s (%s reclaimable)", sep, tolower($1), $2, $3; sep=" · " } END { print "" }'
 }
 free_gb() { df -Pk "$ADLC_ROOT" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }'; }
+# The project clone (every run's worktree shares its objects): reworks, rebases and fetches leave unreachable
+# objects behind. Once there are too many, git's automatic gc gives up, leaves .git/gc.log and then only warns
+# ("too many unreachable loose objects") on every fetch, into the poller's log. Objects younger than an hour
+# stay: a run may be writing them right now.
+prune_repo() {
+  [ -d "$REPO_DIR/.git" ] || return 0
+  rm -f "$REPO_DIR/.git/gc.log"
+  git -C "$REPO_DIR" gc --quiet --prune=1.hour.ago >/dev/null 2>&1 || true
+  git -C "$REPO_DIR" worktree prune 2>/dev/null || true
+}
 housekeep() {
   local before after
   before=$(free_gb)
@@ -129,10 +139,11 @@ housekeep() {
   docker image prune -f >/dev/null 2>&1 || true
   prune_build_cache "${ADLC_BUILD_CACHE_KEEP:-6GB}"
   docker volume prune -f >/dev/null 2>&1 || true
+  prune_repo
   # Component logs over 100 MB keep their last 20 MB, trimmed in place: their writers hold the file open.
   find "$LOG_DIR" -maxdepth 1 -name '*.log' -size +100M -exec sh -c 'tail -c 20M "$1" >"$1.tmp" && cat "$1.tmp" >"$1"; rm -f "$1.tmp"' _ {} \; 2>/dev/null || true
   after=$(free_gb)
   # For the dashboard's Health tab (it has no Docker access).
   engine_usage >"$STATE_DIR/docker_usage.tmp" 2>/dev/null && mv "$STATE_DIR/docker_usage.tmp" "$STATE_DIR/docker_usage"
-  log "housekeeping: finished runs' images, dangling images and build cache pruned (free ${before:-?}GB → ${after:-?}GB)"
+  log "housekeeping: finished runs' images, dangling images, build cache and the clone's unreachable git objects pruned (free ${before:-?}GB → ${after:-?}GB)"
 }
