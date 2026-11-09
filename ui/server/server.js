@@ -64,8 +64,10 @@ function rateLimited(ip) {
 app.addHook("onSend", async (req, reply) => {
   reply.header("x-content-type-options", "nosniff")
   reply.header("referrer-policy", "same-origin")
+  // media-src: the Field Guide's video tutorial streams from the ADLC repo's GitHub release (github.com
+  // redirects the download to release-assets.githubusercontent.com). Video only; nothing else leaves the host.
   reply.header("content-security-policy",
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self' https://github.com https://release-assets.githubusercontent.com https://objects.githubusercontent.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 })
 
 app.addHook("onRequest", async (req, reply) => {

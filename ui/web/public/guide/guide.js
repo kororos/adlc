@@ -527,3 +527,18 @@ function renderCmds() {
 $("#q").addEventListener("input", renderCmds)
 $("#chips").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; where = b.dataset.w; $("#chips").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b)); renderCmds() })
 renderCmds()
+
+// The video tutorial: an inline player under the hero. The video streams from the GitHub release (so it
+// plays only once the repository is public); the subtitles are served with the guide.
+const watchBtn = $("#watch-btn"), watch = $("#watch"), watchVideo = $("#watch-video")
+watchBtn.addEventListener("click", () => {
+  const open = watch.hidden
+  watch.hidden = !open
+  watchBtn.setAttribute("aria-expanded", String(open))
+  watchBtn.textContent = open ? "■ Close the video" : "▶ Watch the video tutorial"
+  if (open) watchVideo.play().catch(() => {})
+  else watchVideo.pause()
+})
+watchVideo.querySelector("source").addEventListener("error", () => {
+  $("#watch-note").innerHTML = 'The video couldn’t load here. <a href="https://github.com/kororos/adlc/releases/tag/tutorial-video" target="_blank" rel="noopener">Open it on GitHub</a> to watch or download it.'
+})

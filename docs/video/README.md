@@ -1,6 +1,6 @@
 # ADLC video tutorial: how it's built
 
-The 9-minute tutorial for new users is generated, not recorded, so it can be rebuilt after the dashboard or the commands change. The published video is attached to the [`tutorial-video` release](https://github.com/kororos/adlc/releases/tag/tutorial-video), and the Field Guide and the README link to it.
+The 9-minute tutorial for new users is generated, not recorded, so it can be rebuilt after the dashboard or the commands change. The published video is attached to the [`tutorial-video` release](https://github.com/kororos/adlc/releases/tag/tutorial-video); the Field Guide plays it in its own player, and the README links to it.
 
 | File | What it is |
 |---|---|
@@ -9,7 +9,7 @@ The 9-minute tutorial for new users is generated, not recorded, so it can be reb
 | `fake-server.mjs` | Serves the built dashboard (`dist/`) with that data, on `127.0.0.1:4173`. |
 | `shots.mjs` | Screenshots each dashboard tab from the fake server into `shots/`, with the positions of the elements the video zooms to (`shots/boxes.json`). |
 | `stage.html` | Draws any moment of the video: title, chapter, bullet, diagram, terminal, Claude-session and dashboard scenes. |
-| `build.mjs` | Narration, timeline, frames (headless Chrome) and encoding: `out/adlc-tutorial.m4v` and `out/adlc-tutorial.srt`. |
+| `build.mjs` | Narration, timeline, frames (headless Chrome) and encoding: `out/adlc-tutorial.m4v`, `.srt` and `.vtt`. |
 | `fix-tx3g.py` | Gives the subtitle track the video's size; ffmpeg leaves it 0×0 and QuickTime then shows nothing. |
 
 ## The voice: Soniox key
@@ -62,6 +62,11 @@ TTS=soniox SONIOX_VOICE=Imogen node build.mjs
 
 ```bash
 gh release upload tutorial-video out/adlc-tutorial.m4v out/adlc-tutorial.srt --clobber -R kororos/adlc
+# the Field Guide's player: its subtitles and poster live with the guide (commit them)
+cp out/adlc-tutorial.vtt ../../ui/web/public/guide/video/
+ffmpeg -y -ss 3 -i out/adlc-tutorial.m4v -frames:v 1 -vf scale=1280:-1 -q:v 4 ../../ui/web/public/guide/video/poster.jpg
 ```
 
-The release page's link stays the same, so the Field Guide and the README need no change.
+The release's download link stays the same, so the links don't change.
+
+**The Field Guide's player** (▶ Watch the video tutorial) streams the `.m4v` straight from the release, so it plays only once the repository is public; until then it offers the GitHub link. The dashboard's content security policy allows media from `github.com` and GitHub's release-asset hosts for this (`ui/server/server.js`). Browsers can't load subtitles from GitHub, so the guide serves `video/adlc-tutorial.vtt` itself.

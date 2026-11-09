@@ -113,6 +113,8 @@ let n = 0
 const srt = tl.scenes.flatMap((s) => s.beats.map((b) => `${++n}\n${srtTime(s.start + b.t0)} --> ${srtTime(s.start + b.t0 + b.audio + 0.2)}\n${b.cap}\n`)).join("\n")
 const srtFile = path.join(OUT, "adlc-tutorial.srt")
 fs.writeFileSync(srtFile, srt)
+// the Field Guide's player loads its subtitles from the guide itself (a browser can't load them from the release)
+fs.writeFileSync(path.join(OUT, "adlc-tutorial.vtt"), "WEBVTT\n\n" + srt.replace(/^\d+\n/gm, "").replace(/(\d\d:\d\d:\d\d),(\d{3})/g, "$1.$2"))
 
 // 4. frames → ffmpeg
 const outFile = path.join(OUT, partial ? "part.mp4" : "adlc-tutorial.av.mp4")

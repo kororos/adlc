@@ -1,0 +1,217 @@
+WEBVTT
+
+00:01.200 --> 00:06.212
+This is ADLC, the Agentic Delivery Life Cycle.
+
+00:06.462 --> 00:18.360
+It turns your idea into a product spec, an architecture and a backlog of GitHub issues. Then it delivers those issues, one by one, as tested and reviewed pull requests.
+
+00:18.610 --> 00:24.674
+In this video you'll set it up, start a first project, and see how to work with it day to day.
+
+00:26.224 --> 00:27.464
+There are two halves.
+
+00:27.714 --> 00:37.659
+First, you plan with Claude: you describe the product, agree on an architecture, and Claude turns it into GitHub issues with their dependencies.
+
+00:37.909 --> 00:45.341
+Then the agents deliver, unattended. A poller on your dev server picks up ready issues in dependency order.
+
+00:45.591 --> 00:58.739
+For each one, a team of agents writes the spec, the design and the tests first, builds the code, verifies it, runs end-to-end checks and reviews it, then opens a pull request.
+
+00:58.989 --> 01:07.393
+Low- and medium-risk changes merge by themselves once CI is green. High-risk changes wait for your approval.
+
+01:08.943 --> 01:10.154
+Here's what you need.
+
+01:10.404 --> 01:16.233
+A Claude subscription. Max is recommended, because unattended runs use it.
+
+01:16.483 --> 01:20.048
+A GitHub account, with the gh command line.
+
+01:20.298 --> 01:34.607
+And a Linux server with Docker: your dev server. It runs the agents, their test environments, the CI runners and a dashboard. Give it about twenty-four gigabytes of memory and fifty gigabytes of free disk.
+
+01:35.807 --> 01:37.909
+Part one: install.
+
+01:39.359 --> 01:47.027
+On the dev server, clone the ADLC repository, link the adlc command, and create its data folder.
+
+01:47.277 --> 01:55.989
+Then run adlc doctor. It checks Docker, disk space and virtualisation, and tells you what's missing.
+
+01:57.539 --> 02:03.282
+The agents need their own identity on GitHub, so you create a GitHub App, once.
+
+02:03.532 --> 02:13.053
+Give it read and write access to contents, issues, pull requests and workflows, and read access to actions and commit statuses. Nothing else.
+
+02:13.303 --> 02:17.534
+Install it on your project's repository, and generate a private key.
+
+02:17.784 --> 02:25.373
+Because the agents act as the app, you review and approve their pull requests like a colleague's, and they can never push to main.
+
+02:26.923 --> 02:32.412
+Now create the project: an empty repository, then its secrets on the dev server.
+
+02:32.673 --> 02:39.320
+The secrets stay on the server, readable only by you. Claude never sees their values.
+
+02:39.570 --> 02:42.396
+Start the runner, and connect the GitHub App.
+
+02:43.770 --> 02:50.940
+Log in to Claude once, and enable Remote Control, so you can talk to Claude on the server from your laptop or your phone.
+
+02:51.190 --> 02:54.558
+Finally, start the dashboard, and get its login token.
+
+02:55.758 --> 02:58.373
+Part two: plan your product.
+
+02:59.823 --> 03:10.776
+Open the Claude app, or claude.ai/code, and pick the session adlc-orbit. Now you're talking to Claude on the dev server.
+
+03:11.026 --> 03:25.721
+Run /adlc-core:init. Claude goes through the setup section by section: repository, CI, registry, environments, and what the agents may do on their own.
+
+03:25.971 --> 03:32.768
+Each proposal comes with a reason. You confirm it, change it, or leave it to be decided later.
+
+03:33.018 --> 03:44.806
+It writes adlc.yaml and a setup document, and a provisioning script that you run yourself, with your own GitHub login, because the agents have no admin rights.
+
+03:46.356 --> 03:51.630
+Next, describe your idea with /adlc-core:discover.
+
+03:51.880 --> 03:57.929
+Claude asks questions and writes a product requirements document with testable acceptance criteria.
+
+03:58.179 --> 04:05.057
+Then /adlc-core:architect designs the system and records each decision as an architecture decision record.
+
+04:05.307 --> 04:20.869
+And /adlc-core:plan-backlog breaks the work into epics and issues, with milestones and dependencies. The first issue is always a walking skeleton: one thin path from screen to API to database, with CI and a test environment.
+
+04:21.119 --> 04:26.941
+Each step ends with a pull request of its documents, so everything is versioned in your repository.
+
+04:28.141 --> 04:30.784
+Part three: watch it deliver.
+
+04:32.234 --> 04:38.291
+Open the dashboard. The Queue tab lists every open issue in the order the agents will take them.
+
+04:38.541 --> 04:44.305
+Issues wait for their blockers. The waitlist can only start once booking is merged.
+
+04:44.555 --> 04:50.673
+Orange items are your own tasks, like creating a secret. They unblock the issues behind them.
+
+04:50.923 --> 04:53.884
+Run next moves an issue to the front of the line.
+
+04:55.434 --> 05:01.458
+The Dependencies tab draws the same queue as a graph, so you can see what is holding up what.
+
+05:03.008 --> 05:05.803
+The Now tab shows what's happening right now.
+
+05:06.053 --> 05:12.992
+Issue 18 is being delivered: the agent is in the Build phase, step four of eight.
+
+05:13.242 --> 05:20.874
+The pull request for issue 17 is in the merge train, waiting for its CI checks, and you can see which jobs are running.
+
+05:21.124 --> 05:27.122
+Below, the dev deployment waits for the newest images to be published, with a link to that run.
+
+05:27.372 --> 05:33.061
+Further down is the run itself: its phases, and a live log of what the agents are doing.
+
+05:33.311 --> 05:46.228
+Each run works in its own git worktree and test environment, and tests what the change affects. The full suite runs in the pull request's CI, which must be green before anything merges.
+
+05:47.778 --> 05:51.274
+When the agents need you, it shows up under Needs you.
+
+05:51.524 --> 05:59.742
+At the top, the merge train. It merges pull requests one after another, bringing each up to date and checking it first.
+
+05:59.992 --> 06:12.114
+High-risk changes, like payments, wait for your review. The pull request explains the spec, the risk, which test covers each acceptance criterion, and the review verdicts.
+
+06:12.364 --> 06:19.078
+Questions land here too. Answer on the issue, relabel it ready, and the run continues where it stopped.
+
+06:19.328 --> 06:26.501
+And issues the agents opened, such as a flaky test, don't start until you press Start or Run next.
+
+06:27.701 --> 06:30.197
+Part four: day to day.
+
+06:31.647 --> 06:37.806
+Day to day, ADLC runs mostly on its own. Start with the Overview.
+
+06:38.056 --> 06:46.482
+It shows each project's running delivery, the pull requests to review, blocked runs and your tasks, and how busy each machine is.
+
+06:48.032 --> 06:56.531
+Then go through Needs you. Review and approve the high-risk pull requests: you only approve, and the merge train does the merging.
+
+06:56.781 --> 07:05.140
+Do your owner tasks, like creating the secret a new feature needs. Close the task, and the issues it blocked start by themselves.
+
+07:05.390 --> 07:07.387
+And answer the agents' questions.
+
+07:08.937 --> 07:20.130
+If priorities change, use Run next on an issue, or on a whole epic in the Epics tab. For lasting changes, revise the backlog with Claude.
+
+07:21.680 --> 07:29.706
+The Health tab holds the switches: the merge train, reworks on failed checks, and how much the agents test during delivery.
+
+07:29.956 --> 07:39.346
+It shows the nightly checks, which run the exhaustive suites and open a regression issue when something breaks. You can also start them now.
+
+07:39.596 --> 07:43.435
+And the logs of the poller, the deployer and Remote Control.
+
+07:44.985 --> 07:51.299
+History lists every run with its duration and cost, so you always know what the agents spend.
+
+07:52.849 --> 07:57.208
+From a terminal, adlc status gives you the same picture.
+
+07:57.458 --> 08:03.056
+Pause stops new runs while the current one finishes, and resume starts them again.
+
+08:03.306 --> 08:07.580
+And adlc logs follows any component, or a single run.
+
+08:09.130 --> 08:18.860
+When something goes wrong, the agents rework their own pull requests: failed checks and merge conflicts go back to them, twice at most.
+
+08:19.110 --> 08:26.711
+After that, or when a run gets stuck, the issue is marked blocked or needs human review, with a summary of why.
+
+08:26.961 --> 08:32.683
+Fix the cause or answer the question, relabel the issue ready, and it continues.
+
+08:32.933 --> 08:37.981
+And the agents never deploy production: you deploy releases yourself.
+
+08:39.531 --> 08:49.281
+To learn more, open the Field Guide from the dashboard's sidebar. It has an issue lifecycle simulator, tutorials, and fixes for common problems.
+
+08:50.831 --> 08:57.897
+That's ADLC. Describe what you want, plan it with Claude, and let the agents deliver it.
+
+08:58.147 --> 09:02.801
+You'll find everything on GitHub, at kororos/adlc.
