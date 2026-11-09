@@ -26,6 +26,7 @@ It is packaged as a Claude Code **plugin marketplace**, so a project gets the wh
 15. [Extending ADLC with stack packs](#15-extending-adlc-with-stack-packs)
 16. [Troubleshooting](#16-troubleshooting)
 17. [Repository layout](#17-repository-layout)
+18. [License](#18-license)
 
 ---
 
@@ -867,6 +868,7 @@ Situations from real projects, with the steps that resolve them. The [Field Guid
 
 ```
 adlc/
+├── LICENSE                             Apache License 2.0
 ├── .claude-plugin/marketplace.json     this repo is a Claude Code plugin marketplace
 ├── plugins/stack-react-native/         Expo app, e2e, test-environment skills + templates
 ├── plugins/stack-react-web/            React + Vite SPA, shadcn/ui (Base UI), nginx image, Vitest/Playwright
@@ -890,3 +892,7 @@ adlc/
 ├── bin/adlc                            host CLI: doctor, secrets, up, login, attach, status, pause, logs, audit, down
 └── docs/architecture.md                design of ADLC itself
 ```
+
+## 18. License
+
+ADLC is licensed under the [Apache License 2.0](LICENSE). You may use, change and redistribute it, also commercially, provided you keep the copyright and licence notices and mark the files you changed. The licence includes a patent grant from contributors and doesn't grant use of the ADLC name. Projects that ADLC delivers (your application code) aren't covered by it: they stay under whatever licence you choose.
