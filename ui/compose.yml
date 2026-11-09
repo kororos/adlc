@@ -13,6 +13,7 @@ services:
     environment:
       ADLC_UI_HOSTS: ${ADLC_UI_HOSTS:-}
       ADLC_HOST_NAME: ${ADLC_HOST_NAME:-}
+      ADLC_COMMIT: ${ADLC_COMMIT:-}   # the ADLC checkout's commit at `adlc ui up`, shown in the sidebar
       ADLC_MIN_FREE_GB: ${ADLC_MIN_FREE_GB:-15}
       ADLC_DISK_WARN_PCT: ${ADLC_DISK_WARN_PCT:-75}
     volumes:

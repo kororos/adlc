@@ -44,6 +44,8 @@ export function AppSidebar() {
   const loc = useLocation()
   const { setOpenMobile } = useSidebar()
   const projects = useQuery({ queryKey: queryKeys.projects, queryFn: api.projects, refetchInterval: 10_000 })
+  const version = useQuery({ queryKey: queryKeys.version, queryFn: api.version, staleTime: Infinity })
+  const commit = version.data?.commit
   // Whatever the server says, end up on the sign-in page (the session query decides).
   const logout = useMutation({ mutationFn: api.logout, onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.session }) })
   const needYouTotal = (projects.data ?? []).reduce((n, p) => n + p.attention + p.reviews, 0)
@@ -136,6 +138,10 @@ export function AppSidebar() {
       <SidebarFooter>
         <div className="flex items-center justify-between gap-2 px-1 group-data-[collapsible=icon]:hidden">
           <ThemeToggle />
+          {commit && (
+            <a href={`https://github.com/kororos/adlc/commit/${commit}`} target="_blank" rel="noreferrer" title="The ADLC commit this dashboard runs"
+              className="font-mono text-xs text-muted-foreground hover:text-primary">ADLC {commit}</a>
+          )}
         </div>
         <SidebarMenu>
           <SidebarMenuItem>

@@ -236,6 +236,9 @@ function hosts() {
 }
 app.get("/api/hosts", async () => hosts())
 
+// The ADLC commit this dashboard was started from (set by `adlc ui up`), shown in the sidebar.
+app.get("/api/version", async () => ({ commit: /^[0-9a-f]{7,40}$/.test(process.env.ADLC_COMMIT ?? "") ? process.env.ADLC_COMMIT : null }))
+
 app.post("/api/host-reports/:name", async (req, reply) => {
   const name = req.params.name
   if (rateLimited(`host:${req.ip}`)) return reply.code(429).send({ error: "too many attempts" })

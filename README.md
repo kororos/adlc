@@ -700,7 +700,7 @@ adlc ui host-token <host> [--rotate|--remove]   # a CI-only host's report token 
 ```
 - **LAN only by default.** To reach it from outside, publish it through your own reverse proxy over **HTTPS**, with that proxy's authentication in front, and add the name with `--host`. The token login and `SameSite=Strict` cookies stay on (the cookie is marked `Secure` when the proxy forwards HTTPS).
 - **Safe by construction:** the dashboard has no Docker socket and no GitHub or Claude credentials, and it reads project state and logs read-only. The only thing it accepts without a login is a CI-only host's stats report, checked against that host's own token and reduced to a few numbers. GitHub data comes from a snapshot the poller writes every minute. Pause and resume are requests the poller applies within a minute and logs.
-- Update it after `git -C ~/adlc pull` with `adlc ui up`.
+- Update it after `git -C ~/adlc pull` with `adlc ui up`. The sidebar shows the ADLC commit it runs (**ADLC `<sha>`**, linked to GitHub), so you can see whether it's up to date.
 
 | Situation | What you do |
 |---|---|

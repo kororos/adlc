@@ -243,6 +243,7 @@ export const api = {
   runTotals: (slug: string) => request<RunTotals>("GET", `/api/projects/${slug}/runs/totals`),
   disk: () => request<Disk | null>("GET", "/api/disk"),
   hosts: () => request<Host[]>("GET", "/api/hosts"),
+  version: () => request<{ commit: string | null }>("GET", "/api/version"),
   action: (slug: string, action: ProjectAction) => request<{ ok: true }>("POST", `/api/projects/${slug}/actions`, { action }),
 }
 
@@ -254,4 +255,5 @@ export const queryKeys = {
   runTotals: (slug: string) => ["runs", slug, "totals"] as const,
   disk: ["disk"] as const,
   hosts: ["hosts"] as const,
+  version: ["version"] as const,
 }

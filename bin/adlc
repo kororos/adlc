@@ -532,6 +532,7 @@ edge_get() { [ -f "$(edge_cfg)" ] && grep "^$1=" "$(edge_cfg)" | cut -d= -f2- ||
 ui_compose() {
   ADLC_ROOT=$ADLC_ROOT ADLC_UID=$(id -u) ADLC_GID=$(id -g) ADLC_UI_HOSTS=$(edge_get ADLC_UI_HOSTS) \
     ADLC_HOST_NAME=$(hostname -s | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | cut -c1-32) \
+    ADLC_COMMIT=$(git -C "$ADLC_HOME" rev-parse --short=7 HEAD 2>/dev/null) \
     docker compose -f "$ADLC_HOME/ui/compose.yml" "$@"
 }
 ui_host() {
