@@ -256,7 +256,7 @@ Prod is deployed **by you**, on the Swarm manager, with `adlc-swarm-deploy`. The
 ```bash
 # once, on the manager
 sudo install -m 0755 ~/adlc/sandbox/swarm/adlc-swarm-deploy /usr/local/bin/   # or copy the file over
-docker login harbor.kororos.eu                         # prod pull-only robot
+docker login harbor.example.com                        # prod pull-only robot
 # add a read-only deploy key for kororos/<slug> (repo → Settings → Deploy keys) and use it for git@github.com
 
 # each release
