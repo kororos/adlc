@@ -4,7 +4,7 @@ ADLC is a software delivery pipeline built on [Claude Code](https://code.claude.
 
 It is packaged as a Claude Code **plugin marketplace**, so a project gets the whole pipeline (agents, commands, skills, guardrails) from git. Nothing is installed by hand.
 
-> **Status:** draft v0.6. The plugin (agents, commands, contracts, guard hook) and the **runner sandbox** (`sandbox/`, `bin/adlc`) are built. The sandbox was integration-tested on Docker Desktop (macOS); the first run on a Linux dev server and the first real end-to-end delivery are still to come. Features not built yet are marked 🚧. See [docs/architecture.md](docs/architecture.md) for the full design.
+> **Status:** in daily use since October 2026 on a full-stack product (Node API, React web app, Expo mobile app): 118 agent pull requests delivered and merged in its first three weeks, with CI on two self-hosted machines. Runs on a Linux x86_64 dev server (Docker Engine); Docker Desktop on macOS works for trying it out. Each plugin is versioned on its own (`adlc-core` 0.1.x), and there are no tagged ADLC releases yet: follow `main`, and read the commit log before updating a dev server. Features not built yet are marked 🚧. The design is in [docs/architecture.md](docs/architecture.md).
 
 ---
 
@@ -26,7 +26,7 @@ It is packaged as a Claude Code **plugin marketplace**, so a project gets the wh
 15. [Extending ADLC with stack packs](#15-extending-adlc-with-stack-packs)
 16. [Troubleshooting](#16-troubleshooting)
 17. [Repository layout](#17-repository-layout)
-18. [License](#18-license)
+18. [License, support and contributing](#18-license-support-and-contributing)
 
 ---
 
@@ -54,6 +54,13 @@ It is packaged as a Claude Code **plugin marketplace**, so a project gets the wh
 - **Delivery runs without you.** A poller on the dev server picks up ready issues in dependency order and runs the delivery pipeline. Low- and medium-risk changes merge automatically once CI is green. High-risk changes wait for you.
 
 ---
+
+**Quick start** (about an hour, most of it waiting for builds):
+1. **Dev server:** a Linux machine with Docker; clone ADLC and run `adlc doctor` ([§3](#3-installation)).
+2. **GitHub:** create your project's repo and the ADLC GitHub App, which gives the agents their own identity ([§3](#agent-identity-the-adlc-github-app-recommended)).
+3. **Runner:** `adlc secrets <slug>`, `adlc up <slug> --repo <owner>/<slug>`, `adlc login <slug>`, then `adlc ui up` for the dashboard.
+4. **Plan with Claude** from claude.ai/code or the Claude app: `/adlc-core:init`, `discover`, `architect`, `plan-backlog` ([§4](#4-starting-a-new-project)).
+5. **Let it deliver:** watch the dashboard, review high-risk PRs, answer questions and do your owner tasks ([§10](#10-day-to-day-operation)).
 
 **New to ADLC?** Watch the 9-minute video tutorial (install, a first project, delivery and day-to-day use; with subtitles): in the Field Guide (**▶ Watch the video tutorial**), or [download it](https://github.com/kororos/adlc/releases/tag/tutorial-video). The **ADLC Field Guide** walks through it interactively: an issue-lifecycle simulator (labels, poller, CI, merge train), six step-by-step tutorials and a label and command reference. Open [`ui/web/public/guide/index.html`](ui/web/public/guide/index.html) from a clone in any browser (it needs no server or network), or use **Guide** in the dashboard's sidebar (`/guide/`).
 
@@ -109,9 +116,9 @@ Run `adlc up <slug>` again after pulling a new ADLC version or changing secrets.
 ### Bootstrapping a brand-new project
 Fine-grained tokens are scoped to existing repos, so create the (empty) repo first, as yourself:
 ```bash
-gh repo create kororos/<slug> --private --add-readme     # your own gh login on the host
-# create gh_pat (and ci_admin_pat) for kororos/<slug> on github.com, see the table above
-adlc secrets <slug> && adlc up <slug> --repo kororos/<slug>
+gh repo create <owner>/<slug> --private --add-readme     # your own gh login on the host
+# create gh_pat (and ci_admin_pat) for <owner>/<slug> on github.com, see the table above
+adlc secrets <slug> && adlc up <slug> --repo <owner>/<slug>
 adlc login <slug> && adlc attach <slug>                   # one-time login + "Enable Remote Control? y"
 adlc session <slug>                                       # → /adlc-core:init
 cd /srv/adlc/projects/<slug>/sessions/main && bash .adlc/provision.sh   # on the host, with YOUR gh login (admin)
@@ -123,7 +130,7 @@ With `gh_pat`, agents act as **your** account: you can't approve their PRs (GitH
 **1. Create it:** github.com → avatar → Settings → Developer settings → **GitHub Apps → New GitHub App**
 | Field | Value |
 |---|---|
-| GitHub App name | e.g. `adlc-kororos` (must be unique on GitHub) |
+| GitHub App name | e.g. `adlc-<owner>` (must be unique on GitHub) |
 | Homepage URL | `https://github.com/kororos/adlc` (any valid URL) |
 | Callback/Setup URL, user authorization, device flow | empty / off |
 | **Webhook → Active** | **unchecked** |
@@ -131,15 +138,15 @@ With `gh_pat`, agents act as **your** account: you can't approve their PRs (GitH
 | Organization / Account permissions | all **No access** |
 | Where can it be installed | **Only on this account** |
 
-Then **Create GitHub App** → note the **App ID** (not the Client ID) → **Private keys → Generate a private key** (a `.pem` downloads) → **Install App** → *Only select repositories* → `kororos/<slug>`. For later projects, add their repos to the same installation.
+Then **Create GitHub App** → note the **App ID** (not the Client ID) → **Private keys → Generate a private key** (a `.pem` downloads) → **Install App** → *Only select repositories* → `<owner>/<slug>`. For later projects, add their repos to the same installation.
 
 **2. Configure the runner.** `adlc up` restarts the runner, so commit and push open session work first:
 ```bash
-scp ~/Downloads/adlc-kororos.*.private-key.pem dev-server:/tmp/app.pem      # from your Mac
+scp ~/Downloads/adlc-<owner>.*.private-key.pem dev-server:/tmp/app.pem      # from your Mac
 adlc app <slug> --id <APP_ID> --key /tmp/app.pem && shred -u /tmp/app.pem   # on the dev server
 cd ~/adlc && git pull && adlc up <slug>
-docker logs adlc-<slug>-runner-1 2>&1 | grep identity          # GitHub identity: adlc-kororos[bot] (app mode)
-docker exec adlc-<slug>-runner-1 gh api repos/kororos/<slug> --jq .full_name   # kororos/<slug>
+docker logs adlc-<slug>-runner-1 2>&1 | grep identity          # GitHub identity: adlc-<owner>[bot] (app mode)
+docker exec adlc-<slug>-runner-1 gh api repos/<owner>/<slug> --jq .full_name   # <owner>/<slug>
 ```
 Delete the downloaded `.pem` on your Mac (a new key can always be generated on the app page).
 
@@ -148,7 +155,7 @@ Delete the downloaded `.pem` on your Mac (a new key can always be generated on t
 **3. Retire the personal token:** `: > /srv/adlc/secrets/<slug>/gh_pat`, then revoke that token under Settings → Developer settings → Fine-grained tokens. Keep `ci_admin_pat` (the CI registrar still uses it).
 
 **What changes:**
-- Agent PRs are authored by `adlc-kororos[bot]`.
+- Agent PRs are authored by `adlc-<owner>[bot]`.
 - The bot can't push to `main` (it isn't an admin).
 - Low/medium-risk PRs auto-merge through branch protection; `/.github/` and `/deploy/` PRs wait for **your** approval.
 
@@ -258,14 +265,14 @@ Prod is deployed **by you**, on the Swarm manager, with `adlc-swarm-deploy`. The
 # once, on the manager
 sudo install -m 0755 ~/adlc/sandbox/swarm/adlc-swarm-deploy /usr/local/bin/   # or copy the file over
 docker login harbor.example.com                        # prod pull-only robot
-# add a read-only deploy key for kororos/<slug> (repo → Settings → Deploy keys) and use it for git@github.com
+# add a read-only deploy key for <owner>/<slug> (repo → Settings → Deploy keys) and use it for git@github.com
 
 # each release
-adlc-swarm-deploy kororos/<slug> v1.4.0 --dry-run      # check: commit on main, all images exist
-adlc-swarm-deploy kororos/<slug> v1.4.0                # predeploy (migrations), then rolling update
-adlc-swarm-deploy kororos/<slug> --history             # what ran when; roll back = deploy the previous ref
+adlc-swarm-deploy <owner>/<slug> v1.4.0 --dry-run      # check: commit on main, all images exist
+adlc-swarm-deploy <owner>/<slug> v1.4.0                # predeploy (migrations), then rolling update
+adlc-swarm-deploy <owner>/<slug> --history             # what ran when; roll back = deploy the previous ref
 # several stacks (e.g. data + app): deploy each one; runs deploy/predeploy.data.sh if present
-adlc-swarm-deploy kororos/<slug> v1.4.0 --file deploy/stack.data.yml --stack <slug>-data
+adlc-swarm-deploy <owner>/<slug> v1.4.0 --file deploy/stack.data.yml --stack <slug>-data
 ```
 It refuses any ref that isn't on `main`, so only code that passed branch protection, CI and (for `/deploy/`) your review can reach prod.
 
@@ -894,6 +901,10 @@ adlc/
 └── docs/video/                         builds the video tutorial (narration, scenes, dashboard screenshots)
 ```
 
-## 18. License
+## 18. License, support and contributing
 
 ADLC is licensed under the [Apache License 2.0](LICENSE). You may use, change and redistribute it, also commercially, provided you keep the copyright and licence notices and mark the files you changed. The licence includes a patent grant from contributors and doesn't grant use of the ADLC name. Projects that ADLC delivers (your application code) aren't covered by it: they stay under whatever licence you choose.
+
+- **Questions and bugs:** open an issue on [kororos/adlc](https://github.com/kororos/adlc/issues), with the output of `adlc doctor` and the relevant `adlc logs` lines. Remove tokens, hostnames and anything else private first.
+- **Security problems** (a way for agent-written code to reach secrets, production or the host; a hole in the egress proxy or the guard hook): report them privately through the repository's **Security → Report a vulnerability**, not in a public issue. [§14](#14-safety-model) describes what ADLC protects against.
+- **Contributions:** pull requests are welcome under the Apache License 2.0. Every change updates the docs with it: this README (the feature's section, the command table, §16) and the Field Guide (`ui/web/public/guide/`), as `CLAUDE.md` describes. A new stack (e.g. ESP32) is a plugin: see [§15](#15-extending-adlc-with-stack-packs).

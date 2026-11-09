@@ -70,6 +70,8 @@ section > .wrap > header { display: grid; gap: 10px; margin-bottom: 28px }
 .player { margin: 16px 0 0; max-width: 960px }
 .player video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--line); background: #000 }
 .player figcaption { margin-top: 8px; font-size: .9rem; color: var(--muted) }
+.player-off { padding: 22px 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--sunk) }
+.player-off p { margin: 0 } .player-off p + p { margin-top: 8px }
 .flow { margin-top: 32px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface) }
 .flow button { background: none; border: 0; border-right: 1px solid var(--line); padding: 14px 14px 12px; text-align: left; display: grid; gap: 4px; min-width: 0 }
 .flow button:last-child { border-right: 0 }
@@ -252,6 +254,10 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
       <track kind="subtitles" src="video/adlc-tutorial.vtt" srclang="en" label="English">
     </video>
     <figcaption id="watch-note">Subtitles: the CC button in the player.</figcaption>
+    <div class="player-off" id="watch-off" hidden>
+      <p><b>The video can’t play here.</b> It streams from the ADLC repository’s GitHub release, which a page can only reach while the repository is public.</p>
+      <p><a href="https://github.com/kororos/adlc/releases/tag/tutorial-video" target="_blank" rel="noopener">Open it on GitHub</a> to watch or download it.</p>
+    </div>
   </figure>
   <div class="flow" role="group" aria-label="ADLC phases" id="flow"></div>
   <div class="flow-detail" id="flow-detail"></div>

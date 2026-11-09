@@ -539,6 +539,9 @@ watchBtn.addEventListener("click", () => {
   if (open) watchVideo.play().catch(() => {})
   else watchVideo.pause()
 })
+// It can't load (e.g. the repository is private: GitHub answers 404): replace the empty player with the reason.
 watchVideo.querySelector("source").addEventListener("error", () => {
-  $("#watch-note").innerHTML = 'The video couldn’t load here. <a href="https://github.com/kororos/adlc/releases/tag/tutorial-video" target="_blank" rel="noopener">Open it on GitHub</a> to watch or download it.'
+  watchVideo.hidden = true
+  $("#watch-note").hidden = true
+  $("#watch-off").hidden = false
 })
