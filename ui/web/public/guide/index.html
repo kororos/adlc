@@ -64,6 +64,9 @@ section > .wrap > header { display: grid; gap: 10px; margin-bottom: 28px }
 .hero { padding-block: 48px 40px }
 .hero h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); font-weight: 700; letter-spacing: -0.02em; max-width: 18ch }
 .hero .lede { margin-top: 14px; font-size: 1.08rem }
+.watch { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 16px; font-size: .95rem; color: var(--muted) }
+.watch a.play { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none }
+.watch a.play:hover { filter: brightness(1.08) }
 .flow { margin-top: 32px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface) }
 .flow button { background: none; border: 0; border-right: 1px solid var(--line); padding: 14px 14px 12px; text-align: left; display: grid; gap: 4px; min-width: 0 }
 .flow button:last-child { border-right: 0 }
@@ -239,6 +242,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
   <p class="eyebrow">Agentic Delivery Life Cycle</p>
   <h1>From an idea to merged pull requests, with you deciding what matters.</h1>
   <p class="lede">ADLC runs Claude agents on your dev server. You plan the product with Claude in four conversations; then a poller delivers the GitHub issues one by one, in dependency order, and only comes back to you for decisions, high-risk reviews and your own tasks. Pick a step to see who does what.</p>
+  <p class="watch"><a class="play" href="https://github.com/kororos/adlc/releases/tag/tutorial-video" target="_blank" rel="noopener">▶ Watch the video tutorial</a> 9 minutes: install, plan a first project, watch it deliver, and day-to-day use. Subtitles included.</p>
   <div class="flow" role="group" aria-label="ADLC phases" id="flow"></div>
   <div class="flow-detail" id="flow-detail"></div>
 </div></header>

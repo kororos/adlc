@@ -55,7 +55,7 @@ It is packaged as a Claude Code **plugin marketplace**, so a project gets the wh
 
 ---
 
-**New to ADLC?** The **ADLC Field Guide** walks through it interactively: an issue-lifecycle simulator (labels, poller, CI, merge train), six step-by-step tutorials and a label and command reference. Open [`ui/web/public/guide/index.html`](ui/web/public/guide/index.html) from a clone in any browser (it needs no server or network), or use **Guide** in the dashboard's sidebar (`/guide/`).
+**New to ADLC?** Watch the [9-minute video tutorial](https://github.com/kororos/adlc/releases/tag/tutorial-video) (install, a first project, delivery and day-to-day use; with subtitles). The **ADLC Field Guide** walks through it interactively: an issue-lifecycle simulator (labels, poller, CI, merge train), six step-by-step tutorials and a label and command reference. Open [`ui/web/public/guide/index.html`](ui/web/public/guide/index.html) from a clone in any browser (it needs no server or network), or use **Guide** in the dashboard's sidebar (`/guide/`).
 
 ---
 
@@ -890,7 +890,8 @@ adlc/
 │   ├── edge/                           host-level Traefik for preview URLs
 │   └── swarm/adlc-swarm-deploy         human-run production deploys on the Swarm manager
 ├── bin/adlc                            host CLI: doctor, secrets, up, login, attach, status, pause, logs, audit, down
-└── docs/architecture.md                design of ADLC itself
+├── docs/architecture.md                design of ADLC itself
+└── docs/video/                         builds the video tutorial (narration, scenes, dashboard screenshots)
 ```
 
 ## 18. License

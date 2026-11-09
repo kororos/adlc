@@ -1,0 +1,9 @@
+node_modules/
+dist/
+shots/
+audio/
+out/
+samples/
+stage.built.html
+build.log
+server.log

@@ -1,0 +1,361 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ADLC video stage</title>
+<style>
+  :root {
+    --bg: #0b0c12; --panel: #14161f; --panel2: #1a1d29; --line: #2a2e3d; --text: #eceef5; --muted: #8e93a8;
+    --accent: #8b8cff; --accent2: #6366f1; --green: #34d399; --amber: #fbbf24; --red: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: "SF Mono", Menlo, Monaco, monospace; }
+  #frame { position: absolute; inset: 0; background: radial-gradient(1200px 700px at 75% -10%, #1d1f3a 0%, transparent 60%), radial-gradient(900px 600px at -10% 110%, #151a2e 0%, transparent 60%), var(--bg); }
+  .scene { position: absolute; inset: 0; opacity: 0; }
+
+  /* caption */
+  #cap { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); width: max-content; max-width: 1560px; padding: 16px 30px;
+    background: rgba(8, 9, 14, 0.82); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; font-size: 33px; line-height: 1.32;
+    text-align: center; color: #f4f5fa; box-shadow: 0 10px 40px rgba(0,0,0,0.35); }
+  #chap { position: absolute; left: 56px; top: 40px; font-size: 22px; color: var(--muted); letter-spacing: 0.02em; display: flex; gap: 12px; align-items: center; }
+  #chap b { color: var(--accent); font-weight: 600; }
+  #prog { position: absolute; left: 0; bottom: 0; height: 5px; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+
+  /* logo */
+  .logo { width: 132px; height: 132px; border-radius: 30px; background: linear-gradient(145deg, #8b8cff, #5b5ef0); display: grid; place-items: center;
+    font-size: 74px; font-weight: 700; color: white; box-shadow: 0 20px 60px rgba(99,102,241,0.35); }
+  .title-wrap { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .title-wrap h1 { font-size: 128px; letter-spacing: -0.02em; margin-top: 36px; }
+  .title-wrap p { font-size: 40px; color: var(--muted); margin-top: 18px; max-width: 1300px; }
+
+  /* chapter */
+  .chapter { position: absolute; left: 180px; top: 380px; }
+  .chapter .num { font-size: 36px; color: var(--accent); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .chapter h2 { font-size: 112px; letter-spacing: -0.02em; margin-top: 10px; }
+  .chapter .bar { height: 6px; width: 0; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 3px; margin-top: 30px; }
+
+  /* bullets */
+  .heading { position: absolute; left: 140px; top: 120px; font-size: 64px; font-weight: 650; letter-spacing: -0.01em; }
+  .items { position: absolute; left: 140px; top: 260px; right: 160px; display: grid; gap: 30px; }
+  .item { display: grid; grid-template-columns: 84px 1fr; gap: 28px; align-items: center; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 22px; padding: 26px 32px; }
+  .item .ic { width: 84px; height: 84px; border-radius: 22px; background: rgba(139,140,255,0.14); color: var(--accent); display: grid; place-items: center; font-size: 40px; font-weight: 700; }
+  .item .t { font-size: 40px; font-weight: 600; }
+  .item .s { font-size: 28px; color: var(--muted); margin-top: 6px; }
+
+  /* flow */
+  .flow { position: absolute; left: 140px; right: 110px; top: 270px; height: 640px; }
+  .col-title { font-size: 24px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 18px; }
+  .plan { position: absolute; left: 0; top: 0; width: 470px; }
+  .chip { display: inline-flex; align-items: center; gap: 12px; padding: 14px 22px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); font-size: 28px; }
+  .plan .chip { display: flex; margin-bottom: 14px; font-family: "SF Mono", Menlo, monospace; font-size: 25px; }
+  .issues { position: absolute; left: 0; top: 400px; width: 470px; padding: 22px 26px; border-radius: 18px; background: rgba(52,211,153,0.10); border: 1px solid rgba(52,211,153,0.35); font-size: 28px; }
+  .issues small { display: block; color: var(--muted); font-size: 22px; margin-top: 6px; }
+  .arrow { position: absolute; height: 3px; background: var(--accent); border-radius: 2px; }
+  .arrow::after { content: ""; position: absolute; right: -4px; top: -8px; border-left: 16px solid var(--accent); border-top: 9px solid transparent; border-bottom: 9px solid transparent; }
+  .deliver { position: absolute; left: 620px; top: 0; right: 0; }
+  .poller { padding: 18px 26px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); font-size: 30px; display: inline-flex; gap: 14px; align-items: center; }
+  .pipe { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 34px; }
+  .pipe .chip { font-size: 27px; background: rgba(139,140,255,0.12); border-color: rgba(139,140,255,0.4); }
+  .outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 44px; }
+  .out { padding: 22px 26px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); font-size: 28px; }
+  .out .k { font-size: 22px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .out.ok .k { color: var(--green); } .out.you .k { color: var(--amber); }
+
+  /* terminal */
+  .term { position: absolute; left: 150px; right: 150px; top: 110px; height: 760px; background: #0d0f15; border: 1px solid #262a37; border-radius: 18px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5); overflow: hidden; }
+  .term .bar, .chat .bar { height: 52px; background: #171a23; border-bottom: 1px solid #262a37; display: flex; align-items: center; gap: 10px; padding: 0 20px; }
+  .dot { width: 15px; height: 15px; border-radius: 50%; }
+  .term .bar span.name, .chat .bar span.name { margin-left: 18px; color: var(--muted); font-size: 22px; }
+  .term .body { position: absolute; left: 0; right: 0; top: 52px; bottom: 0; padding: 26px 34px; font-size: 27px; line-height: 1.5; overflow: hidden; }
+  .term .lines { position: absolute; left: 34px; right: 34px; bottom: 26px; }
+  .term .body::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 70px; z-index: 2; background: linear-gradient(#0d0f15, rgba(13,15,21,0)); }
+  .pr { color: var(--green); } .pr2 { color: var(--accent); }
+  .o { color: #b7bccc; white-space: pre; }
+  .o.okl { color: #9be7c4; } .o.warnl { color: #f5cf73; }
+  .cursor { display: inline-block; width: 14px; height: 30px; background: #d6d9e4; vertical-align: -5px; margin-left: 2px; }
+
+  /* claude chat */
+  .chat { position: absolute; left: 230px; right: 230px; top: 100px; height: 780px; background: #13141a; border: 1px solid #2a2c36; border-radius: 22px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,0.5); }
+  .chat .status { margin-left: auto; font-size: 20px; color: var(--green); display: flex; gap: 8px; align-items: center; }
+  .chat .msgs { position: absolute; left: 0; right: 0; top: 52px; bottom: 96px; overflow: hidden; }
+  .chat .stack { position: absolute; left: 40px; right: 40px; bottom: 18px; display: grid; gap: 22px; }
+  .msg.user { justify-self: end; max-width: 82%; background: #2a2b33; border-radius: 18px; padding: 16px 22px; font-size: 27px; font-family: "SF Mono", Menlo, monospace; }
+  .msg.claude { display: grid; grid-template-columns: 40px 1fr; gap: 16px; font-size: 27px; line-height: 1.45; white-space: pre-wrap; }
+  .msg.claude .star { color: #d97757; font-size: 34px; line-height: 1; }
+  .msg.out { font-family: "SF Mono", Menlo, monospace; font-size: 24px; color: #9be7c4; white-space: pre-wrap; background: #0d0e13; border: 1px solid #23252e; border-radius: 12px; padding: 14px 18px; }
+  .chat .input { position: absolute; left: 30px; right: 30px; bottom: 22px; height: 58px; border-radius: 16px; border: 1px solid #33353f; background: #1b1c23; color: var(--muted); font-size: 23px; display: flex; align-items: center; padding: 0 22px; }
+
+  /* screenshot */
+  .shotwrap { position: absolute; inset: 0; overflow: hidden; background: #0b0c12; }
+  .cam { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .cam img { display: block; }
+  .mark { position: absolute; border: 3px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(4,5,10,0.55), 0 0 30px rgba(139,140,255,0.55); }
+</style>
+</head>
+<body>
+<div id="frame"></div>
+<div id="chap"></div>
+<div id="cap"></div>
+<div id="prog"></div>
+<script>
+const TL = window.TIMELINE
+const frame = document.getElementById("frame")
+const capEl = document.getElementById("cap")
+const chapEl = document.getElementById("chap")
+const progEl = document.getElementById("prog")
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x))
+const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2)
+const fade = (t, at, d = 0.45) => ease(clamp((t - at) / d))
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e }
+
+// ── builders: each returns { root, update(t) → key }; t is seconds since the scene started ──────────────
+const B = {}
+
+B.title = (s) => {
+  const root = el("div", "scene")
+  const w = el("div", "title-wrap")
+  const inner = el("div")
+  const logo = el("div", "logo", "A.")
+  logo.style.margin = "0 auto"
+  const h = el("h1", null, esc(s.title)), p = el("p", null, esc(s.subtitle))
+  inner.append(logo, h, p); w.append(inner); root.append(w)
+  return { root, update(t) {
+    const a = fade(t, 0.1, 0.7), b = fade(t, 0.5, 0.7), c = fade(t, 0.9, 0.7)
+    logo.style.opacity = a; logo.style.transform = `scale(${0.85 + 0.15 * a})`
+    h.style.opacity = b; h.style.transform = `translateY(${(1 - b) * 24}px)`
+    p.style.opacity = c; p.style.transform = `translateY(${(1 - c) * 24}px)`
+    return [a, b, c].map((x) => x.toFixed(3)).join()
+  } }
+}
+
+B.chapter = (s) => {
+  const root = el("div", "scene")
+  const c = el("div", "chapter")
+  const n = el("div", "num", esc(s.num)), h = el("h2", null, esc(s.title)), bar = el("div", "bar")
+  c.append(n, h, bar); root.append(c)
+  return { root, update(t) {
+    const a = fade(t, 0.05, 0.6), b = fade(t, 0.25, 0.6), w = fade(t, 0.4, 1.0)
+    n.style.opacity = a; h.style.opacity = b; h.style.transform = `translateX(${(1 - b) * -40}px)`; bar.style.width = `${w * 420}px`
+    return [a, b, w].map((x) => x.toFixed(3)).join()
+  } }
+}
+
+B.bullets = (s) => {
+  const root = el("div", "scene")
+  const h = el("div", "heading", esc(s.heading))
+  const list = el("div", "items")
+  const items = s.items.map((it, i) => {
+    const e = el("div", "item", `<div class="ic">${esc(it.icon)}</div><div><div class="t">${esc(it.text)}</div><div class="s">${esc(it.sub ?? "")}</div></div>`)
+    // the item appears with the first beat that reveals it
+    const b = s.beats.find((b) => (b.reveal ?? 0) >= i + 1)
+    e._at = b ? b.t0 : 0.4
+    list.append(e); return e
+  })
+  if (s.items.length >= 4) list.style.gap = "22px"
+  root.append(h, list)
+  return { root, update(t) {
+    const a = fade(t, 0.05, 0.5); h.style.opacity = a
+    const ks = [a.toFixed(3)]
+    for (const e of items) { const f = fade(t, e._at, 0.5); e.style.opacity = f; e.style.transform = `translateY(${(1 - f) * 30}px)`; ks.push(f.toFixed(3)) }
+    return ks.join()
+  } }
+}
+
+B.flow = (s) => {
+  const root = el("div", "scene")
+  const h = el("div", "heading", esc(s.heading))
+  const f = el("div", "flow")
+  const plan = el("div", "plan", `<div class="col-title">You + Claude · interactive</div>` +
+    ["/adlc-core:init", "/adlc-core:discover", "/adlc-core:architect", "/adlc-core:plan-backlog"].map((c) => `<div class="chip">${c}</div>`).join(""))
+  const issues = el("div", "issues", `GitHub issues · <b>adlc:ready</b><small>with milestones and dependencies</small>`)
+  const arrow = el("div", "arrow"); arrow.style.left = "485px"; arrow.style.top = "445px"; arrow.style.width = "0px"
+  const deliver = el("div", "deliver")
+  deliver.innerHTML = `<div class="col-title">Agents · unattended</div>`
+  const poller = el("div", "poller", `<span style="color:var(--accent)">●</span> poller on the dev server: next ready issue`)
+  const pipe = el("div", "pipe")
+  const stages = ["Understand", "Design", "Tests first", "Build", "Verify", "QA (e2e)", "Review", "Pull request"].map((x) => { const c = el("div", "chip", x); pipe.append(c); return c })
+  const outs = el("div", "outcomes", `<div class="out ok"><div class="k">low / medium risk</div>merges by itself once CI is green</div><div class="out you"><div class="k">high risk</div>waits for your approval</div>`)
+  deliver.append(poller, pipe, outs)
+  f.append(plan, issues, arrow, deliver); root.append(h, f)
+  const at = (name) => s.beats.find((b) => b.show === name)?.t0 ?? 999
+  const tPlan = at("plan"), tPoll = at("poller"), tPipe = at("pipeline"), tMerge = at("merge")
+  return { root, update(t) {
+    const ks = []
+    const set = (e, v, dy = 24) => { e.style.opacity = v; e.style.transform = `translateY(${(1 - v) * dy}px)`; ks.push(v.toFixed(3)) }
+    set(h, fade(t, 0.05))
+    const pc = [...plan.querySelectorAll(".chip")]
+    set(plan.querySelector(".col-title"), fade(t, tPlan))
+    pc.forEach((c, i) => set(c, fade(t, tPlan + 0.35 * i)))
+    set(issues, fade(t, tPlan + 1.8))
+    const w = fade(t, tPoll - 0.2, 0.8); arrow.style.width = `${w * 120}px`; arrow.style.opacity = w > 0 ? 1 : 0; ks.push(w.toFixed(3))
+    set(deliver.querySelector(".col-title"), fade(t, tPoll))
+    set(poller, fade(t, tPoll + 0.2))
+    stages.forEach((c, i) => set(c, fade(t, tPipe + 0.55 * i, 0.4), 14))
+    set(outs, fade(t, tMerge))
+    return ks.join()
+  } }
+}
+
+const PROMPT = `<span class="pr">alex@dev-server</span>:<span class="pr2">~</span>$ `
+B.terminal = (s) => {
+  const root = el("div", "scene")
+  const term = el("div", "term", `<div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span class="name">${esc(s.title)}</span></div>`)
+  const body = el("div", "body mono"), lines = el("div", "lines")
+  body.append(lines); term.append(body); root.append(term)
+  // schedule: each beat types its commands one after another (40 chars/s), output 0.3s after each
+  const sched = []
+  for (const b of s.beats) {
+    let c = b.t0 + 0.25
+    for (const l of b.lines ?? []) {
+      const typeDur = Math.min(2.4, l.cmd.length / 40)
+      sched.push({ ...l, t0: c, t1: c + typeDur })
+      c += typeDur + 0.3 + (l.out ? 0.25 * l.out.length + 0.4 : 0.2)
+    }
+  }
+  return { root, update(t) {
+    const a = fade(t, 0, 0.5); term.style.opacity = a; term.style.transform = `translateY(${(1 - a) * 20}px)`
+    let html = "", key = a.toFixed(2), started = false
+    for (const l of sched) {
+      if (t < l.t0) break
+      started = true
+      const n = Math.floor(clamp((t - l.t0) / (l.t1 - l.t0)) * l.cmd.length)
+      const typing = n < l.cmd.length
+      html += `<div>${PROMPT}${esc(l.cmd.slice(0, n))}${typing ? '<span class="cursor"></span>' : ""}</div>`
+      key += `|${n}`
+      if (!typing && l.out) l.out.forEach((o, i) => {
+        if (t >= l.t1 + 0.3 + 0.25 * i) { html += `<div class="o${o.includes("✔") ? " okl" : o.trim().startsWith("!") ? " warnl" : ""}">${esc(o)}</div>`; key += "o" }
+      })
+    }
+    const last = sched.filter((l) => t >= l.t0).pop()
+    if (!started || (last && t >= last.t1 + 0.3 + 0.25 * (last.out?.length ?? 0))) {
+      const blink = Math.floor(t * 1.6) % 2 === 0
+      html += `<div>${PROMPT}${blink ? '<span class="cursor"></span>' : ""}</div>`; key += blink ? "b" : "_"
+    }
+    lines.innerHTML = html
+    return key
+  } }
+}
+
+B.claude = (s) => {
+  const root = el("div", "scene")
+  const chat = el("div", "chat", `<div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span class="name">Claude Code · ${esc(s.session)} (Remote Control)</span><span class="status">● Connected</span></div>`)
+  const msgs = el("div", "msgs"), stack = el("div", "stack"), input = el("div", "input", "Reply to Claude…")
+  msgs.append(stack); chat.append(msgs, input); root.append(chat)
+  const sched = []
+  for (const b of s.beats) {
+    let c = b.t0 + 0.3
+    for (const m of b.msgs ?? []) {
+      const d = m.who === "user" ? Math.min(2.2, m.text.length / 45) : 0.5
+      sched.push({ ...m, t0: c, t1: c + d }); c += d + (m.who === "user" ? 0.9 : 1.2)
+    }
+  }
+  return { root, update(t) {
+    const a = fade(t, 0, 0.5); chat.style.opacity = a; chat.style.transform = `translateY(${(1 - a) * 20}px)`
+    let html = "", key = a.toFixed(2)
+    for (const m of sched) {
+      if (t < m.t0) break
+      if (m.who === "user") {
+        const n = Math.floor(clamp((t - m.t0) / (m.t1 - m.t0)) * m.text.length)
+        html += `<div class="msg user">${esc(m.text.slice(0, n))}${n < m.text.length ? '<span class="cursor" style="height:26px"></span>' : ""}</div>`; key += `|${n}`
+      } else if (m.who === "claude") {
+        const o = fade(t, m.t0, 0.5)
+        html += `<div class="msg claude" style="opacity:${o.toFixed(3)}"><span class="star">✳</span><div>${esc(m.text)}</div></div>`; key += `|c${o.toFixed(2)}`
+      } else {
+        const o = fade(t, m.t0, 0.5)
+        html += `<div class="msg out" style="opacity:${o.toFixed(3)}">${esc(m.text)}</div>`; key += `|o${o.toFixed(2)}`
+      }
+    }
+    stack.innerHTML = html
+    return key
+  } }
+}
+
+// Screenshot with a camera (focus rect, CSS px of a 1600-wide capture at 1.2×) and a highlight.
+const DSF = 1.2, VIEW = { x: 60, y: 30, w: 1800, h: 880 }
+const camFor = (f, imgW, imgH) => {
+  const [x, y, w, h] = f.map((v) => v * DSF)
+  let s = Math.min(VIEW.w / w, VIEW.h / h, 1.55)
+  const cx = x + w / 2, cy = y + h / 2
+  let tx = VIEW.x + VIEW.w / 2 - cx * s, ty = VIEW.y + VIEW.h / 2 - cy * s
+  // keep the image covering the frame where possible
+  tx = Math.min(0, Math.max(1920 - imgW * s, tx)); if (imgW * s < 1920) tx = (1920 - imgW * s) / 2
+  ty = Math.min(0, Math.max(1080 - imgH * s, ty)); if (imgH * s < 1080) ty = (1080 - imgH * s) / 2
+  if (y * s + ty < 0) ty = -y * s + 20
+  return { s, tx, ty }
+}
+B.shot = (s) => {
+  const root = el("div", "scene")
+  const wrap = el("div", "shotwrap"), cam = el("div", "cam"), img = el("img"), mark = el("div", "mark")
+  img.src = `shots/${s.img}.png`; cam.append(img, mark); wrap.append(cam); root.append(wrap)
+  const W = 1920, H = TL.shotSizes[s.img][1] * DSF
+  const cams = s.beats.map((b) => camFor(b.focus ?? [0, 0, 1600, 1000], W, H))
+  return { root, update(t) {
+    const a = fade(t, 0, 0.5); root.style.opacity = a
+    let i = 0; while (i + 1 < s.beats.length && t >= s.beats[i + 1].t0) i++
+    const prev = cams[Math.max(0, i - 1)], cur = cams[i]
+    const k = i === 0 ? 1 : fade(t, s.beats[i].t0 - 0.1, 0.9)
+    const c = { s: prev.s + (cur.s - prev.s) * k, tx: prev.tx + (cur.tx - prev.tx) * k, ty: prev.ty + (cur.ty - prev.ty) * k }
+    cam.style.transform = `translate(${c.tx.toFixed(1)}px, ${c.ty.toFixed(1)}px) scale(${c.s.toFixed(4)})`
+    const m = s.beats[i].mark
+    let mo = 0
+    if (m) {
+      const pm = i > 0 ? s.beats[i - 1].mark : null
+      const r = pm ? pm.map((v, j) => v + (m[j] - v) * fade(t, s.beats[i].t0, 0.6)) : m
+      mo = pm ? 1 : fade(t, s.beats[i].t0 + 0.4, 0.5)
+      const p = 8
+      mark.style.left = `${(r[0] - p) * DSF}px`; mark.style.top = `${(r[1] - p) * DSF}px`
+      mark.style.width = `${(r[2] + 2 * p) * DSF}px`; mark.style.height = `${(r[3] + 2 * p) * DSF}px`
+      mark.style.borderWidth = `${3 / c.s}px`
+    }
+    mark.style.opacity = mo
+    return `${a.toFixed(3)}|${c.tx.toFixed(1)},${c.ty.toFixed(1)},${c.s.toFixed(4)}|${mo.toFixed(3)}|${mark.style.left},${mark.style.top},${mark.style.width}`
+  } }
+}
+
+// ── scenes and the frame renderer ───────────────────────────────────────────────
+const built = TL.scenes.map((s) => { const b = B[s.type](s); frame.append(b.root); return b })
+let lastCap = null
+window.renderAt = (T) => {
+  let key = ""
+  TL.scenes.forEach((s, i) => {
+    const r = built[i].root
+    const local = T - s.start
+    if (local < -0.01 || local > s.dur + 0.01) { r.style.display = "none"; return }
+    r.style.display = "block"
+    const k = built[i].update(local)
+    // scene fade in/out (shot scenes fade themselves in)
+    const fo = s.type === "shot" ? 1 : fade(local, 0, 0.35)
+    const out = 1 - fade(local, s.dur - 0.35, 0.35)
+    r.style.opacity = Math.min(fo, out) * (s.type === "shot" ? 1 : 1)
+    if (s.type === "shot") r.style.opacity = Math.min(parseFloat(r.style.opacity) || 1, out) * fade(local, 0, 0.5)
+    key += `${i}:${k}:${r.style.opacity};`
+  })
+  // caption of the beat being spoken
+  let cap = "", capO = 0
+  for (const s of TL.scenes) for (const b of s.beats) {
+    const st = s.start + b.t0, en = s.start + b.t0 + b.dur
+    if (T >= st - 0.05 && T < en) { cap = b.cap; capO = Math.min(fade(T, st - 0.05, 0.2), 1 - fade(T, en - 0.2, 0.2)) }
+  }
+  if (cap !== lastCap) { capEl.textContent = cap; lastCap = cap }
+  capEl.style.opacity = cap && TL.captions ? capO : 0
+  if (!TL.captions) { cap = ""; capO = 0 }
+  // chapter label
+  const sc = TL.scenes.filter((s) => s.start <= T).pop()
+  const ch = TL.scenes.filter((s) => s.start <= T && s.type === "chapter").pop()
+  const showChap = ch && sc && sc.type !== "chapter" && sc.type !== "title"
+  chapEl.innerHTML = showChap ? `<b>${esc(ch.num)}</b> ${esc(ch.title)}` : ""
+  chapEl.style.opacity = showChap ? 1 : 0
+  if (sc?.type === "shot") { chapEl.style.background = "rgba(8,9,14,0.75)"; chapEl.style.padding = "8px 16px"; chapEl.style.borderRadius = "10px"; chapEl.style.top = "980px"; chapEl.style.left = "40px"; chapEl.style.opacity = 0 }
+  else { chapEl.style.background = "none"; chapEl.style.padding = "0"; chapEl.style.top = "40px"; chapEl.style.left = "56px" }
+  progEl.style.width = `${(T / TL.total) * 1920}px`
+  return key + `|${cap}|${capO.toFixed(2)}|${Math.round((T / TL.total) * 1920)}`
+}
+window.ready = Promise.all([...document.images].map((i) => i.decode().catch(() => {})))
+</script>
+</body>
+</html>
