@@ -454,6 +454,10 @@ watch_pr_checks() {
     # Conflicts first: GitHub runs no pull_request workflows for a conflicting PR, so its checks would
     # look pending forever.
     if [ "$mergeable" = CONFLICTING ]; then
+      # A PR queued in the merge train behind another one is reworked once it reaches the front: the PRs
+      # ahead of it will change the base again when they merge, so resolving now means resolving twice
+      # (and a re-approval each time).
+      if train_waiting "$pr"; then continue; fi
       request_rework "$pr" "$n" "$sha" "merge conflicts with $base" "ADLC: this PR has merge conflicts with \`$base\` at \`${sha:0:7}\`. Merge \`$base\` into the branch and resolve them, keeping the intent of both sides; then verify and review again." also-blocked
       continue
     fi
@@ -632,6 +636,10 @@ agent_wont_rework() { # agent_wont_rework <pr> <issue> <conflicts|failed>
   fi
   why="automatic reworks used up: fix it on the branch, or relabel #$2 adlc:ready for another agent rework"
 }
+# The PR is queued in the merge train behind another PR (from the train's last pass).
+train_waiting() { # train_waiting <pr>
+  [ -s "$TRAIN_FILE" ] && jq -e --argjson pr "$1" '.mode == "on" and any(.prs[]; .pr == $pr and .status == "queued")' "$TRAIN_FILE" >/dev/null 2>&1
+}
 # The PR's title comes from merge_train's loop ($title): the dashboard keeps showing it after the merge,
 # when the PR is no longer in its list of open PRs.
 train_entry() { jq -cn --argjson pr "$1" --argjson issue "$2" --arg status "$3" --arg detail "${4:-}" --arg title "${title:-}" '{pr:$pr,issue:$issue,title:$title,status:$status,detail:$detail}'; }
@@ -692,7 +700,10 @@ merge_train() {
         entries+=("$(train_entry "$pr" "$n" queued "risk $risk (no approval needed); waits for #$front")"); continue
       fi
     elif ! approval_holds "$approved" "$head" "$base"; then
-      entries+=("$(train_entry "$pr" "$n" needs-reapproval "new changes since your approval (${approved:0:7}..${head:0:7})")")
+      # It keeps its place: the PRs behind it wait for your re-approval and its merge, or they would
+      # merge first and leave it behind the base (another update, maybe conflicts, another re-approval).
+      if [ -z "$front" ]; then front=$pr; detail="; the PRs behind it wait for it"; else detail=""; fi
+      entries+=("$(train_entry "$pr" "$n" needs-reapproval "new changes since your approval (${approved:0:7}..${head:0:7})$detail")")
       f="$CI_DIR/reapprove-$pr"
       if ! grep -qx "$head" "$f" 2>/dev/null && [ "$mode" = on ]; then
         # GitHub keeps the (stale) approval since "dismiss stale approvals" is off: make sure its auto-merge

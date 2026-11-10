@@ -314,6 +314,9 @@ $("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span c
 /* ── Fix it: what to do when… ──────────────────────────────────── */
 // [category, what you see, why, steps, optional code]. `x` in text renders as code.
 const FIXES = [
+  ["PRs", "Approved PRs were all reworked for conflicts at once, and keep needing re-approval",
+    "Older runners sent every conflicting agent PR back to the agent at the same time, and let the next PR overtake one waiting for re-approval, so each merge caused new conflicts. Current runners rework a queued PR only when it reaches the front, and a PR waiting for re-approval keeps its place.",
+    ["Re-approve the PR at the front of the train (Needs you → Merge train).", "The PRs behind it then merge one by one, each brought up to date (and reworked if it conflicts) when its turn comes."]],
   ["Pipeline", "After changing stacks, the agents lack a tool or a stack's conventions",
     "The runner's tools and plugins follow `adlc.yaml` only when the runner is rebuilt: `adlc restart` reloads plugins but not the image.",
     ["Merge the `stacks` change to main.", "Between deliveries: `adlc pause <slug>`, then `adlc up <slug>`, then `adlc resume <slug>`.", "Check which packs it installed. \"no stack pack for '<name>'\" means the name doesn't match a stack."],
