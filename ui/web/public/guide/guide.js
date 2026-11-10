@@ -209,7 +209,7 @@ const TUTS = [
   ] },
   { id: "plan", title: "Plan a product", when: "Interactive sessions from the Claude app · a few hours over a few days", steps: [
     { t: "Open a Remote Control session", w: "Claude app / claude.ai/code", b: "Start a new session on the <b>adlc-&lt;slug&gt;</b> environment and wait for <b>Ready</b>. It works in <code>sessions/rc</code> on the dev server." },
-    { t: "Set up the project", w: "Claude session", b: "Go section by section or accept the defaults and review the summary. Then run the provisioning script yourself: it needs your admin login, which agents never get.",
+    { t: "Set up the project", w: "Claude session", b: "Claude asks for your platforms and <b>stacks</b> first (react-native, react-web, node-api: see <a href=\"#stacks\">Stacks</a>), then goes section by section; or accept the defaults and review the summary. Then run the provisioning script yourself: it needs your admin login, which agents never get.",
       c: "/adlc-core:init\n! bash .adlc/provision.sh" },
     { t: "Discover the product", w: "Claude session", b: "Rounds of questions turn the idea into a vision, a PRD and acceptance criteria. Say “more ideas” or “stop suggesting” at any time.",
       c: "/adlc-core:discover A booking app for small gyms…" },
@@ -219,6 +219,20 @@ const TUTS = [
       c: "/adlc-core:plan-backlog" },
     { t: "Let it deliver", w: "dashboard", b: "The walking skeleton comes first; the poller then takes ready issues in dependency order. Watch it on the dashboard's <b>Now</b> tab (<b>What's happening</b>: each issue's delivery run, merge-train step and CI jobs in one row, plus the dev deploy with its publish run, and the nightly) and the <b>Queue</b> tab.",
       n: "Finish or push open session work before <code>adlc up</code> or <code>adlc restart</code>: a restart ends every app session, and old sessions don't reconnect." },
+  ] },
+  { id: "adopt", title: "Adopt an existing project", when: "An existing codebase · an afternoon, plus supervised first issues", steps: [
+    { t: "Set up the runner for the repository", w: "dev server", b: "Same as for a new project, but with the existing repository, and install the ADLC GitHub App on it. Nothing in the repository changes yet.",
+      c: "adlc secrets <slug>\nadlc up <slug> --repo <owner>/<repo>" },
+    { t: "Record the setup", w: "Claude session", b: "Init detects what's there first: repository settings, branch protection, CI and required checks, Dockerfiles and registry, Expo config, Renovate or Dependabot. It proposes those values, marked <b>detected</b>. Choose the <a href=\"#stacks\">stacks</a> that match the code, or your organization's own. Then run the provisioning script.",
+      c: "/adlc-core:init\n! bash .adlc/provision.sh" },
+    { t: "Reconstruct the architecture", w: "Claude session", b: "A scout maps the code (modules, data, API, auth, build, tests); the architect writes the <b>as-is</b> architecture, <b>retroactive ADRs</b> and a Risks &amp; debt list. Review them carefully: from now on they bind every agent, and they override the stacks' defaults.",
+      c: "/adlc-core:architect --assess" },
+    { t: "Confirm the build profile", w: "dev server", b: "<code>--assess</code> drafts <code>adlc.build.yaml</code> from your scripts and CI. Run each command in the runner: the agents and CI will run exactly these.",
+      c: "adlc shell <slug>" },
+    { t: "Bring in work", w: "Claude session", b: "New features: discovery first maps what the product already does, then the backlog. Existing issues: bring them to the issue format and label them <code>adlc:ready</code>.",
+      c: "/adlc-core:discover <feature idea>\n/adlc-core:plan-backlog" },
+    { t: "Deliver the first issues under supervision", w: "Claude session", b: "Pick one or two low-risk issues and run them interactively, so you see how the agents treat your code. Then let the poller take over.",
+      c: "/adlc-core:deliver <n>" },
   ] },
   { id: "steer", title: "Steer delivery", when: "Day to day · from the dashboard", steps: [
     { t: "Read the queue", w: "dashboard → Queue", b: "Issues in the order they will start: Run next, then epics on Run next, then reworks, then milestone due date and age. Each row shows what it waits for." },
@@ -300,6 +314,13 @@ $("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span c
 /* ── Fix it: what to do when… ──────────────────────────────────── */
 // [category, what you see, why, steps, optional code]. `x` in text renders as code.
 const FIXES = [
+  ["Pipeline", "After changing stacks, the agents lack a tool or a stack's conventions",
+    "The runner's tools and plugins follow `adlc.yaml` only when the runner is rebuilt: `adlc restart` reloads plugins but not the image.",
+    ["Merge the `stacks` change to main.", "Between deliveries: `adlc pause <slug>`, then `adlc up <slug>`, then `adlc resume <slug>`.", "Check which packs it installed. \"no stack pack for '<name>'\" means the name doesn't match a stack."],
+    "docker logs adlc-<slug>-runner-1 2>&1 | grep \"stack pack\""],
+  ["Pipeline", "The agents use a stack's default where your project decided otherwise",
+    "Stack skills are defaults (UI kit, ORM, test runner…). Only accepted ADRs override them.",
+    ["Record the decision as an ADR: `/adlc-core:architect`, or a PR adding it under `docs/architecture/adr/` with status accepted.", "The agents follow it from the next run."]],
   ["Pipeline", "An issue doesn't start after you answered its question",
     "Removing `adlc:needs-info` leaves the issue with no pipeline state. The poller only starts `adlc:ready` issues (and `adlc:queued` ones once their blockers close).",
     ["Relabel it `adlc:ready` (or `adlc:queued` if it still has open blockers), or press Start on the dashboard's Needs you tab.", "The run resumes where it stopped and reads your answer."],
@@ -495,6 +516,7 @@ const CMDS = [
   ["adlc doctor", "host", "Host checks: Docker, /dev/kvm, disk, secrets, whether each runner runs this checkout's scripts, and each project's CI roles, slots and test jobs at once on this host (warns when the test runner would stop during Android jobs, or the running registrars use another slot count)."],
   ["adlc secrets <slug>", "host", "Enter or update the project's secrets (stored mode 600, never shown)."],
   ["adlc up <slug> [--repo o/r] [--ci-roles …]", "host", "Build the runner image and start or update everything. Loads new ADLC scripts. Remembers CI roles."],
+  ["adlc up <slug> --stacks a,b", "host", "Build the runner with these stacks' tools for this run instead of adlc.yaml's stacks (e.g. to try one)."],
   ["adlc up <slug> --ci-only --ci-roles test,kvm --ci-host ci2", "CI host", "Run only CI registrars and their engines on a second machine."],
   ["adlc ui host-token <host> [--rotate|--remove]", "host", "Token a CI-only host uses to report its CPU, memory and disk to the dashboard."],
   ["adlc ui report <dashboard url>", "CI host", "Report this CI-only host's CPU, memory and disk to the dashboard (asks for the host token)."],
@@ -512,7 +534,7 @@ const CMDS = [
   ["adlc down <slug>", "host", "Stop the project; workspace, volumes and login are kept."],
   ["/adlc-core:init [--update <section>]", "session", "Project setup: repo, CI, registry, environments, autonomy."],
   ["/adlc-core:discover <idea> [--resume]", "session", "Idea to vision, PRD, glossary and acceptance criteria."],
-  ["/adlc-core:architect [--resume] [--assess]", "session", "Architecture, ADRs, quality attributes, evolution and fitness checks."],
+  ["/adlc-core:architect [--resume] [--assess]", "session", "Architecture, ADRs, quality attributes, evolution and fitness checks. --assess reconstructs an existing codebase's as-is architecture and retroactive ADRs."],
   ["/adlc-core:plan-backlog [--revise]", "session", "Milestones, epics and dependency-ordered issues, created after approval."],
   ["/adlc-core:deliver <n>", "session", "Deliver one issue (the poller runs this for you); resumes from the last phase."],
 ]

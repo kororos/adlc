@@ -104,6 +104,20 @@ export const scenes = [
       msgs: [{ who: "user", text: "! bash .adlc/provision.sh" }, { who: "out", text: "✓ labels, milestones, branch protection, environments\n✓ registered on the runner" }] }),
   ] },
 
+  { type: "bullets", heading: "Stacks: what ADLC knows about your technology", intro: "Each stack brings conventions and templates for the agents, tools on the dev server, its download hosts, and end-to-end CI jobs.", items: [
+    { icon: "◆", text: "react-native", sub: "Expo apps on web, Android and iOS · Android SDK, Maestro, emulator e2e" },
+    { icon: "◆", text: "react-web", sub: "desktop-first React + Vite web apps · shadcn/ui, Tailwind, Vitest, Playwright" },
+    { icon: "◆", text: "node-api", sub: "Node.js APIs with Postgres and Redis · migrations, containers, Swarm deploys" },
+    { icon: "+", text: "Your organization's own", sub: "its conventions for a kind of app, in your fork of ADLC · Claude writes it with you" },
+  ], beats: [
+    beat("One of init's first questions is which stacks your project uses. A stack is what ADLC knows about a technology.", { say: "One of init's first questions is which stacks your project uses. A stack is what A D L C knows about a technology." }),
+    beat("Each one brings conventions and templates that every agent loads, the tools the agents need on the dev server, the download hosts it may reach, and its end-to-end CI jobs."),
+    beat("React Native, for Expo apps on web, Android and iOS.", { reveal: 1 }),
+    beat("React web, for desktop-first web apps.", { reveal: 2 }),
+    beat("And Node API, for back ends with Postgres and Redis.", { say: "And Node A P I, for back ends with Postgres and Redis.", reveal: 3 }),
+    beat("Your ADRs override any stack's defaults. And you can add your organization's own conventions as a stack: ask Claude to create one, and it interviews you and learns from a reference repository.", { say: "Your A D Rs override any stack's defaults. And you can add your organization's own conventions as a stack: ask Claude to create one, and it interviews you and learns from a reference repository.", reveal: 4 }),
+  ] },
+
   { type: "claude", session: "adlc-orbit", beats: [
     beat("Next, describe your idea with /adlc-core:discover.", {
       say: "Next, describe your idea with slash A D L C core, discover.",
@@ -117,6 +131,22 @@ export const scenes = [
       say: "And slash plan backlog breaks the work into epics and issues, with milestones and dependencies. The first issue is always a walking skeleton: one thin path from screen to A P I to database, with C I and a test environment.",
       msgs: [{ who: "user", text: "/adlc-core:plan-backlog" }, { who: "claude", text: "Created 3 milestones, 6 epics and 41 issues with dependencies.\n#1 Walking skeleton: scaffold, CI, test environment, one path screen → API → database" }] }),
     beat("Each step ends with a pull request of its documents, so everything is versioned in your repository."),
+  ] },
+
+  { type: "claude", session: "adlc-orbit", beats: [
+    beat("Already have a codebase? ADLC can adopt it, and work within the architecture it already has.", { say: "Already have a codebase? A D L C can adopt it, and work within the architecture it already has." }),
+    beat("Init detects what's there, like your CI, Dockerfiles, registry and repository settings, and proposes those values instead of its defaults.", {
+      msgs: [
+        { who: "user", text: "/adlc-core:init" },
+        { who: "claude", text: "CI/CD · detected\n• .github/workflows/ci.yml: lint, test, build (required checks)\n• registry: ghcr.io/acme/orbit (pushed by the Dockerfile workflow)\nKeep these, change them, or answer tbd." },
+      ] }),
+    beat("Then /adlc-core:architect --assess maps the code and writes the as-is architecture, retroactive decision records, and a list of risks and technical debt.", {
+      say: "Then architect, with assess, maps the code and writes the as-is architecture, retroactive decision records, and a list of risks and technical debt.",
+      msgs: [
+        { who: "user", text: "/adlc-core:architect --assess" },
+        { who: "claude", text: "As-is architecture written, for your review:\n• 9 retroactive ADRs, e.g. 0003 Prisma for data access\n• Risks & debt: 6 items\n• adlc.build.yaml drafted from your scripts: confirm each command" },
+      ] }),
+    beat("From then on, every agent follows those decisions, over any stack's defaults. Start with a few low-risk issues under supervision, then let the poller take over."),
   ] },
 
   { type: "chapter", num: "Part 3", title: "Watch it deliver", beats: [beat("Part three: watch it deliver.")] },

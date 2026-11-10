@@ -1,6 +1,6 @@
 # ADLC video tutorial: how it's built
 
-The 9-minute tutorial for new users is generated, not recorded, so it can be rebuilt after the dashboard or the commands change. The published video is attached to the [`tutorial-video` release](https://github.com/kororos/adlc/releases/tag/tutorial-video); the Field Guide plays it in its own player, and the README links to it.
+The 11-minute tutorial for new users is generated, not recorded, so it can be rebuilt after the dashboard or the commands change. The published video is attached to the [`tutorial-video` release](https://github.com/kororos/adlc/releases/tag/tutorial-video); the Field Guide plays it in its own player, and the README links to it.
 
 | File | What it is |
 |---|---|
@@ -29,7 +29,7 @@ The narration uses [Soniox Text-to-Speech](https://docs.soniox.com/tts) (voice "
    curl -s -H "Authorization: Bearer $K" https://api.soniox.com/v1/tts-models \
      | jq -r '.models[0].voices[] | "\(.id)\t\(.description)"' | grep -iE 'american|british|australian'
    ```
-4. Build with `TTS=soniox` (and `SONIOX_VOICE=<name>` for another voice). Soniox charges per generated audio; the whole video is about 9 minutes, and lines that didn't change come from the cache in `audio/`.
+4. Build with `TTS=soniox` (and `SONIOX_VOICE=<name>` for another voice). Soniox charges per generated audio; the whole video is about 11 minutes, and lines that didn't change come from the cache in `audio/`.
 
 Without a key, leave out `TTS=soniox`: the build uses the macOS `say` voice (`VOICE=Samantha` by default, `RATE=172`), which sounds noticeably robotic.
 

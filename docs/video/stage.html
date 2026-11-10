@@ -44,6 +44,7 @@
   .item .ic { width: 84px; height: 84px; border-radius: 22px; background: rgba(139,140,255,0.14); color: var(--accent); display: grid; place-items: center; font-size: 40px; font-weight: 700; }
   .item .t { font-size: 40px; font-weight: 600; }
   .item .s { font-size: 28px; color: var(--muted); margin-top: 6px; }
+  .intro { position: absolute; left: 140px; right: 200px; top: 215px; font-size: 32px; line-height: 1.4; color: var(--muted); }
 
   /* flow */
   .flow { position: absolute; left: 140px; right: 110px; top: 270px; height: 640px; }
@@ -148,7 +149,9 @@ B.chapter = (s) => {
 B.bullets = (s) => {
   const root = el("div", "scene")
   const h = el("div", "heading", esc(s.heading))
+  const intro = s.intro ? el("div", "intro", esc(s.intro)) : null
   const list = el("div", "items")
+  if (intro) list.style.top = "330px"
   const items = s.items.map((it, i) => {
     const e = el("div", "item", `<div class="ic">${esc(it.icon)}</div><div><div class="t">${esc(it.text)}</div><div class="s">${esc(it.sub ?? "")}</div></div>`)
     // the item appears with the first beat that reveals it
@@ -157,10 +160,12 @@ B.bullets = (s) => {
     list.append(e); return e
   })
   if (s.items.length >= 4) list.style.gap = "22px"
-  root.append(h, list)
+  root.append(h, list); if (intro) root.append(intro)
+  const tIntro = s.beats[1]?.t0 ?? 0.5
   return { root, update(t) {
     const a = fade(t, 0.05, 0.5); h.style.opacity = a
     const ks = [a.toFixed(3)]
+    if (intro) { const f = fade(t, tIntro, 0.6); intro.style.opacity = f; ks.push(f.toFixed(3)) }
     for (const e of items) { const f = fade(t, e._at, 0.5); e.style.opacity = f; e.style.transform = `translateY(${(1 - f) * 30}px)`; ks.push(f.toFixed(3)) }
     return ks.join()
   } }

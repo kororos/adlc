@@ -21,7 +21,7 @@ Verified against Claude Code 2.1.299 docs (code.claude.com) on 2026-10-14. Items
 | Network | Egress proxy, starting in **audit** mode. Credential scoping is the primary control. |
 | Agent identity | **ADLC GitHub App** (one per account, installed per repo): installation tokens (1 h, single repo) minted in the runner by `adlc-gh-token`. A `gh` wrapper and git credential helper fetch a fresh token per use. Commits are made as `<app>[bot]`. The bot isn't an admin, so it can't bypass branch protection, and the owner can approve its PRs. `gh_pat` is a fallback only. |
 | Prod deploys | Human-run `adlc-swarm-deploy` on the Swarm manager: only refs on the default branch, image check, `deploy/predeploy.sh`, then `docker stack deploy`. No CI runner on the manager. `/deploy/` and `/.github/` are in CODEOWNERS. Works on GitHub Pro (no Enterprise-only environment reviewers or rulesets needed). |
-| Stack packs | `stack-react-native`, `stack-node-api` (skills plus templates), installed by the runner from `adlc.yaml stacks`. Core `ci-workflows` skill: CI runs the same `adlc.build.yaml` commands as the agents. |
+| Stack packs | `stack-react-native`, `stack-react-web`, `stack-node-api` (skills plus templates, runner image layers, egress domain lists), installed by the runner from `adlc.yaml stacks` (README §15). Core `ci-workflows` skill: CI runs the same `adlc.build.yaml` commands as the agents. |
 | Project setup | One-time `/adlc-core:init` captures repo, CI, registry (default GHCR), environments, mobile distribution, secrets, release and compliance. Persisted in `adlc.yaml` (policy, read-only for unattended runs), `docs/project/setup.md` (decisions + reasons) and a generated `CLAUDE.md` block (auto-loaded by every agent). Privileged GitHub setup runs through a reviewed `.adlc/provision.sh` with the user's admin credentials. |
 
 ## 2. Lifecycle
@@ -132,6 +132,7 @@ adlc/  (this repo = Claude Code plugin marketplace)
 │   │   ├── skills/     handoff-contracts, testing-contract, project-setup
 │   │   └── hooks/      guard.sh (PreToolUse)
 │   ├── stack-react-native/   (Phase 4) skills, e2e patterns, emulator sidecar, network domains
+│   ├── stack-react-web/      skills (Vite SPA, nginx image, Vitest/Playwright), templates
 │   └── stack-node-api/       (Phase 4) skills, Postgres/Redis patterns, network domains
 ├── sandbox/            (Phase 0, next) Dockerfile, compose, egress proxy, entrypoint, poller
 ├── templates/project/  .claude/settings.json, CLAUDE.md, adlc.yaml (policy), adlc.build.yaml (commands)
@@ -225,7 +226,7 @@ Controls, strongest first:
 5. **Egress proxy** (all HTTP(S) leaves through it) with `network.mode`:
    - `open`: interactive sessions (a human is present).
    - `audit`: allow and log every domain. This is the **initial default** for all modes, run for a few weeks.
-   - `allowlist`: unattended runs once the list is stable. The list is assembled from core (Anthropic, GitHub, Context7) + each enabled stack pack's `network.domains` + `adlc.yaml network.extra_domains`.
+   - `allowlist`: unattended runs once the list is stable. The list is assembled from core (Anthropic, GitHub, Context7) + each enabled stack's `sandbox/egress/domains/<stack>.txt` + `adlc.yaml network.extra_domains`.
 6. **Package caches** inside the runner (npm/pnpm store, Gradle) to reduce outbound traffic and speed up builds.
 7. Non-root container user (required for `bypassPermissions`).
 8. The poller sets `ADLC_MODE=unattended`, so the guard hook makes the policy and setup files read-only for agents.
@@ -254,7 +255,7 @@ Controls, strongest first:
 | 1 | Smoke test: toy RN + Node repo, discover → architect → backlog → deliver 3 issues | |
 | 2 | Hardening: rate-limit handling, resume, telemetry (tokens/cost per agent), optional Agent SDK poller | |
 | 3 | Nightly regression workflow template, flaky management, docs agent, notifications/digest | |
-| 4 | Stack packs: react-native, node-api | **done (draft).** Skills, templates (compose, Swarm stack and workflows validated with compose config, stack config and actionlint). Not yet exercised by a real walking skeleton. |
+| 4 | Stack packs: react-native, node-api, react-web | **done.** Skills, templates, runner layers and egress lists; exercised by a real project's walking skeleton and deliveries since October 2026. |
 | 4b | Agent identity (GitHub App), human-run Swarm deploys | **done (draft).** JWT signing and the error paths tested; deploy script tested in a throwaway swarm. Real app install pending. |
 | 4c | Pack-authoring guide; more packs (ESP32 …) | |
 | 5 | Evals per agent (golden issues), routing tuned from telemetry | |

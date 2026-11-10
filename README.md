@@ -23,7 +23,7 @@ It is packaged as a Claude Code **plugin marketplace**, so a project gets the wh
 12. [Configuration reference](#12-configuration-reference)
 13. [Agents and models](#13-agents-and-models)
 14. [Safety model](#14-safety-model)
-15. [Extending ADLC with stack packs](#15-extending-adlc-with-stack-packs)
+15. [Stacks: what ADLC knows about your technology](#15-stacks-what-adlc-knows-about-your-technology)
 16. [Troubleshooting](#16-troubleshooting)
 17. [Repository layout](#17-repository-layout)
 18. [License, support and contributing](#18-license-support-and-contributing)
@@ -59,10 +59,10 @@ It is packaged as a Claude Code **plugin marketplace**, so a project gets the wh
 1. **Dev server:** a Linux machine with Docker; clone ADLC and run `adlc doctor` ([§3](#3-installation)).
 2. **GitHub:** create your project's repo and the ADLC GitHub App, which gives the agents their own identity ([§3](#agent-identity-the-adlc-github-app-recommended)).
 3. **Runner:** `adlc secrets <slug>`, `adlc up <slug> --repo <owner>/<slug>`, `adlc login <slug>`, then `adlc ui up` for the dashboard.
-4. **Plan with Claude** from claude.ai/code or the Claude app: `/adlc-core:init`, `discover`, `architect`, `plan-backlog` ([§4](#4-starting-a-new-project)).
+4. **Plan with Claude** from claude.ai/code or the Claude app: `/adlc-core:init` (including your [stacks](#15-stacks-what-adlc-knows-about-your-technology)), `discover`, `architect`, `plan-backlog` ([§4](#4-starting-a-new-project)).
 5. **Let it deliver:** watch the dashboard, review high-risk PRs, answer questions and do your owner tasks ([§10](#10-day-to-day-operation)).
 
-**New to ADLC?** Watch the 9-minute video tutorial (install, a first project, delivery and day-to-day use; with subtitles): in the Field Guide (**▶ Watch the video tutorial**), or [download it](https://github.com/kororos/adlc/releases/tag/tutorial-video). The **ADLC Field Guide** walks through it interactively: an issue-lifecycle simulator (labels, poller, CI, merge train), six step-by-step tutorials and a label and command reference. Open [`ui/web/public/guide/index.html`](ui/web/public/guide/index.html) from a clone in any browser (it needs no server or network), or use **Guide** in the dashboard's sidebar (`/guide/`).
+**New to ADLC?** Watch the 11-minute video tutorial (install, a first project and its stacks, adopting an existing codebase, delivery and day-to-day use; with subtitles): in the Field Guide (**▶ Watch the video tutorial**), or [download it](https://github.com/kororos/adlc/releases/tag/tutorial-video). The **ADLC Field Guide** walks through it interactively: an issue-lifecycle simulator (labels, poller, CI, merge train), seven step-by-step tutorials and a label and command reference. Open [`ui/web/public/guide/index.html`](ui/web/public/guide/index.html) from a clone in any browser (it needs no server or network), or use **Guide** in the dashboard's sidebar (`/guide/`).
 
 ---
 
@@ -341,7 +341,7 @@ All commands below run in an interactive Claude Code session, in an empty folder
 ```text
 /adlc-core:init
 ```
-Claude asks for the project name, description and platforms. Then it goes section by section. Each section shows the proposed values with a one-line reason; you confirm, change, or answer `tbd`:
+Claude asks for the project name, description, platforms and **stacks** (the technologies ADLC brings know-how for, see [§15](#15-stacks-what-adlc-knows-about-your-technology)). Then it goes section by section. Each section shows the proposed values with a one-line reason; you confirm, change, or answer `tbd`:
 
 | Section | Examples of what is decided |
 |---|---|
@@ -400,14 +400,17 @@ Each planning step ends with a PR containing its documents. Discovery and backlo
 
 ## 5. Adopting ADLC on an existing project
 
-1. **Install** the plugins (see [§3](#3-installation)) and open the project.
-2. **Record the setup:** `/adlc-core:init`. Claude detects what already exists (repo, CI, registry) and proposes those values instead of defaults. Run `provision.sh` to add the ADLC labels, environments and branch protection.
-3. **Reconstruct the architecture:** `/adlc-core:architect --assess`. The codebase-scout maps the code and the solution-architect writes the *as-is* architecture, retroactive ADRs, and a **Risks & debt** list. Review it carefully: from now on these ADRs constrain every change.
-4. **Write the build profile:** `--assess` drafts `adlc.build.yaml` from your existing scripts (install, lint, typecheck, test, e2e). Check that each command actually works.
-5. **Bring in work:**
-   - For a **new feature**: `/adlc-core:discover <feature idea>`, then `/adlc-core:plan-backlog`.
+ADLC can take over an existing codebase and work **within its architecture**: it reads what's there, records it, and from then on every agent follows it.
+
+1. **Set up the runner** for the existing repository as in [§3](#3-installation): `adlc secrets <slug>`, `adlc up <slug> --repo <owner>/<repo>`, and install the ADLC GitHub App on that repository. There's no `gh repo create`; nothing in the repository changes yet.
+2. **Record the setup:** `/adlc-core:init`. Claude detects what already exists before asking: the repository's settings and branch protection, CI workflows and required checks, Dockerfiles and the registry they push to, Expo config, Renovate or Dependabot, `.env.example`. It proposes those values, marked "detected", instead of ADLC's defaults. Run `provision.sh` to add the ADLC labels, environments and branch protection.
+3. **Choose the stacks** that match the code (init asks; [§15](#15-stacks-what-adlc-knows-about-your-technology)). A stack's conventions are defaults, so where your code already does things differently, the ADRs from the next step win. If your organization has its own conventions for this kind of application, use (or [create](docs/stacks/README.md)) its stack: the stack then carries the organization's rules, and the ADRs this codebase's own decisions.
+4. **Reconstruct the architecture:** `/adlc-core:architect --assess`. The codebase-scout maps the code at architecture level (modules and dependencies, data stores and schemas, API surface, auth, state, build and deploy, test setup), and the architect writes the *as-is* architecture, **retroactive ADRs** (accepted, "recorded retroactively") and a **Risks & debt** list. It designs new parts only for what the product needs and the code lacks. Review it carefully: from now on these ADRs constrain every change.
+5. **Write the build profile:** `--assess` drafts `adlc.build.yaml` from your existing scripts (package.json, Makefile, CI workflows) and asks you to confirm each command works. The agents and CI run exactly these commands, so check them in the runner (`adlc shell <slug>`).
+6. **Bring in work:**
+   - For a **new feature**: `/adlc-core:discover <feature idea>`. On an existing codebase it first maps what the product already does (features, screens, endpoints, roles), then works out the feature against it. Then `/adlc-core:plan-backlog`.
    - For **existing issues**: make sure they follow the [issue format](#writing-issues-by-hand), then label them `adlc:ready`.
-6. Start with one or two **low-risk issues** delivered under supervision (`/adlc-core:deliver <n>` in an interactive session) before enabling the poller.
+7. Start with one or two **low-risk issues** delivered under supervision (`/adlc-core:deliver <n>` in an interactive session) before enabling the poller.
 
 ---
 
@@ -798,18 +801,60 @@ The orchestrating sessions never read code or logs. They receive at most 15-line
 
 ---
 
-## 15. Extending ADLC with stack packs
+## 15. Stacks: what ADLC knows about your technology
 
-The core is technology-agnostic. Technology know-how lives in **stack packs**: plugins with skills (conventions, templates), runner image layers, egress domain lists and, later, setup questions and specialised agents. A project enables them in `adlc.yaml → stacks`. The runner installs the matching `stack-<name>` plugins and image layers on `adlc up`, and agents load the skills that apply to their task.
+The core pipeline (agents, labels, merge train, CI gate) knows nothing about any language or framework. What ADLC knows about **your** technology comes from **stacks**: one per technology, enabled per project in `adlc.yaml`:
 
-| Pack | Skills | Runner layer |
-|---|---|---|
-| `stack-react-native` | `expo-app` (app conventions) · `e2e-patterns` (Playwright, Maestro, shared emulator) · `rn-test-env` (adlc.build.yaml, compose test env, emulator, e2e workflow templates) | JDK 17, Android SDK, Maestro, Playwright deps |
-| `stack-react-web` | `vite-spa` (React + Vite + TS, TanStack Router/Query, **shadcn/ui on Base UI + Tailwind v4**, runtime config, a11y, review checklist) · `web-containers` (Dockerfile with vite dev / unprivileged nginx targets, `/config.json`, CSP, same-origin `/api` via Traefik) · `web-testing` (Vitest + Testing Library, Playwright, axe) | Playwright deps (chromium) |
-| `stack-node-api` | `node-api` (Fastify, zod, OpenAPI, auth, health) · `postgres-redis` (migrations, expand/contract, Redis rules) · `node-containers` (Dockerfile, compose, Swarm stack, predeploy migrations) | (none needed) |
-| core | `ci-workflows` (CI from adlc.build.yaml, publish, nightly) | |
+```yaml
+stacks: [react-native, node-api]   # react-native, react-web, node-api
+platforms: [web, android, ios]     # which platforms the acceptance criteria and e2e tests cover
+```
 
-To add a technology (e.g. ESP32): create `plugins/stack-<name>/` with `.claude-plugin/plugin.json` and `skills/`, add it to `.claude-plugin/marketplace.json`, optionally add `sandbox/runner/stacks/<name>.Dockerfile` and `sandbox/egress/domains/<name>.txt`. A pack-authoring guide will follow. 🚧
+### What a stack brings
+Each stack is up to four parts, matched by name. The project needs no other setting:
+
+| Part | Where it lives | What it does | When it applies |
+|---|---|---|---|
+| **Skills** (conventions and templates) | `plugins/stack-<name>/skills/` | Every agent loads the skills that fit its task before it starts: the architect for the design, the test-designer for the tests, the implementer, reviewer and debugger for the code, QA for the e2e flows. Accepted ADRs override them. Templates give the walking skeleton its Dockerfiles, compose files, test environment and CI jobs. | The runner installs `stack-<name>` for each entry when it starts (`adlc up`, `adlc restart`). |
+| **Runner image layer** (tools) | `sandbox/runner/stacks/<name>.Dockerfile` | Tools the agents need on the dev server beyond Node, pnpm, git and Docker: the Android SDK and Maestro for React Native, Playwright's system libraries for web. | Built on top of the base image by `adlc up <slug>`. |
+| **Network allowlist** | `sandbox/egress/domains/<name>.txt` | The registries and download hosts this technology needs (npm, Maven, Expo, Playwright's CDNs…). Enforced only with `network.mode: allowlist`. | The egress proxy re-reads it within a minute of `adlc.yaml` changing on `main`. |
+| **CI jobs** | a template in the stack's skills (e.g. `e2e.yml`) | The stack's end-to-end jobs (web, Android emulator, iOS on macOS), added to the project's workflows by `/adlc-core:init` and the walking skeleton. | Through the project's own workflows. |
+
+A stack that has no pack (say `stacks: [go]`) is allowed: the runner logs "no stack pack for 'go' (agents rely on general knowledge for it)", and the agents work from the model's own knowledge and the project's ADRs.
+
+### The stacks available
+
+| Stack | For | Skills | Runner layer | Host needs |
+|---|---|---|---|---|
+| `react-native` | Expo apps on web, Android and iOS | `expo-app` (app layout, state, config, platforms, testIDs, offline, EAS) · `e2e-patterns` (Playwright for web, Maestro for Android on the shared emulator and iOS in CI) · `rn-test-env` (per-run test environment, watch and build modes, emulator, `adlc.build.yaml`, `e2e.yml`, walking-skeleton checklist) | JDK 17, Android SDK 35, Maestro, Playwright libraries | **x86_64** and **`/dev/kvm`** for the Android emulator (`adlc doctor` checks both); iOS e2e runs on GitHub's macOS runners |
+| `react-web` | Desktop-first web apps (React + Vite SPA) | `vite-spa` (routing and data, forms, **shadcn/ui on Base UI + Tailwind v4**, runtime config, same-origin auth, i18n, a11y, performance budgets) · `web-containers` (vite dev and unprivileged nginx images, `/config.json`, CSP, `/api` through Traefik) · `web-testing` (Vitest + Testing Library, Playwright, axe) | Playwright libraries (browsers download per project) | none |
+| `node-api` | Node.js/TypeScript APIs with Postgres and Redis | `node-api` (Fastify, zod, OpenAPI, errors, auth, config, logging, health, shutdown, rate limits) · `postgres-redis` (migrations, expand/contract, transactions, seeding, Redis with TTLs) · `node-containers` (Dockerfile, compose for test and dev, Swarm prod stack, pre-deploy migrations) | none (the base image has Node) | none |
+| core (always) | every project | `ci-workflows` (CI from `adlc.build.yaml`, publish, nightly, release) · `testing-contract` (when tests run; stacks say how) | | |
+
+Typical combinations: a mobile product with an API is `[react-native, node-api]` (the default); a web app with an API is `[react-web, node-api]`; a product with a mobile app and a separate desktop-first web app uses all three. Where `react-web` and `react-native` are both enabled, they share the Playwright conventions.
+
+### Choosing and changing stacks
+- **At setup:** `/adlc-core:init` asks for the platforms and stacks first, because they decide which setup questions apply (no mobile platform: no mobile section). It writes them to `adlc.yaml`, enables the matching plugins in the project's `.claude/settings.json` (so a local Claude Code session on a clone gets them too), and adds the stack's `e2e.yml`.
+- **In the architecture:** `/adlc-core:architect` loads the enabled stacks' skills first, as the default conventions to design from, and confirms `stacks` and `platforms` at the end. A decision that departs from a stack's default (another UI kit, another ORM) becomes an ADR, which the agents then follow instead.
+- **Later:** change `adlc.yaml → stacks` through a PR (or `/adlc-core:init --update`), merge it, then run `adlc up <slug>` on the dev server: it rebuilds the runner image with the new layers and installs the new plugins. The egress allowlist follows by itself. `adlc restart` alone installs plugins but doesn't rebuild the image. `adlc up <slug> --stacks a,b` builds other layers for one run without changing `adlc.yaml`, e.g. to try a stack out.
+- **Check it:** `docker logs adlc-<slug>-runner-1 2>&1 | grep "stack pack"` lists the packs the runner installed.
+
+### Adding a stack
+Stacks are usually how an organization teaches ADLC **its own** conventions for a kind of application: its libraries, layout, security and logging rules, base images, registries and review checklist. Keep such stacks in your organization's fork of ADLC (private, if the conventions are internal); the dev servers run that fork.
+
+**Let Claude write it:** in a Claude Code session on your ADLC checkout, ask *"Create a stack for our Spring Boot services; our reference repo is …"*. Claude follows [`docs/stacks/README.md`](docs/stacks/README.md): it interviews you, reads the reference repository, writes the skills, templates, tool layer and network list, and registers the stack.
+
+By hand: a stack is a plugin in this repository's marketplace, plus optional files picked up by name. For a new technology, say `go-api`:
+
+1. **The plugin:** `plugins/stack-go-api/.claude-plugin/plugin.json` (`name`, `version`, `description`) and one folder per skill under `skills/`. Each `SKILL.md` starts with a `name` and a `description` that says when to load it ("Load before designing, implementing, reviewing or debugging Go API code"). Keep skills to conventions the agents can act on: layout, patterns, testing, how the test environment is built, a review checklist. Say that accepted ADRs override them.
+2. **Templates** (optional) in `skills/<skill>/templates/`: the files the walking skeleton copies: Dockerfile, compose files for the per-run test environment (follow `stack-react-native:rn-test-env`: no host ports, `${ADLC_RUN}` names, Traefik routing) and the stack's e2e workflow jobs.
+3. **The marketplace:** add the plugin to `.claude-plugin/marketplace.json`.
+4. **Tools** (optional): `sandbox/runner/stacks/go-api.Dockerfile`, starting with `ARG BASE` / `FROM ${BASE}` and `LABEL org.adlc.managed="true"` (so housekeeping recognises the image), installing as root and switching back to the `adlc` user (see `react-native.Dockerfile`).
+5. **Network** (optional): `sandbox/egress/domains/go-api.txt`, one domain per line (`.example.com` covers subdomains).
+6. **Setup questions** (optional): `skills/go-api-setup/SKILL.md` with extra rows in the project-setup table format; `/adlc-core:init` asks them after the core sections.
+7. **Make it known:** add it to the list of stacks in `plugins/adlc-core/commands/init.md`, the `stacks` comment in `templates/project/adlc.yaml`, and the tables above. Bump the plugin's version whenever its skills change, so runners pick up the update on `adlc restart`.
+
+`bin/adlc`, the runner and the egress proxy find the parts by file name, so nothing else changes.
 
 ---
 
@@ -868,6 +913,8 @@ Situations from real projects, with the steps that resolve them. The [Field Guid
 - **The dashboard lacks something new, or the dev server seems to run old code.** `adlc restart` reloads only the plugins; the poller, queue, merge train and CI registrar are built into the runner image. `adlc doctor` says whether each runner's image is older than your checkout. To update: `adlc pause <slug>`, wait until `adlc status <slug>` shows no active run, then `cd ~/adlc && git pull && adlc up <slug> && adlc ui up && adlc resume <slug>`. A CI-only host needs `git pull && adlc up <slug>` too (its roles are remembered).
 - **A CI host is missing from Machines, or its tile says "No report".** The main host is sampled by the dashboard; a CI-only host shows up only once linked, and dims after 3 minutes without a report. On the CI host, `adlc logs <slug> hoststats`: 200 is fine, 401 means a wrong or rotated token (`adlc ui host-token <host>` on the main host, then `adlc ui report <url>` again), 000 means it can't reach the dashboard URL.
 - **The dashboard opens in Chrome but not in Safari (or not on another device).** DNS-rebind protection in your router (e.g. pfSense) drops `nip.io` answers that point to private IPs; Chrome's secure DNS bypasses the router, Safari uses it. Allow `nip.io` as a private domain in the router, or use your own name (`adlc ui up --host adlc.example.com`). Then flush the Mac's DNS cache: `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.
+- **After changing `stacks`, the agents lack a tool (no Android SDK, no Playwright libraries) or a stack's conventions.** The runner image and its plugins only follow `adlc.yaml` when the runner is rebuilt. Merge the change to `main`, then `adlc up <slug>` (between deliveries: `adlc pause <slug>` first). `docker logs adlc-<slug>-runner-1 2>&1 | grep "stack pack"` shows which packs it installed; "no stack pack for '<name>'" means there's none for that name (check the spelling against [§15](#15-stacks-what-adlc-knows-about-your-technology)).
+- **The agents keep using a stack's default where your project decided otherwise** (another UI kit, ORM or test runner). Stack skills are defaults; accepted ADRs override them. Record the decision as an ADR (`/adlc-core:architect`, or a PR adding it under `docs/architecture/adr/` with status `accepted`), and the agents follow it from the next run.
 
 ---
 
@@ -898,6 +945,7 @@ adlc/
 │   └── swarm/adlc-swarm-deploy         human-run production deploys on the Swarm manager
 ├── bin/adlc                            host CLI: doctor, secrets, up, login, attach, status, pause, logs, audit, down
 ├── docs/architecture.md                design of ADLC itself
+├── docs/stacks/README.md               instructions for Claude to create a stack (an organization's conventions)
 └── docs/video/                         builds the video tutorial (narration, scenes, dashboard screenshots)
 ```
 
@@ -907,4 +955,4 @@ ADLC is licensed under the [Apache License 2.0](LICENSE). You may use, change an
 
 - **Questions and bugs:** open an issue on [kororos/adlc](https://github.com/kororos/adlc/issues), with the output of `adlc doctor` and the relevant `adlc logs` lines. Remove tokens, hostnames and anything else private first.
 - **Security problems** (a way for agent-written code to reach secrets, production or the host; a hole in the egress proxy or the guard hook): report them privately through the repository's **Security → Report a vulnerability**, not in a public issue. [§14](#14-safety-model) describes what ADLC protects against.
-- **Contributions:** pull requests are welcome under the Apache License 2.0. Every change updates the docs with it: this README (the feature's section, the command table, §16) and the Field Guide (`ui/web/public/guide/`), as `CLAUDE.md` describes. A new stack (e.g. ESP32) is a plugin: see [§15](#15-extending-adlc-with-stack-packs).
+- **Contributions:** pull requests are welcome under the Apache License 2.0. Every change updates the docs with it: this README (the feature's section, the command table, §16) and the Field Guide (`ui/web/public/guide/`), as `CLAUDE.md` describes. A new stack (e.g. ESP32) is a plugin: see [§15](#15-stacks-what-adlc-knows-about-your-technology).

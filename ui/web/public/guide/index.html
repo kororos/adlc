@@ -193,6 +193,10 @@ section > .wrap > header { display: grid; gap: 10px; margin-bottom: 28px }
 .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px }
 .lcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; align-content: start }
 .lcard p { font-size: 0.88rem } .lcard .do { color: var(--muted); font-size: 0.85rem }
+.stack-sub { font-size: 1.1rem; margin: 30px 0 12px }
+.lcard h3 { font-size: 1rem; margin: 0 } .lcard ul { margin: 0; padding-left: 18px; font-size: 0.88rem } .lcard ul li + li { margin-top: 3px }
+.lcard dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 0.85rem } .lcard dt { color: var(--muted) } .lcard dd { margin: 0 }
+.stack-steps { display: grid; gap: 12px; margin: 0; padding-left: 20px; max-width: 80ch } .stack-steps li { font-size: 0.93rem }
 
 /* commands */
 .cmd-tools { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px }
@@ -239,7 +243,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
 <nav class="bar"><div class="wrap">
   <span class="brand">ADLC Field Guide</span>
   <div class="links">
-    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#lifecycle">Lifecycle</a><a href="#labels">Labels</a><a href="#fixes">Fix it</a><a href="#commands">Commands</a>
+    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#lifecycle">Lifecycle</a><a href="#labels">Labels</a><a href="#stacks">Stacks</a><a href="#fixes">Fix it</a><a href="#commands">Commands</a>
   </div>
 </div></nav>
 
@@ -247,7 +251,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
   <p class="eyebrow">Agentic Delivery Life Cycle</p>
   <h1>From an idea to merged pull requests, with you deciding what matters.</h1>
   <p class="lede">ADLC runs Claude agents on your dev server. You plan the product with Claude in four conversations; then a poller delivers the GitHub issues one by one, in dependency order, and only comes back to you for decisions, high-risk reviews and your own tasks. Pick a step to see who does what.</p>
-  <p class="watch"><button type="button" class="play" id="watch-btn" aria-expanded="false" aria-controls="watch">▶ Watch the video tutorial</button> 9 minutes: install, plan a first project, watch it deliver, and day-to-day use. <a href="https://github.com/kororos/adlc/releases/tag/tutorial-video" target="_blank" rel="noopener">Download</a></p>
+  <p class="watch"><button type="button" class="play" id="watch-btn" aria-expanded="false" aria-controls="watch">▶ Watch the video tutorial</button> 11 minutes: install, plan a first project and choose its stacks, adopt an existing codebase, watch it deliver, and day-to-day use. <a href="https://github.com/kororos/adlc/releases/tag/tutorial-video" target="_blank" rel="noopener">Download</a></p>
   <figure class="player" id="watch" hidden>
     <video id="watch-video" controls preload="none" playsinline poster="video/poster.jpg">
       <source src="https://github.com/kororos/adlc/releases/download/tutorial-video/adlc-tutorial.m4v" type="video/mp4">
@@ -304,7 +308,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
   <header>
     <p class="eyebrow">Tutorials</p>
     <h2>Do it for real</h2>
-    <p class="lede">Six walkthroughs in the order you'll need them. Tick steps off as you go; your progress stays in this browser.</p>
+    <p class="lede">Seven walkthroughs in the order you'll need them. Tick steps off as you go; your progress stays in this browser.</p>
   </header>
   <div class="tut">
     <div class="tut-list" role="tablist" id="tut-list" aria-label="Tutorials"></div>
@@ -336,6 +340,44 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
   <div class="lgrid" id="lgrid"></div>
 </div></section>
 
+<section id="stacks"><div class="wrap">
+  <header>
+    <p class="eyebrow">Reference</p>
+    <h2>Stacks: what ADLC knows about your technology</h2>
+    <p class="lede">The pipeline itself knows no language or framework. Each technology your project uses is a <b>stack</b>, listed in <code>adlc.yaml</code>: <code>stacks: [react-native, node-api]</code>. A stack brings the agents its conventions and templates, installs its tools on the dev server, opens its download hosts and adds its end-to-end CI jobs.</p>
+  </header>
+
+  <h3 class="stack-sub">What a stack brings</h3>
+  <div class="lgrid">
+    <div class="lcard"><h3>Skills and templates</h3><p>Conventions every agent loads for its task: the architect to design, the test-designer and implementer to write tests and code, reviewers to check it, QA for e2e. Templates give the walking skeleton its Dockerfiles, test environment and CI jobs.</p><p class="do">Accepted ADRs override them.</p></div>
+    <div class="lcard"><h3>Tools on the dev server</h3><p>A layer on the runner image with what the agents need beyond Node, pnpm, git and Docker: the Android SDK and Maestro for React Native, Playwright's libraries for web.</p><p class="do">Built by <code>adlc up &lt;slug&gt;</code>.</p></div>
+    <div class="lcard"><h3>Network allowlist</h3><p>The registries and download hosts the technology needs (npm, Maven, Expo, Playwright's CDNs), when the project restricts the agents' network (<code>network.mode: allowlist</code>).</p><p class="do">Follows <code>adlc.yaml</code> on main within a minute.</p></div>
+    <div class="lcard"><h3>CI jobs</h3><p>The stack's end-to-end jobs: web in a browser, Android on an emulator (on your host with <code>/dev/kvm</code>, or GitHub's runners), iOS on GitHub's macOS runners.</p><p class="do">Added by <code>/adlc-core:init</code> and the walking skeleton.</p></div>
+  </div>
+
+  <h3 class="stack-sub">The stacks available</h3>
+  <div class="lgrid">
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">react-native</span><p>Expo apps on web, Android and iOS.</p>
+      <ul><li><b>expo-app</b>: layout, state, config, platforms, testIDs, offline, EAS</li><li><b>e2e-patterns</b>: Playwright for web, Maestro for Android and iOS</li><li><b>rn-test-env</b>: per-run test environment, emulator, <code>adlc.build.yaml</code>, <code>e2e.yml</code></li></ul>
+      <dl><dt>Tools</dt><dd>JDK 17, Android SDK, Maestro, Playwright libraries</dd><dt>Host</dt><dd>x86_64 and <code>/dev/kvm</code> for the emulator</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">react-web</span><p>Desktop-first web apps: React + Vite single-page apps.</p>
+      <ul><li><b>vite-spa</b>: routing and data, forms, shadcn/ui on Base UI with Tailwind v4, runtime config, i18n, a11y</li><li><b>web-containers</b>: vite dev and nginx images, <code>/config.json</code>, CSP, <code>/api</code> through Traefik</li><li><b>web-testing</b>: Vitest with Testing Library, Playwright, axe</li></ul>
+      <dl><dt>Tools</dt><dd>Playwright libraries</dd><dt>Host</dt><dd>nothing extra</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">node-api</span><p>Node.js/TypeScript APIs with Postgres and Redis.</p>
+      <ul><li><b>node-api</b>: Fastify, zod, OpenAPI, errors, auth, logging, health</li><li><b>postgres-redis</b>: migrations, expand/contract, transactions, seeding, Redis</li><li><b>node-containers</b>: Dockerfile, compose for test and dev, Swarm prod, pre-deploy migrations</li></ul>
+      <dl><dt>Tools</dt><dd>none extra (Node is in the base image)</dd><dt>Host</dt><dd>nothing extra</dd></dl></div>
+  </div>
+  <p class="lede" style="margin-top:14px">A mobile product with an API is <code>[react-native, node-api]</code> (the default); a web app with an API is <code>[react-web, node-api]</code>. A stack without a pack (say <code>go</code>) still works: the agents rely on the model's own knowledge and your ADRs.</p>
+
+  <h3 class="stack-sub">Choosing and changing stacks</h3>
+  <ol class="stack-steps">
+    <li><b>At setup</b>, <code>/adlc-core:init</code> asks for your platforms and stacks first: they decide which setup questions apply. It writes them to <code>adlc.yaml</code> and enables the stack plugins for local Claude sessions too.</li>
+    <li><b>In the architecture</b>, <code>/adlc-core:architect</code> designs from the stacks' conventions. Where your project decides otherwise (another UI kit, another ORM), that's an ADR, and the agents follow it instead.</li>
+    <li><b>Later</b>, change <code>stacks</code> in <code>adlc.yaml</code> through a PR, merge it, and run <code>adlc up &lt;slug&gt;</code> on the dev server: it rebuilds the runner with the new tools and installs the new plugins. <code>adlc restart</code> alone doesn't rebuild the tools.</li>
+    <li><b>Add your organization's conventions</b> as a stack of your own, in your fork of ADLC: in a Claude Code session on the ADLC checkout, ask <i>“Create a stack for our Spring Boot services”</i>. Claude follows <a href="https://github.com/kororos/adlc/blob/main/docs/stacks/README.md">docs/stacks/README.md</a>: it asks about your conventions, reads a reference repository, and writes the stack.</li>
+  </ol>
+</div></section>
+
 <section id="fixes"><div class="wrap">
   <header>
     <p class="eyebrow">Troubleshooting</p>
@@ -365,7 +407,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
   </table></div>
 </div></section>
 
-<footer><div class="wrap">Based on the <a href="https://github.com/kororos/adlc#readme">ADLC README</a>. Commands use <code>&lt;slug&gt;</code> for your project, e.g. <code>diet</code>.</div></footer>
+<footer><div class="wrap">Based on the <a href="https://github.com/kororos/adlc#readme">ADLC README</a>. Commands use <code>&lt;slug&gt;</code> for your project, e.g. <code>myapp</code>.</div></footer>
 <script src="guide.js"></script>
 </body>
 </html>
