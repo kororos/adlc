@@ -834,7 +834,7 @@ A stack that has no pack (say `stacks: [go]`) is allowed: the runner logs "no st
 Typical combinations: a mobile product with an API is `[react-native, node-api]` (the default); a web app with an API is `[react-web, node-api]`; a product with a mobile app and a separate desktop-first web app uses all three. Where `react-web` and `react-native` are both enabled, they share the Playwright conventions.
 
 ### Choosing and changing stacks
-- **At setup:** `/adlc-core:init` asks for the platforms and stacks first, because they decide which setup questions apply (no mobile platform: no mobile section). It writes them to `adlc.yaml`, enables the matching plugins in the project's `.claude/settings.json` (so a local Claude Code session on a clone gets them too), and adds the stack's `e2e.yml`.
+- **At setup:** `/adlc-core:init` asks for the platforms and stacks first (it offers every `stack-*` plugin in the ADLC marketplace, your organization's included), because they decide which setup questions apply (no mobile platform: no mobile section). It writes them to `adlc.yaml`, enables the matching plugins in the project's `.claude/settings.json` (so a local Claude Code session on a clone gets them too), and adds the stack's `e2e.yml`.
 - **In the architecture:** `/adlc-core:architect` loads the enabled stacks' skills first, as the default conventions to design from, and confirms `stacks` and `platforms` at the end. A decision that departs from a stack's default (another UI kit, another ORM) becomes an ADR, which the agents then follow instead.
 - **Later:** change `adlc.yaml → stacks` through a PR (or `/adlc-core:init --update`), merge it, then run `adlc up <slug>` on the dev server: it rebuilds the runner image with the new layers and installs the new plugins. The egress allowlist follows by itself. `adlc restart` alone installs plugins but doesn't rebuild the image. `adlc up <slug> --stacks a,b` builds other layers for one run without changing `adlc.yaml`, e.g. to try a stack out.
 - **Check it:** `docker logs adlc-<slug>-runner-1 2>&1 | grep "stack pack"` lists the packs the runner installed.
@@ -852,7 +852,7 @@ By hand: a stack is a plugin in this repository's marketplace, plus optional fil
 4. **Tools** (optional): `sandbox/runner/stacks/go-api.Dockerfile`, starting with `ARG BASE` / `FROM ${BASE}` and `LABEL org.adlc.managed="true"` (so housekeeping recognises the image), installing as root and switching back to the `adlc` user (see `react-native.Dockerfile`).
 5. **Network** (optional): `sandbox/egress/domains/go-api.txt`, one domain per line (`.example.com` covers subdomains).
 6. **Setup questions** (optional): `skills/go-api-setup/SKILL.md` with extra rows in the project-setup table format; `/adlc-core:init` asks them after the core sections.
-7. **Make it known:** add it to the list of stacks in `plugins/adlc-core/commands/init.md`, the `stacks` comment in `templates/project/adlc.yaml`, and the tables above. Bump the plugin's version whenever its skills change, so runners pick up the update on `adlc restart`.
+7. **Document it** in the tables above. `/adlc-core:init` offers every `stack-*` plugin in the marketplace, with its description, so a new stack shows up there by itself. Bump the plugin's version whenever its skills change, so runners pick up the update on `adlc restart`.
 
 `bin/adlc`, the runner and the egress proxy find the parts by file name, so nothing else changes.
 

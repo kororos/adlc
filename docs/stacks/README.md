@@ -139,10 +139,9 @@ Pin versions. Put environment variables the tools need in `/etc/profile.d/adlc-<
 
 ## Step 5: register and document it
 
-1. Add the plugin to `.claude-plugin/marketplace.json` (`name`, `source: ./plugins/stack-<name>`, `description`).
-2. Add the stack to the list of available stacks in `plugins/adlc-core/commands/init.md` and to the `stacks` comment in `templates/project/adlc.yaml`.
-3. Add it to the tables in README §15 and to the Field Guide's Stacks section (`ui/web/public/guide/index.html`), as this repository's `CLAUDE.md` requires for every change.
-4. Bump the plugin's `version` whenever its skills change later, so runners pick up the change on `adlc restart`.
+1. Add the plugin to `.claude-plugin/marketplace.json` (`name`, `source: ./plugins/stack-<name>`, `description`). `/adlc-core:init` offers every `stack-*` plugin listed there, with that description, so write it for someone choosing stacks ("<Org>'s Spring Boot services: …").
+2. Add it to the tables in README §15 and to the Field Guide's Stacks section (`ui/web/public/guide/index.html`), as this repository's `CLAUDE.md` requires for every change.
+3. Bump the plugin's `version` whenever its skills change later, so runners pick up the change on `adlc restart`.
 
 ## Step 6: check it
 

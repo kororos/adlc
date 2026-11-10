@@ -371,7 +371,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
 
   <h3 class="stack-sub">Choosing and changing stacks</h3>
   <ol class="stack-steps">
-    <li><b>At setup</b>, <code>/adlc-core:init</code> asks for your platforms and stacks first: they decide which setup questions apply. It writes them to <code>adlc.yaml</code> and enables the stack plugins for local Claude sessions too.</li>
+    <li><b>At setup</b>, <code>/adlc-core:init</code> asks for your platforms and stacks first, offering every stack in your ADLC checkout (your organization's included): they decide which setup questions apply. It writes them to <code>adlc.yaml</code> and enables the stack plugins for local Claude sessions too.</li>
     <li><b>In the architecture</b>, <code>/adlc-core:architect</code> designs from the stacks' conventions. Where your project decides otherwise (another UI kit, another ORM), that's an ADR, and the agents follow it instead.</li>
     <li><b>Later</b>, change <code>stacks</code> in <code>adlc.yaml</code> through a PR, merge it, and run <code>adlc up &lt;slug&gt;</code> on the dev server: it rebuilds the runner with the new tools and installs the new plugins. <code>adlc restart</code> alone doesn't rebuild the tools.</li>
     <li><b>Add your organization's conventions</b> as a stack of your own, in your fork of ADLC: in a Claude Code session on the ADLC checkout, ask <i>“Create a stack for our Spring Boot services”</i>. Claude follows <a href="https://github.com/kororos/adlc/blob/main/docs/stacks/README.md">docs/stacks/README.md</a>: it asks about your conventions, reads a reference repository, and writes the stack.</li>
