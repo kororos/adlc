@@ -14,7 +14,7 @@ ensure_dirs
 # dashboard) and one log line per new set; returns 1 while any is missing.
 missing_logged=""
 check_dev_secrets() {
-  local paths p name missing=() hint lines=() fmt cfiles=() a origin pr
+  local paths p name missing=() hint lines=() fmt gen cfiles=() a origin pr
   for a in "$@"; do [ "$a" = -f ] || cfiles+=("$a"); done
   paths=$(IMAGE_TAG=check ADLC_PROJECT_DOMAIN="$ADLC_SLUG.${ADLC_BASE_DOMAIN:-lan}" \
     docker compose -p "$ADLC_SLUG-dev" --project-directory "$REPO_DIR" "$@" config --format json 2>/dev/null \
@@ -28,9 +28,11 @@ check_dev_secrets() {
     name=$(basename "$p")
     # The test environment usually generates the same secret: reuse its format (e.g. `make <name> hex 24`).
     fmt=$(grep -hE "^[[:space:]]*make[[:space:]]+$name[[:space:]]" "$REPO_DIR"/deploy/test/secrets.sh 2>/dev/null | head -1 | awk '{print $3, $4}')
+    # or a one-line generator function in the same file (`make <name> <fn>` with `<fn>() { …; }`)
+    gen=""; [ -n "${fmt%% *}" ] && gen=$(sed -nE "s/^[[:space:]]*${fmt%% *}\(\)[[:space:]]*\{[[:space:]]*(.*[^[:space:]])[[:space:]]*;?[[:space:]]*\}[[:space:]]*$/\1/p" "$REPO_DIR"/deploy/test/secrets.sh 2>/dev/null | head -1)
     case $fmt in
       "hex "*) hint="openssl rand -hex ${fmt#hex } > $p && chmod 444 $p   (chmod 600 instead if only a root container reads it and refuses world-readable files, like Garage)" ;;
-      *) hint="create $p (format: see deploy/test/secrets.sh or the PR's owner notes), then chmod 444 (600 if only a root container reads it)" ;;
+      *) [ -n "$gen" ] && hint="( ${gen%;} ) > $p && chmod 444 $p" || hint="create $p (format: see deploy/test/secrets.sh or the PR's owner notes), then chmod 444 (600 if only a root container reads it)" ;;
     esac
     # The merged change that added it: the newest commit whose diff adds or removes the name in the
     # dev stack's compose files; a squash merge's subject ends with "(#<PR>)". Its owner notes say how.

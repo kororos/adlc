@@ -248,7 +248,7 @@ const TUTS = [
     { t: "Answer questions", w: "GitHub issue", b: "<span class='lbl c-needs-info'>adlc:needs-info</span> Reply in a comment, then relabel <code>adlc:ready</code> (or <code>adlc:queued</code> if it still has open blockers). The run resumes from where it stopped." },
     { t: "Unblock a run", w: "GitHub issue", b: "<span class='lbl c-blocked'>adlc:blocked</span> Read the summary comment (phase, reason, report paths), fix the cause, relabel <code>adlc:ready</code>. Environment failures (runner, emulator, network) are reported, never “fixed” by changing tests." },
     { t: "Review and approve high-risk PRs", w: "GitHub PR", b: "<span class='lbl c-needs-human-review'>adlc:needs-human-review</span> Review like any PR. Approve it and the merge train merges it: updated with main, checks green, squash-merged. Low and medium risk PRs need no approval (<code>autonomy.auto_merge</code>): the train merges them once green. If code changes after your approval, ADLC asks you to approve again (Review changes → Approve)." },
-    { t: "Do your owner tasks", w: "GitHub issue", b: "<span class='lbl c-owner'>adlc:owner</span> Accounts, credentials, infrastructure, sign-offs. Do the task, check its acceptance criteria, close the issue: what it blocked starts by itself." },
+    { t: "Do your owner tasks", w: "GitHub issue", b: "<span class='lbl c-owner'>adlc:owner</span> Accounts, credentials, infrastructure, sign-offs. Each says where to run what, with the exact commands to paste (absolute paths, a check at the end). Do the task, check its acceptance criteria, close the issue: what it blocked starts by itself." },
     { t: "Triage new issues", w: "dashboard → Needs you", b: "Flaky tests, regressions and spikes opened by agents have no pipeline state. <b>Start</b> puts one in the queue, <b>Run next</b> puts it first; close it on GitHub to drop it." },
     { t: "Redo an issue from scratch", w: "GitHub PR", b: "Close its agent PR without merging. The poller archives the branch as <code>adlc-closed/&lt;n&gt;-pr&lt;PR&gt;</code>, removes the workspace and requeues the issue; the next run starts from the current main." },
   ] },
@@ -314,6 +314,10 @@ $("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span c
 /* ── Fix it: what to do when… ──────────────────────────────────── */
 // [category, what you see, why, steps, optional code]. `x` in text renders as code.
 const FIXES = [
+  ["Pipeline", "An owner task's command fails: \"No such file or directory\" for /projects/<slug>/…",
+    "It was written with `$ADLC_ROOT`, which exists only inside the runner; your shell doesn't have it, so the path starts at `/projects`. Agents before adlc-core 0.1.42 wrote owner tasks that way; current ones write absolute paths, ready to paste.",
+    ["Replace `$ADLC_ROOT` with your ADLC root (`/srv/adlc` by default) and run the command with that path.", "Check it: `ls -l` on the file shows `-r--r--r--` and a size above 0.", "For a missing dev secret, `adlc status <slug>` (and Needs you) also shows a create command with the full path."],
+    "f=/srv/adlc/projects/<slug>/secrets/dev/<name>; ls -l \"$f\""],
   ["Pipeline", "An issue never starts and isn't in the Queue",
     "The Queue lists only issues with an ADLC state label. An issue opened without one (a follow-up an agent filed, one you or a Claude session opened by hand) has no state, so the poller never starts it.",
     ["Needs you → New issues to triage lists it with a \"no label\" badge: press Start (or Run next to put it first).", "Or add `adlc:ready` on GitHub (`adlc:queued` if it has open blockers)."]],
