@@ -1,6 +1,6 @@
 {
   "name": "adlc-core",
-  "version": "0.1.42",
+  "version": "0.1.43",
   "description": "Generic agentic SDLC pipeline: intake, spec, design, test-first build, verify, review, release.",
   "author": { "name": "Lefteris Kororos" }
 }

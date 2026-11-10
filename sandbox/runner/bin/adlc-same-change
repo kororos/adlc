@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# adlc-same-change: does a PR still make the same change after it was carried onto a newer base?
+#
+#   adlc-same-change [-C <repo>] [--ignore "<glob> …"] [--diff] <old> <new> <base ref>
+#
+# A PR's own change is what it changes compared with the point of <base ref> it contains (git diff from
+# the merge base): the added and removed lines, per file, in order, without line numbers, context and
+# blank lines, and without ADLC's run records (.adlc/) and the --ignore globs. Exit 0 when <old> and <new> make the same
+# change (a merge of the base, with or without conflicts, only moved it), 1 when not, 2 on an error.
+# --diff prints what differs (lines prefixed "-" were in <old>'s change, "+" are in <new>'s).
+# Used by the merge train (an approval holds when the change is the same) and by conflict reworks.
+set -uo pipefail
+dir=. ignore="" show=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    -C) dir=$2; shift 2 ;;
+    --ignore) ignore=$2; shift 2 ;;
+    --diff) show=1; shift ;;
+    *) break ;;
+  esac
+done
+[ $# -eq 3 ] || { sed -n '3,4p' "$0" | sed 's/^# //' >&2; exit 2; }
+old=$1 new=$2 base=$3
+specs=(. ':(exclude).adlc')
+for g in $ignore; do specs+=(":(exclude,glob)$g"); done
+
+own() {
+  local mb
+  mb=$(git -C "$dir" merge-base "$base" "$1" 2>/dev/null) || return 1
+  git -C "$dir" diff -U0 --no-renames --no-color --no-ext-diff "$mb" "$1" -- "${specs[@]}" | awk '
+    /^diff --git / { hdr = 1; next }
+    hdr && /^--- / { if ($0 != "--- /dev/null") f = substr($0, 7); next }
+    hdr && /^\+\+\+ / { if ($0 != "+++ /dev/null") f = substr($0, 7); next }
+    /^@@/ { hdr = 0; next }
+    hdr { next }
+    /^[-+][[:space:]]*$/ { next }
+    /^[-+]/ { print f "\t" $0 }'
+}
+
+a=$(own "$old") || { echo "adlc-same-change: no merge base of $old with $base" >&2; exit 2; }
+b=$(own "$new") || { echo "adlc-same-change: no merge base of $new with $base" >&2; exit 2; }
+[ "$a" = "$b" ] && exit 0
+[ -z "$show" ] || diff <(printf '%s\n' "$a") <(printf '%s\n' "$b") | sed -nE 's/^< /-/p; s/^> /+/p'
+exit 1

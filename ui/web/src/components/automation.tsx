@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<string, string> }> = {
   merge_train: {
     title: "Merge train",
-    what: "Approved agent PRs are merged one after another: each is brought up to date, checked and merged. You re-approve only when code changed after your approval.",
+    what: "Approved agent PRs are merged one after another: each is brought up to date, checked and merged. You re-approve only when the PR’s own change differs from what you approved (carrying it onto a newer main, even through conflicts, keeps your approval).",
     values: { on: "merges", "dry-run": "reports only", off: "off" },
   },
   ci_auto_rework: {

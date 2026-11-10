@@ -408,18 +408,23 @@ keep_current() { # keep_current <pr> <issue> <head sha>
   fi
 }
 # Send an agent PR back to its issue's delivery run. Shared by failed checks and merge conflicts: once per
-# head commit, at most autonomy.ci_rework_max automatic reworks per PR, then adlc:needs-human-review.
+# head commit, then adlc:needs-human-review after autonomy.ci_rework_max reworks for failed checks (default 2)
+# or autonomy.conflict_rework_max for conflicts (default 5; counted apart, in <pr>.conflicts: with parallel
+# work every merge ahead of a PR can conflict with it, and a conflict rework is quick).
 # Conflicts also send back a PR whose issue is adlc:blocked (e.g. waiting on an environment fix): the base
 # moved on after the block, and nothing else would tell the agent.
+# The rework limit and the counter file for <pr>'s reworks of a kind (conflicts, or failed checks).
+rework_max() { if [ "${1:-}" = conflicts ]; then cfg_raw '.autonomy.conflict_rework_max' "${ADLC_CONFLICT_REWORK_MAX:-5}"; else cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}"; fi; }
+rework_file() { if [ "${2:-}" = conflicts ]; then echo "$CI_DIR/$1.conflicts"; else echo "$CI_DIR/$1"; fi; }
 request_rework() { # request_rework <pr> <issue> <head sha> <what> <comment> [also-blocked]
   local pr=$1 n=$2 sha=$3 what=$4 body=$5 max f tried from=adlc:pr-open
-  max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
+  max=$(rework_max "${6:+conflicts}")
   is_running "$n" && return 0
   if ! has_label "$n" adlc:pr-open; then
     [ "${6:-}" = also-blocked ] && has_label "$n" adlc:blocked || return 0
     from=adlc:blocked
   fi
-  f="$CI_DIR/$pr"
+  f=$(rework_file "$pr" "${6:+conflicts}")
   grep -qx "$sha" "$f" 2>/dev/null && return 0         # this commit was handled already
   tried=$(grep -c . "$f" 2>/dev/null || true); tried=${tried:-0}
   if [ "$tried" -ge "$max" ]; then
@@ -458,7 +463,7 @@ watch_pr_checks() {
       # ahead of it will change the base again when they merge, so resolving now means resolving twice
       # (and a re-approval each time).
       if train_waiting "$pr"; then continue; fi
-      request_rework "$pr" "$n" "$sha" "merge conflicts with $base" "ADLC: this PR has merge conflicts with \`$base\` at \`${sha:0:7}\`. Merge \`$base\` into the branch and resolve them, keeping the intent of both sides; then verify and review again." also-blocked
+      request_rework "$pr" "$n" "$sha" "merge conflicts with $base" "ADLC: this PR has merge conflicts with \`$base\` at \`${sha:0:7}\`. Merge \`$base\` into the branch and resolve them, keeping the intent of both sides (a quick conflict rework: resolve, check what the resolution touches, push; CI runs the full suite). If the PR's own change stays the same, an approval holds." also-blocked
       continue
     fi
     # GitHub computes mergeability lazily: UNKNOWN may still turn out CONFLICTING, so don't treat it as green yet.
@@ -503,10 +508,12 @@ Find the cause and fix it. If it's the environment (runner, emulator, network, d
 # time goes through: brought up to date with its base (keep it current), checks green, then squash-merged
 # with the App (a normal merge: required checks and reviews apply). Conflicts and failed checks take the
 # usual rework path. ADLC decides whether an approval still holds (the branch protection setting
-# "dismiss stale approvals" is off): it does when every commit after the approved one is a clean merge
-# from the base branch, i.e. a merge whose tree is exactly what git produces by itself, or touches only
-# ADLC's own run records under .adlc/ (review, rework notes, state). Anything else (new code, a conflict
-# resolution) needs a new approval, which ADLC asks for on the PR.
+# "dismiss stale approvals" is off): it does when the PR still makes the same change as the approved commit
+# (adlc-same-change: the same added and removed lines compared with the base, so a merge of the base, even
+# with resolved conflicts, only carried it over), or when every commit after the approved one is a clean
+# merge from the base branch or touches only ADLC's own run records under .adlc/. Anything else (new code,
+# a resolution that changed the PR's own lines) needs a new approval, which ADLC asks for on the PR, with
+# just the lines that differ.
 # Mode (see train_mode): on | dry-run (default: decide and report, merge nothing) | off.
 # Out of the train: adlc:hold on the PR, a "changes requested" review, or removing the approval.
 TRAIN_FILE="$STATE_DIR/merge_train.json"
@@ -582,11 +589,19 @@ resolution_diff() { # resolution_diff <approved> <head>
   done
   printf '%s' "$txt"
 }
+# Does <new> make the same change as <old> compared with the base (see adlc-same-change)? With --diff, prints
+# the lines that differ.
+same_change() { # same_change [--diff] <old> <new> <base>
+  local d=(); [ "$1" = --diff ] && { d=(--diff); shift; }
+  adlc-same-change -C "$REPO_DIR" --ignore "$(reapprove_ignore)" "${d[@]}" "$1" "$2" "origin/$3" 2>/dev/null
+}
 # Is every commit in <approved>..<head> a clean merge of the base branch or a .adlc/-only record?
 # (1 = new changes since approval)
 approval_holds() { # approval_holds <approved sha> <head sha> <base>
   local a=$1 h=$2 base=$3 c p1 p2 tree
   [ "$a" = "$h" ] && return 0
+  # The same change as approved, carried onto a newer base (also through resolved conflicts)
+  same_change "$a" "$h" "$base" && return 0
   git -C "$REPO_DIR" merge-base --is-ancestor "$a" "$h" 2>/dev/null || return 1
   # The branch's own line (first parents); commits that came in from the base are covered by the p2 check.
   for c in $(git -C "$REPO_DIR" rev-list --first-parent "$a..$h"); do
@@ -622,7 +637,7 @@ auto_tiers_json() {
 # blocked issue back, see request_rework). A person relabelling the issue adlc:ready for another rework,
 # queued or under way, clears both.
 agent_wont_rework() { # agent_wont_rework <pr> <issue> <conflicts|failed>
-  local max tried labels; max=$(cfg_raw '.autonomy.ci_rework_max' "${ADLC_CI_REWORK_MAX:-2}")
+  local max tried labels kind=""; [ "$3" = conflicts ] && kind=conflicts; max=$(rework_max "$kind")
   why=""
   labels=,$(gh issue view "$2" -R "$R" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null),
   if [[ $labels != *,adlc:needs-human-review,* ]]; then
@@ -632,7 +647,7 @@ agent_wont_rework() { # agent_wont_rework <pr> <issue> <conflicts|failed>
       why="#$2 is adlc:blocked, the agent found nothing to fix (its comment on #$2 says why): re-run the checks if they're flaky, or fix it on the branch, then relabel #$2 adlc:ready"
       return 0
     fi
-    tried=$(grep -c . "$CI_DIR/$1" 2>/dev/null); [ "${tried:-0}" -gt "$max" ] || return 1
+    tried=$(grep -c . "$(rework_file "$1" "$kind")" 2>/dev/null); [ "${tried:-0}" -gt "$max" ] || return 1
   fi
   why="automatic reworks used up: fix it on the branch, or relabel #$2 adlc:ready for another agent rework"
 }
@@ -709,18 +724,29 @@ merge_train() {
         # GitHub keeps the (stale) approval since "dismiss stale approvals" is off: make sure its auto-merge
         # (enabled by the agents for low/medium risk) can't merge on it either.
         gh pr merge "$pr" -R "$R" --disable-auto >/dev/null 2>&1 || true
-        local rdiff rbody=""
+        local rdiff rbody="" odiff
+        # What differs in the PR's own change (the lines it adds and removes) from the approved one
+        odiff=$(same_change --diff "$approved" "$head" "$base")
+        if [ -n "$odiff" ]; then
+          if [ "$(wc -l <<<"$odiff")" -gt 200 ]; then odiff="$(head -200 <<<"$odiff")"$'\n'"… (cut at 200 lines; the compare link has everything)"; fi
+          rbody="
+
+**What changed in this PR's own change** since you approved it (the lines it adds or removes compared with \`$base\`; \`-\` was in the approved version, \`+\` is new; file, then the line). Everything else is \`$base\`'s, carried over:
+\`\`\`diff
+$odiff
+\`\`\`"
+        fi
         rdiff=$(resolution_diff "$approved" "$head")
         if [ -n "$rdiff" ]; then
           if [ "$(wc -l <<<"$rdiff")" -gt 200 ]; then rdiff="$(head -200 <<<"$rdiff")"$'\n'"… (cut at 200 lines; the compare link has everything)"; fi
-          rbody="
+          rbody+="
 
 **Conflict resolutions**: only what the agent's merges of \`$base\` changed compared with git's own merge (\`git show --remerge-diff\`). The rest of a clean merge of \`$base\` needs no review:
 \`\`\`diff
 $rdiff
 \`\`\`"
         fi
-        gh pr comment "$pr" -R "$R" --body "ADLC merge train: this PR changed after your approval (beyond clean merges of \`$base\` and ADLC run records): https://github.com/$R/compare/${approved:0:7}...${head:0:7}${rbody}
+        gh pr comment "$pr" -R "$R" --body "ADLC merge train: this PR's own change is different from the one you approved (more than \`$base\` carried over): all commits since: https://github.com/$R/compare/${approved:0:7}...${head:0:7}${rbody}
 
 Please review those changes and approve again to put it back in the merge train (auto-merge, if it was on, is off until then)." >/dev/null 2>&1 && echo "$head" >>"$f"
       fi
@@ -730,7 +756,7 @@ Please review those changes and approve again to put it back in the merge train 
     front=$pr
     # The front PR: bring it to a mergeable state, one step per cycle.
     if is_running "$n"; then status=agent; detail="the delivery agent is reworking #$n"
-    elif [ "$mergeable" = CONFLICTING ]; then status=conflicts; detail="conflicts with $base: the agent resolves them, then you re-approve"
+    elif [ "$mergeable" = CONFLICTING ]; then status=conflicts; detail="conflicts with $base: the agent resolves them (your approval holds if its own change stays the same)"
     elif [ "$mergeable" = UNKNOWN ]; then status=checking; detail="GitHub is computing mergeability"
     else
       behind=$(gh api "repos/$R/compare/$base...$head" --jq .behind_by 2>/dev/null || echo 0)
@@ -775,7 +801,7 @@ Please review those changes and approve again to put it back in the merge train 
     if { [ "$status" = conflicts ] || [ "$status" = failed ]; } && agent_wont_rework "$pr" "$n" "$status"; then
       status=needs-you; front=""
       detail="$detail; $why, then re-approve. Later PRs go ahead meanwhile"
-      detail=${detail/: the agent resolves them, then you re-approve;/;}
+      detail=${detail/: the agent resolves them (your approval holds if its own change stays the same);/;}
       detail=${detail/: rework, then you re-approve if code changed;/;}
     fi
     entries+=("$(train_entry "$pr" "$n" "$status" "$detail")")
