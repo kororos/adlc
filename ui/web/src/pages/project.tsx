@@ -372,8 +372,8 @@ function AttentionTab({ p }: { p: Project }) {
           </a>
         ))}
       </Section>
-      <Section icon={Bug} title="New issues to triage" count={triage.length} empty="No flaky test, regression or spike is waiting for your decision.">
-        <p className="-mt-1 text-sm text-muted-foreground">Opened by the agents or the nightly run. They don't start until you start them.</p>
+      <Section icon={Bug} title="New issues to triage" count={triage.length} empty="No flaky test, regression, spike or unlabelled issue is waiting for your decision.">
+        <p className="-mt-1 text-sm text-muted-foreground">Open issues with no pipeline state: flaky tests, regressions and spikes the agents or the nightly opened, and any issue opened without an ADLC label (<b>no label</b>). They don't start until you start them; close the ones you don't want.</p>
         {triage.map((t) => <TriageCard key={t.number} p={p} item={t} />)}
       </Section>
       <Section icon={OctagonAlert} title="Blocked runs and questions" count={s.attention.length} empty="Nothing is blocked or waiting for an answer.">
@@ -419,7 +419,7 @@ function TriageCard({ p, item }: { p: Project; item: TriageItem }) {
   return (
     <div className="rounded-xl border bg-card p-4" data-testid={`triage-${item.number}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className={tone}>{item.kind}</Badge>
+        <Badge variant="outline" className={tone}>{item.kind === "untracked" ? "no label" : item.kind}</Badge>
         <IssueLink item={item} className="font-medium" />
         <span className="text-xs text-muted-foreground">opened {ago(item.created)}{item.blockers.length ? ` · blocked by ${item.blockers.map((b) => `#${b}`).join(" ")}` : ""}</span>
         <span className="ml-auto flex items-center gap-2">

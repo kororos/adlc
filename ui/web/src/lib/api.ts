@@ -52,7 +52,7 @@ export type TriageItem = {
   number: number
   title: string
   url: string
-  kind: "flaky" | "regression" | "spike"
+  kind: "flaky" | "regression" | "spike" | "untracked"   // untracked: open, but no ADLC label at all
   created: string
   milestone: string
   blockers: number[]

@@ -26,7 +26,7 @@ if (!owner || !name) { console.error("adlc-queue: ADLC_REPO is not set"); proces
 
 const query = `query($o:String!,$r:String!,$endCursor:String){repository(owner:$o,name:$r){
   issues(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
-    nodes{number title url createdAt milestone{title dueOn} labels(first:30){nodes{name}}
+    nodes{number title url createdAt isPinned milestone{title dueOn} labels(first:30){nodes{name}}
           assignees(first:5){nodes{login}}
           comments(last:1){nodes{author{login} createdAt body url}}
           blockedBy(first:100){nodes{number state}}
@@ -72,8 +72,12 @@ for (const i of issues) {
   const isOwner = labels.includes("adlc:owner") || labels.includes("owner-task")
   const state = isOwner ? "owner" : STATES.find((s) => labels.includes(`adlc:${s}`))
   if (!state) {
+    // Flaky tests, regressions and spikes the agents or the nightly opened; anything else open with no ADLC state
+    // (a follow-up or fix opened without a label, by an agent or by hand) would otherwise show nowhere.
+    // Pinned issues (e.g. a status issue) aren't work.
     const kind = TRIAGE.find((l) => labels.includes(l))
     if (kind) triage.push({ i, kind: kind.replace("adlc:", "") })
+    else if (!i.isPinned) triage.push({ i, kind: "untracked" })
     continue
   }
   work.set(i.number, {

@@ -314,6 +314,9 @@ $("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span c
 /* ── Fix it: what to do when… ──────────────────────────────────── */
 // [category, what you see, why, steps, optional code]. `x` in text renders as code.
 const FIXES = [
+  ["Pipeline", "An issue never starts and isn't in the Queue",
+    "The Queue lists only issues with an ADLC state label. An issue opened without one (a follow-up an agent filed, one you or a Claude session opened by hand) has no state, so the poller never starts it.",
+    ["Needs you → New issues to triage lists it with a \"no label\" badge: press Start (or Run next to put it first).", "Or add `adlc:ready` on GitHub (`adlc:queued` if it has open blockers)."]],
   ["Pipeline", "A run is blocked because the issue needs setup.md, CLAUDE.md or adlc.yaml changed",
     "Those files are the project's setup record. Unattended agents can't change them; only you can, through init. The blocked comment names the section to update.",
     ["In a Claude session: `/adlc-core:init --update <section>` (e.g. `secrets` for secret file locations and modes). Confirm the values and merge its PR.", "Relabel the issue `adlc:ready`: the agent does the rest of it."],
