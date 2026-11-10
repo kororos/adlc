@@ -35,7 +35,7 @@ case "$tool" in
       block "access to secret file '$path' is not allowed. Use the matching .example file or ask for the env var name."
     fi
     if [ "$tool" != "Read" ] && unattended && is_setup_path "$path"; then
-      block "project setup files are read-only in unattended runs. Return STATUS: blocked and name the setting that needs to change (/adlc-core:init --update)."
+      block "project setup files (adlc.yaml, CLAUDE.md, docs/project/) are read-only in unattended runs: only the owner changes them, with /adlc-core:init --update <section> in an interactive session. Keep the work that stays consistent without them on the branch, then return STATUS: blocked with the exact command for the owner (e.g. /adlc-core:init --update secrets) and what to record."
     fi
     ;;
   Bash)

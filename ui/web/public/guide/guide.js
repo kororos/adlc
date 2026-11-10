@@ -314,6 +314,10 @@ $("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span c
 /* ── Fix it: what to do when… ──────────────────────────────────── */
 // [category, what you see, why, steps, optional code]. `x` in text renders as code.
 const FIXES = [
+  ["Pipeline", "A run is blocked because the issue needs setup.md, CLAUDE.md or adlc.yaml changed",
+    "Those files are the project's setup record. Unattended agents can't change them; only you can, through init. The blocked comment names the section to update.",
+    ["In a Claude session: `/adlc-core:init --update <section>` (e.g. `secrets` for secret file locations and modes). Confirm the values and merge its PR.", "Relabel the issue `adlc:ready`: the agent does the rest of it."],
+    "/adlc-core:init --update secrets"],
   ["PRs", "Approved PRs were all reworked for conflicts at once, and keep needing re-approval",
     "Older runners sent every conflicting agent PR back to the agent at the same time, and let the next PR overtake one waiting for re-approval, so each merge caused new conflicts. Current runners rework a queued PR only when it reaches the front, and a PR waiting for re-approval keeps its place.",
     ["Re-approve the PR at the front of the train (Needs you → Merge train).", "The PRs behind it then merge one by one, each brought up to date (and reworked if it conflicts) when its turn comes."]],

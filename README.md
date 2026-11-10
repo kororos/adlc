@@ -351,7 +351,7 @@ Claude asks for the project name, description, platforms and **stacks** (the tec
 | Container registry | GHCR (default), image names, tag scheme, retention, vulnerability scanning |
 | Environments | a profile per environment: **runtime** (default: dev = Docker Compose on the dev server, prod = **Docker Swarm**), hosts/nodes, URLs, deploy trigger and approval, ingress/TLS, replicas, rolling-update policy, secrets, database placement and backups, how migrations run, **where agents may deploy on their own** (default: dev only) |
 | Mobile | bundle IDs, Expo EAS build/update, store accounts, signing |
-| Secrets | where secrets live (names only, never values) |
+| Secrets | where secrets live (names only, never values); secret files per environment: location, directory and file mode, and the command to add one |
 | Release & deps | SemVer, release-please, Renovate, allowed licences |
 | Operations | error tracking, logging, notifications, compliance (GDPR, data residency) |
 | ADLC | autonomy (which risk tiers auto-merge), network mode |
@@ -866,6 +866,7 @@ By hand: a stack is a plugin in this repository's marketplace, plus optional fil
 | Runs hit usage limits | All agents share your plan's quota. Lower `ADLC_MAX_PARALLEL_RUNS`. The poller backs off and retries automatically. |
 | `adlc:blocked` with "environmental" | Sidecar down, emulator missing (`/dev/kvm`), or a domain blocked by the network allowlist. Check the run's `reports/` and the proxy audit log. |
 | Agent blocked on a `tbd` key | `/adlc-core:init --update <section>`, then relabel `adlc:ready`. |
+| Agent blocked because the issue needs `docs/project/setup.md`, `CLAUDE.md` or `adlc.yaml` changed | Those are the project's setup record: only you change them, with `/adlc-core:init --update <section>` in an interactive session (the blocked comment names the section, e.g. `secrets` for secret file locations and modes). Merge its PR, then relabel the issue `adlc:ready`; the agent does the rest. |
 | Plugins not loaded | `claude plugin validate`, check `.claude/settings.json`, and trust the folder in an interactive session once. On the runner, `adlc up <slug>` re-installs them. |
 | Poller log says GitHub rejects the token | PAT expired or missing a permission: `adlc secrets <slug>` then `adlc up <slug>`. |
 | A build in a run fails to download something | The domain is blocked in allowlist mode: `adlc audit <slug>`, add it to `adlc.yaml → network.extra_domains`. |
