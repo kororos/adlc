@@ -38,8 +38,9 @@ The scheduling, selection and flake rules come from the core `testing-contract` 
 - Install the **release APK** built by `env.start_build`, and uninstall or clear app data before each run (`clearState: true` in flows).
 - Common failures:
   - `device offline`: run `adb reconnect`, then retry once.
-  - Emulator not booted: check `getprop sys.boot_completed`.
-  - In both cases report **environmental**, not a test failure.
+  - Emulator not booted: check `getprop sys.boot_completed`. If the container is unhealthy, recreate it (`up -d --force-recreate`, see `rn-test-env`), never `docker restart` it.
+  - The app shows "offline" or can't resolve the API host, and the emulator log has `HTTP proxy handshake … 403`: the emulator service lacks the empty `HTTP_PROXY`/`http_proxy`/`HTTPS_PROXY`/`https_proxy` of the `rn-test-env` template. Fix `deploy/compose.emulator.yml` and recreate it.
+  - In all these cases report **environmental**, not a test failure.
 
 ## iOS
 - Same Maestro flows, run only in CI on `macos-latest` (`where: ci`). Don't add iOS-only flows unless an AC is iOS-specific. Use `runFlow` with `when: platform` for small differences.

@@ -15,6 +15,13 @@ services:
       DEVICE_INTERVAL_WAITING: "10"
       EMULATOR_ADDITIONAL_ARGS: "-no-boot-anim -no-audio"
       USER_BEHAVIOR_ANALYTICS: "false"
+      # No proxy for the emulator. ADLC's Docker injects HTTP(S)_PROXY into every container, and the emulator
+      # ignores NO_PROXY: it passes http_proxy to the device (-http-proxy), so every app connection tunnels
+      # through the egress proxy, which refuses the per-run hosts (403). Set to empty, Docker doesn't inject them.
+      HTTP_PROXY: ""
+      http_proxy: ""
+      HTTPS_PROXY: ""
+      https_proxy: ""
       NO_PROXY: "*"
       no_proxy: "*"
     networks: [adlc-web]

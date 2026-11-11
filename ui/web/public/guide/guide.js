@@ -314,6 +314,10 @@ $("#lgrid").innerHTML = LABELS.map(([c, n, m, d]) => `<div class="lcard"><span c
 /* ── Fix it: what to do when… ──────────────────────────────────── */
 // [category, what you see, why, steps, optional code]. `x` in text renders as code.
 const FIXES = [
+  ["CI", "Android e2e: the app shows \"offline\", or the emulator stays unhealthy",
+    "Environment, not the app. ADLC's Docker gives every container the egress proxy, and the emulator ignores NO_PROXY: it tunnels the device's connections through the proxy, which refuses the per-run hosts (`HTTP proxy handshake … 403` in its log). Separately, a restarted emulator container can't start the device again (`sudo chown … /dev/kvm` fails).",
+    ["In the project's `deploy/compose.emulator.yml`, set `HTTP_PROXY`, `http_proxy`, `HTTPS_PROXY` and `https_proxy` to `\"\"` (the stack-react-native template does).", "Recreate the emulator, never restart it (command below).", "Relabel the blocked issue `adlc:ready`."],
+    "docker exec adlc-<slug>-runner-1 bash -lc 'cd /srv/adlc/projects/<slug>/repo && ADLC_PROJECT_DOMAIN=<slug>.<base domain> flock \"$ADLC_LOCK_DIR/android-emulator.lock\" docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d --force-recreate --wait'"],
   ["PRs", "Every conflict rework asks you to re-approve, so approved PRs don't merge overnight",
     "Runners before 2026-11-10 treated any conflict resolution as new code and ran a full rework (about 35 minutes) for it. Current ones keep your approval while the PR still makes the same change, run a quick rework for conflicts only, and count conflicts apart (conflict_rework_max, default 5).",
     ["Update: `adlc up <slug>` (runner) and `adlc restart <slug>` (plugins).", "A PR that is adlc:needs-human-review from the old shared limit: relabel its issue `adlc:ready`.", "When the change did differ, ADLC's comment lists just those lines: review them and approve again."]],
