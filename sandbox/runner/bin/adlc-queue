@@ -4,8 +4,8 @@
 //   Actions runs (active and recent, with jobs and runners), as
 //   JSON for the ADLC dashboard (written atomically; the poller refreshes it every minute).
 //
-// Mirrors the poller: an issue can start when all its "blocked by" issues are closed; among
-// those, "run next" (label adlc:priority, set from the dashboard) comes first, then regressions (adlc:regression:
+// Mirrors the poller: issues being worked on (adlc:in-progress) first; an issue can start when all its "blocked by"
+// issues are closed; among those, "run next" (label adlc:priority, set from the dashboard) comes first, then regressions (adlc:regression:
 // main or the nightly is broken), then "run next" on the epic, then reworks (ready issues
 // with an open agent PR, unless the switch rework_first is off), then the earliest milestone due date,
 // then the oldest issue. With max_open_prs set, new issues wait while that many agent PRs are open. Owner tasks (adlc:owner)
@@ -98,7 +98,9 @@ for (const w of work.values()) for (const b of w.blockers) if (work.has(b)) {
   if (!blocks.has(b)) blocks.set(b, [])
   blocks.get(b).push(w.n)
 }
-const key = (w) => [w.priority ? 0 : 1, w.regression ? 0 : 1, w.epicFirst ? 0 : 1, reworkFirst && w.rework && w.state === "ready" ? 0 : 1, w.due, w.created, w.n]
+// Running issues come first: they're what happens now (starting one removes its "run next" label, which
+// would otherwise send it back to its old place).
+const key = (w) => [w.state === "in-progress" ? 0 : 1, w.priority ? 0 : 1, w.regression ? 0 : 1, w.epicFirst ? 0 : 1, reworkFirst && w.rework && w.state === "ready" ? 0 : 1, w.due, w.created, w.n]
 const cmp = (a, b) => { const x = key(a), y = key(b); for (let k = 0; k < x.length; k++) if (x[k] !== y[k]) return x[k] < y[k] ? -1 : 1; return 0 }
 const avail = [...work.values()].filter((w) => remaining.get(w.n) === 0)
 const order = []
