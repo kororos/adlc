@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# adlc-bg: start a long job detached, so it outlives the Bash call (at most 10 minutes) that starts it.
+#
+#   adlc-bg <log> -c '<shell command>'
+#   adlc-bg <log> -- <command> [args…]
+#
+# Output goes to <log> (replaced). When the job ends, however it ends, "EXIT_CODE=<n>" is appended to the
+# log and <n> is written to <log>.exit; the job's process id is in <log>.pid. Wait for it with
+# `adlc-wait <log>`, which returns as soon as it ends.
+set -uo pipefail
+usage() { sed -n '4,5p' "$0" | sed 's/^# //' >&2; exit 2; }
+[ $# -ge 3 ] || usage
+log=$1; shift
+case $1 in
+  -c) [ $# -eq 2 ] || usage; cmd=$2 ;;
+  --) shift; cmd=$(printf '%q ' "$@") ;;
+  *) usage ;;
+esac
+mkdir -p "$(dirname "$log")" || exit 2
+rm -f "$log.exit" "$log.pid"
+: >"$log"
+date +%s >"$log.start"
+exitf=$(printf %q "$log.exit")
+# setsid: its own session, so the job survives the end of the calling shell; nohup and setsid exec, so
+# $! is the job's own bash. The command runs in a subshell, so an `exit` in it still reaches the trailer.
+nohup setsid bash -c "("$'\n'"$cmd"$'\n'")"$'\n'"rc=\$?; echo \"EXIT_CODE=\$rc\"; echo \"\$rc\" >$exitf" >>"$log" 2>&1 </dev/null &
+echo $! >"$log.pid"
+echo "adlc-bg: started (pid $!), log $log. Wait with: adlc-wait $log"

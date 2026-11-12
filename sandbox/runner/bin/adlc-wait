@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# adlc-wait: wait for a job started with adlc-bg (or any job that ends its log with "EXIT_CODE=<n>").
+#
+#   adlc-wait <log> [--max <seconds>] [--tail <lines>]
+#
+# Returns as soon as the job ends (it checks every 5 s), or after --max seconds (default 570, under the
+# 10-minute limit of a Bash call): then call it again. Prints the log's last lines (default 15) and a
+# status line. Exit code: the job's own when it ended; 124 still running; 125 the job is gone without an
+# exit code (killed); 2 no such log.
+# Use this instead of `sleep N; grep EXIT_CODE <log>`: a fixed sleep waits its full length even when the
+# job finished long before.
+set -uo pipefail
+log="" max=570 tl=15
+while [ $# -gt 0 ]; do
+  case $1 in
+    --max) max=$2; shift 2 ;;
+    --tail) tl=$2; shift 2 ;;
+    -*) sed -n '4p' "$0" | sed 's/^# //' >&2; exit 2 ;;
+    *) log=$1; shift ;;
+  esac
+done
+[ -n "$log" ] || { sed -n '4p' "$0" | sed 's/^# //' >&2; exit 2; }
+[ -e "$log" ] || { echo "adlc-wait: no log $log" >&2; exit 2; }
+pid=$(cat "$log.pid" 2>/dev/null || true)
+start=$(cat "$log.start" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || date +%s)
+end=$((SECONDS + max))
+rc="" state=""
+while :; do
+  if [ -s "$log.exit" ]; then rc=$(tr -dc 0-9 <"$log.exit"); state=done; break; fi
+  line=$(grep -aE '^EXIT_CODE=[0-9]+' "$log" 2>/dev/null | tail -1)
+  if [ -n "$line" ]; then rc=$(tr -dc 0-9 <<<"$line"); state=done; break; fi
+  if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+    sleep 2; [ -s "$log.exit" ] && continue
+    state=gone; break
+  fi
+  [ "$SECONDS" -ge "$end" ] && { state=running; break; }
+  sleep 5
+done
+el=$(( $(date +%s) - start ))
+tail -n "$tl" "$log" | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | cut -c1-300
+case $state in
+  done) echo "adlc-wait: finished after ${el}s, EXIT_CODE=${rc:-1}"; exit "${rc:-1}" ;;
+  gone) echo "adlc-wait: the job (pid $pid) is gone without an exit code after ${el}s: it was killed"; exit 125 ;;
+  *) echo "adlc-wait: still running after ${el}s; call adlc-wait $log again"; exit 124 ;;
+esac
