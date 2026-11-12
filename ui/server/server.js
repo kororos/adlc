@@ -16,7 +16,7 @@ import readline from "node:readline"
 import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import fastifyStatic from "@fastify/static"
-import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, cpuPct, currentStep, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
+import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, commandLog, cpuPct, currentStep, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
 
 const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
@@ -217,6 +217,21 @@ function runStep(slug, file) {
   return s
 }
 
+// The current command's own log, when it names one, with its progress so far (the command's output
+// reaches the transcript only when it ends). Runner paths (/srv/adlc/projects/<slug>/…) map to DATA.
+function stepWithLog(slug, n, step) {
+  if (!step) return step
+  const { cmd, ...doing } = step.doing ?? {}
+  const out = { ...step, doing: step.doing ? doing : null }
+  const rel = step.doing?.running ? commandLog(cmd) : null
+  if (!rel) return out
+  const file = rel.startsWith("/") ? (rel.includes("/projects/") ? path.join(DATA, rel.slice(rel.indexOf("/projects/") + 1)) : null) : pdir(slug, "runs", String(n), rel)
+  if (!file || !file.startsWith(pdir(slug)) || !fs.existsSync(file)) return out
+  const p = logProgress(file)
+  out.doing.log = { name: path.basename(file), segments: p?.segments ?? [], markers: p?.markers ?? [], last: p?.last ?? "", updated: mtime(file) }
+  return out
+}
+
 function state(p, detail = false) {
   const st = (...f) => pdir(p.slug, "state", ...f)
   const snapshot = readJson(st("github.json"))
@@ -236,7 +251,7 @@ function state(p, detail = false) {
   const active = running.map((n) => {
     const run = all.find((r) => r.issue === n) ?? null
     return { issue: n, title: titles.get(n) ?? "", run, progress: runState(n),
-      ...(detail ? { step: run ? runStep(p.slug, run.file) : null, jobs: runJobs(p.slug, n, run?.started) } : {}) }
+      ...(detail ? { step: run ? stepWithLog(p.slug, n, runStep(p.slug, run.file)) : null, jobs: runJobs(p.slug, n, run?.started) } : {}) }
   })
   let backoffUntil = null
   try {

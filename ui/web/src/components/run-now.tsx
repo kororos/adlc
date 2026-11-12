@@ -31,6 +31,16 @@ export function RunNow({ a }: { a: ActiveRun }) {
           {a.step.doing.since && <span className="shrink-0">· {a.step.doing.running ? "started" : ""} {ago(a.step.doing.since)}</span>}
         </p>
       )}
+      {a.step?.doing?.running && a.step.doing.log && (
+        <div className="grid gap-1.5">
+          <p className="pl-5 text-[11px] text-muted-foreground">
+            output: <span className="font-mono">{a.step.doing.log.name}</span>
+            {a.step.doing.log.updated && <> · written {ago(a.step.doing.log.updated)}</>}
+          </p>
+          {a.step.doing.log.segments.map((s, i) => <SegmentRow key={i} s={s} active={i === a.step!.doing!.log!.segments.length - 1} />)}
+          {a.step.doing.log.last && <p className="truncate pl-6 font-mono text-[11px] text-muted-foreground" title={a.step.doing.log.last}>{a.step.doing.log.last}</p>}
+        </div>
+      )}
       {current && <JobRow job={current} />}
       {earlier.length > 0 && (
         <details className="text-muted-foreground">

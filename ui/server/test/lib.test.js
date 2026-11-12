@@ -120,8 +120,16 @@ test("currentStep is the subagent still running, else the lead's last tool", asy
   const lines = [call("a", { subagent_type: "adlc-core:build-runner", description: "Verify" }, "t1"), result("a"),
     call("b", { subagent_type: "adlc-core:debugger", description: "Fix it" }, "t2"),
     JSON.stringify({ type: "assistant", parent_tool_use_id: "b", message: { content: [{ type: "tool_use", id: "x", name: "Bash", input: { command: "ls" } }] } })]
-  assert.deepEqual(currentStep(lines), { agent: "debugger", what: "Fix it", since: "t2", doing: { what: "ls", since: null, running: true } })
+  assert.deepEqual(currentStep(lines), { agent: "debugger", what: "Fix it", since: "t2", doing: { what: "ls", since: null, running: true, cmd: "ls" } })
   const finished = [...lines, JSON.stringify({ type: "user", parent_tool_use_id: "b", message: { content: [{ type: "tool_result", tool_use_id: "x" }] } })]
   assert.equal(currentStep(finished).doing.running, false)
   assert.equal(currentStep(lines.slice(0, 2)), null)   // finished subagent, no lead tool call since
+})
+
+test("commandLog finds the log a command writes to", async () => {
+  const { commandLog } = await import("../lib.js")
+  assert.equal(commandLog("s=1; timeout 600 pnpm --filter web exec playwright test a b > .adlc/runs/427/reports/logs/qa-e2e-5-a1.log 2>&1; echo x"), ".adlc/runs/427/reports/logs/qa-e2e-5-a1.log")
+  assert.equal(commandLog("nohup bash -c 'x' > /srv/adlc/projects/diet/runs/97/a.log 2>&1 &"), "/srv/adlc/projects/diet/runs/97/a.log")
+  assert.equal(commandLog("(pnpm -r lint) > $L/lint-4.log 2>&1"), null)
+  assert.equal(commandLog("git status"), null)
 })

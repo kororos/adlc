@@ -250,7 +250,7 @@ export function currentStep(lines) {
     if (j.type === "assistant") {
       for (const c of j.message?.content ?? []) {
         if (c.type !== "tool_use") continue
-        const doing = { what: toolSummary(c.name, c.input), since: j.timestamp ?? null, running: true }
+        const doing = { what: toolSummary(c.name, c.input), since: j.timestamp ?? null, running: true, ...(c.name === "Bash" ? { cmd: String(c.input?.command ?? "") } : {}) }
         calls.set(c.id, doing)
         if (parent) { const st = open.get(parent); if (st) st.doing = doing; continue }
         if (c.name === "Agent" || c.name === "Task") {
@@ -269,4 +269,11 @@ export function currentStep(lines) {
   const step = [...open.values()].at(-1) ?? lead
   if (step?.agent === "lead") return { agent: "lead", what: step.what, since: step.since, doing: null }
   return step
+}
+
+// The log a running command writes to: the last "> <path>.log" (or "&> …", "2>&1 >…") with a literal
+// path, as the agents write their stage logs. Paths with variables ($L/…) can't be resolved.
+export function commandLog(cmd) {
+  const m = [...String(cmd ?? "").matchAll(/(?:^|[\s;&|(])(?:&|\d)?>>?\s*([^\s;&|$()`'"]+\.log)\b/g)]
+  return m.length ? m.at(-1)[1] : null
 }
