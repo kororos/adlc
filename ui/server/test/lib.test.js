@@ -120,6 +120,8 @@ test("currentStep is the subagent still running, else the lead's last tool", asy
   const lines = [call("a", { subagent_type: "adlc-core:build-runner", description: "Verify" }, "t1"), result("a"),
     call("b", { subagent_type: "adlc-core:debugger", description: "Fix it" }, "t2"),
     JSON.stringify({ type: "assistant", parent_tool_use_id: "b", message: { content: [{ type: "tool_use", id: "x", name: "Bash", input: { command: "ls" } }] } })]
-  assert.deepEqual(currentStep(lines), { agent: "debugger", what: "Fix it", since: "t2" })
+  assert.deepEqual(currentStep(lines), { agent: "debugger", what: "Fix it", since: "t2", doing: { what: "ls", since: null, running: true } })
+  const finished = [...lines, JSON.stringify({ type: "user", parent_tool_use_id: "b", message: { content: [{ type: "tool_result", tool_use_id: "x" }] } })]
+  assert.equal(currentStep(finished).doing.running, false)
   assert.equal(currentStep(lines.slice(0, 2)), null)   // finished subagent, no lead tool call since
 })

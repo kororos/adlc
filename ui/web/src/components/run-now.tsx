@@ -23,6 +23,14 @@ export function RunNow({ a }: { a: ActiveRun }) {
           {a.step.since && <span className="text-muted-foreground"> · since {ago(a.step.since)}</span>}
         </p>
       )}
+      {a.step?.doing && (
+        <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={a.step.doing.what}>
+          {a.step.doing.running ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-primary" /> : <CircleCheck className="size-3.5 shrink-0" />}
+          <span className="shrink-0">{a.step.doing.running ? "running" : "last"}:</span>
+          <span className="truncate font-mono text-foreground/80">{a.step.doing.what}</span>
+          {a.step.doing.since && <span className="shrink-0">· {a.step.doing.running ? "started" : ""} {ago(a.step.doing.since)}</span>}
+        </p>
+      )}
       {current && <JobRow job={current} />}
       {earlier.length > 0 && (
         <details className="text-muted-foreground">

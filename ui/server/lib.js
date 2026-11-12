@@ -237,24 +237,36 @@ export function jobProgress(text) {
 }
 
 // The step the run is on, from the end of its stream-json log: the subagent the lead is waiting for
-// (Agent/Task call without a result yet), else the lead's own latest tool call.
+// (Agent/Task call without a result yet), else the lead's own latest tool call. `doing` is that agent's
+// latest tool call (a command, a file it edits), with `running` while it has no result yet.
 export function currentStep(lines) {
-  let open = new Map()
+  const open = new Map()   // Agent call id → step
+  const calls = new Map()  // tool call id → its `doing`
   let lead = null
   for (const line of lines) {
     let j
     try { j = JSON.parse(line) } catch { continue }
-    if (j.parent_tool_use_id) continue
+    const parent = j.parent_tool_use_id ?? null
     if (j.type === "assistant") {
       for (const c of j.message?.content ?? []) {
         if (c.type !== "tool_use") continue
+        const doing = { what: toolSummary(c.name, c.input), since: j.timestamp ?? null, running: true }
+        calls.set(c.id, doing)
+        if (parent) { const st = open.get(parent); if (st) st.doing = doing; continue }
         if (c.name === "Agent" || c.name === "Task") {
-          open.set(c.id, { agent: String(c.input?.subagent_type ?? "agent").replace(/^adlc-core:/, ""), what: clip(c.input?.description ?? "", 140), since: j.timestamp ?? null })
-        } else lead = { agent: "lead", what: toolSummary(c.name, c.input), since: j.timestamp ?? null }
+          open.set(c.id, { agent: String(c.input?.subagent_type ?? "agent").replace(/^adlc-core:/, ""), what: clip(c.input?.description ?? "", 140), since: j.timestamp ?? null, doing: null })
+        } else lead = { agent: "lead", what: doing.what, since: doing.since, doing }
       }
     } else if (j.type === "user") {
-      for (const c of j.message?.content ?? []) if (c.type === "tool_result") open.delete(c.tool_use_id)
+      for (const c of j.message?.content ?? []) {
+        if (c.type !== "tool_result") continue
+        if (!parent) open.delete(c.tool_use_id)
+        const d = calls.get(c.tool_use_id)
+        if (d) d.running = false
+      }
     }
   }
-  return [...open.values()].at(-1) ?? lead
+  const step = [...open.values()].at(-1) ?? lead
+  if (step?.agent === "lead") return { agent: "lead", what: step.what, since: step.since, doing: null }
+  return step
 }
