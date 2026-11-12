@@ -37,7 +37,7 @@ const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<st
   },
   verify_scope: {
     title: "Tests during delivery",
-    what: "What the agent's own verify runs: the tests the change affects, plus lint, typecheck, arch checks and build on everything (affected), the whole suite (full), or full for high-risk issues and affected for the rest (auto; the run decides once its design sets the risk). PR CI always runs the full suite before a merge. The label adlc:verify-full or adlc:verify-affected on an issue overrides this for that issue.",
+    what: "What the run's one full verify runs (later verifies re-run only the failed tests and the tests of what changed): the tests the change affects, plus lint, typecheck, arch checks and build on everything (affected), the whole suite (full), or full for high-risk issues and affected for the rest (auto; the run decides once its design sets the risk). PR CI always runs the full suite before a merge. The label adlc:verify-full or adlc:verify-affected on an issue overrides this for that issue.",
     values: { affected: "affected", auto: "auto (full if high risk)", full: "full" },
   },
 }

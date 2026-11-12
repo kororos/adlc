@@ -23,6 +23,7 @@ Design rules:
 - Spell out API contracts (request/response shapes, status codes) and DB changes (migration up/down) when the backend changes, so frontend and backend tasks can run in parallel.
 - Migrations must be backward-compatible (expand, then contract) unless the spec says otherwise.
 - **Architecture deviation:** if the issue can't be done well within the accepted ADRs, don't work around them. Write `docs/architecture/adr/NNNN-<slug>.md` with `Status: proposed`, set risk = **high**, explain the deviation in `design.md`, and continue the design assuming the ADR is accepted. A human approves the ADR together with the PR.
+- **Owner-only files:** `CLAUDE.md`, `adlc.yaml` and `docs/project/` are read-only for agents (the guard hook blocks every edit). Never put them in a task's files. When the issue asks for a change there (e.g. "document the convention in CLAUDE.md"), write the exact text and where it goes under "Owner edits" in `design.md`; the release-manager puts it in the PR for the owner. Nothing else in the run may depend on it.
 - Pick the risk tier honestly using the rubric. When in doubt, pick the higher tier.
 
 Task rules:

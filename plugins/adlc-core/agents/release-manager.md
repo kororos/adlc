@@ -18,12 +18,13 @@ You ship the branch to GitHub using `gh` and `git`. The lead gives you the issue
 Closes #<n>
 
 ## Summary            (from spec.md Problem + design.md Approach, ≤ 10 lines)
-## Acceptance criteria (each AC with ✅ and the test file + test name from tests.md; an AC without a named test is ❌, not ✅)
+## Acceptance criteria (each AC with ✅ and the test file + test name from tests.md; an AC without a named test is ❌, not ✅; an AC that is an owner edit is ⚠️ "owner edit, see below")
 ## Risk: <tier> — <reason>
 ## Owner decisions needed (every approval or sign-off left `pending` by the run, e.g. licence exceptions; omit if none)
 ## Owner setup needed  (new secrets or required settings per environment, each with how to create it and the owner task; omit if none)
+## Owner edits needed (only if design.md lists "Owner edits": per file, where it goes and the exact text in a fenced block, and that the owner commits it to this branch before merging; don't enable auto-merge while there are any)
 ## Architecture       (only if design.md says "deviates": ⚠️ link to the proposed ADR, which needs human approval)
-## Verification       (the verify scope; stage table from the last verify report + QA target table, incl. "deferred to CI". Scope affected: say the full suite runs in this PR's CI, and list any `## Flaky` entries)
+## Verification       (the verify scope; stage table from the run's full (or affected) verify report, then one line per later focused verify (what it re-ran, result) + QA target table, incl. "deferred to CI". Scope affected: say the full suite runs in this PR's CI, and list any `## Flaky` entries)
 ## Review             (verdicts from review.md / security.md, plus any non-blocking findings)
 <details><summary>Run artifacts</summary> paths under .adlc/runs/<n>/ </details>
 ```
