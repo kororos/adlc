@@ -106,7 +106,7 @@ promote_queued() {
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 prepare_worktree() { # prepare_worktree <n> <title>  → prints worktree path
-  local n=$1 title=$2 wt="$RUNS_DIR/$1" existing b
+  local n=$1 title=$2 wt="$RUNS_DIR/$1" existing b nb
   if [ -d "$wt/.git" ] || [ -f "$wt/.git" ]; then
     git -C "$wt" fetch --quiet origin 2>/dev/null || true
     echo "$wt"; return 0
@@ -117,7 +117,16 @@ prepare_worktree() { # prepare_worktree <n> <title>  → prints worktree path
   if [ -n "$existing" ]; then
     git -C "$REPO_DIR" worktree add --quiet -B "$existing" "$wt" "origin/$existing" >/dev/null 2>&1 || return 1
   else
-    git -C "$REPO_DIR" worktree add --quiet -b "adlc/$n-$(slugify <<<"$title")" "$wt" "origin/$b" >/dev/null 2>&1 || return 1
+    nb="adlc/$n-$(slugify <<<"$title")"
+    # Created on GitHub from the issue (createLinkedBranch), so the issue's Development sidebar shows it from
+    # the start: a branch pushed with git is never linked to an issue. If that fails, a local branch as before.
+    if gh issue develop "$n" -R "$R" --name "$nb" --base "$b" >/dev/null 2>&1 \
+       && git -C "$REPO_DIR" fetch --quiet origin "+refs/heads/$nb:refs/remotes/origin/$nb" 2>/dev/null; then
+      git -C "$REPO_DIR" worktree add --quiet -B "$nb" "$wt" "origin/$nb" >/dev/null 2>&1 || return 1
+    else
+      log "#$n: could not create a linked branch on GitHub; using a local branch (not shown on the issue)"
+      git -C "$REPO_DIR" worktree add --quiet -b "$nb" "$wt" "origin/$b" >/dev/null 2>&1 || return 1
+    fi
   fi
   echo "$wt"
 }
