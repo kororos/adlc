@@ -158,3 +158,20 @@ test("jobProgress splits pnpm's interleaved package output into one segment per 
     [["vitest", "tools/arch", 1, 0, null, false, undefined], ["jest", "apps/mobile", 2, 1, 2, true, 54]])
   assert.equal(p.last, "apps/mobile: Time:        53.839 s")
 })
+
+test("jobProgress counts flows of a script that lists them and runs Maestro once per flow", async () => {
+  const { jobProgress } = await import("../lib.js")
+  const p = jobProgress([
+    "15:21:20 e2e-android: acquired android-emulator.lock",
+    "e2e-android: flows: AC24-sign-up AC27-sign-in link-happy-path",
+    " > Flow AC24-sign-up", "Tap on id: x... COMPLETED",
+    " > Flow AC27-sign-in", "Assert that id: y is visible... FAILED",
+    " > Flow link-happy-path", "Tap... FAILED", "e2e-link: link-happy-path attempt 1/3 FAIL",
+    " > Flow link-happy-path", "Tap... COMPLETED",
+  ].join("\n"))
+  const f = p.segments.find((s) => s.label === "flows")
+  assert.deepEqual([f.done, f.failed, f.total, f.current, f.finished], [2, 1, 3, "link-happy-path", false])
+  const done = jobProgress(["e2e-android: flows: a b", " > Flow a", "x... COMPLETED", " > Flow b", "y... COMPLETED", "e2e-link: b attempt 1/3 PASS", "EXIT_CODE=0"].join("\n"))
+  const g = done.segments.find((s) => s.label === "flows")
+  assert.deepEqual([g.done, g.failed, g.finished], [2, 0, true])
+})

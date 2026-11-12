@@ -173,6 +173,12 @@ const PW_DONE = /^\s*(\d+) passed \(([\d.]+)(m?s|m)\)/
 const MAESTRO_FLOW = /^\[(Passed|Failed|Skipped)\]\s+(.+?)(?:\s+\((?:[\dhms ]+)\))?$/
 const MAESTRO_DONE = /^(\d+)\/(\d+) Flows? (Passed|Failed)/
 const ATTEMPT = /^e2e-link: (\S+) (?:attempt \d+\/\d+ (PASS|FAIL)|FAILED after)/
+// A project script that names its flows up front ("e2e-android: flows: a b c") and runs Maestro once per
+// flow (" > Flow a", step lines ending in COMPLETED or FAILED).
+const FLOW_LIST = /^(?:\d\d:\d\d:\d\d )?[\w-]+: flows: (.+)$/
+const FLOW_START = /^\s*> Flow (\S+)/
+const STEP_FAILED = /\.\.\. FAILED\s*$/
+const LINK_RESULT = /^e2e-link: (\S+) (?:attempt \d+\/\d+ (PASS|FAIL)|FAILED after|DETERMINISTIC FAILURE)/
 const GRADLE_TASK = /^> Task :/
 const GRADLE_DONE = /^BUILD (SUCCESSFUL|FAILED)(?: in (.+))?/
 const MARKER = /^([A-Z][A-Z0-9_]*_EXIT|EXIT_CODE)=(\d+)\b/
@@ -191,6 +197,12 @@ export function jobProgress(text) {
   const markers = []
   const curBy = new Map()   // stream (pnpm package, or "") → its current segment
   let last = ""
+  let flows = null   // the named-flows segment, with per-flow bookkeeping
+  const settle = (name, failed) => {
+    if (!flows || !name || flows.settled.has(name)) return
+    flows.settled.add(name); flows.seg.done++
+    if (failed) flows.seg.failed++
+  }
   for (const raw of text.split("\n")) {
     let line = stripAnsi(raw)
     let stream = ""
@@ -201,6 +213,30 @@ export function jobProgress(text) {
     const open = (tool, label, extra = {}) => { cur = { tool, label, done: 0, failed: 0, total: null, finished: false, ...extra }; segments.push(cur); curBy.set(stream, cur); return cur }
     const ensure = (tool, label) => (cur && cur.tool === tool && !cur.finished ? cur : open(tool, stream || label))
     let m
+    if ((m = line.match(FLOW_LIST))) {
+      const names = m[1].trim().split(/\s+/)
+      flows = { seg: open("maestro", "flows", { total: names.length }), settled: new Set(), cur: null, curFailed: false }
+      continue
+    }
+    if (flows && !flows.seg.finished) {
+      if ((m = line.match(FLOW_START))) {
+        if (flows.cur && flows.cur !== m[1] && !flows.linkFlows?.has(flows.cur)) settle(flows.cur, flows.curFailed)
+        if (flows.cur !== m[1]) flows.curFailed = false
+        flows.cur = m[1]; flows.seg.current = m[1]
+        continue
+      }
+      if (STEP_FAILED.test(line)) { flows.curFailed = true; continue }
+      if ((m = line.match(LINK_RESULT))) {
+        (flows.linkFlows ??= new Set()).add(m[1])
+        if (m[2] === "PASS") settle(m[1], false)
+        else if (!m[2]) settle(m[1], true)
+        continue
+      }
+      if (MARKER.test(line) || /^ENVIRONMENTAL:/.test(line)) {
+        if (flows.cur && !flows.linkFlows?.has(flows.cur)) settle(flows.cur, flows.curFailed)
+        flows.seg.finished = true
+      }
+    }
     if ((m = line.match(VITEST_RUN))) open("vitest", relDir(m[1]))
     else if ((m = line.match(VITEST_FILE))) {
       const s = ensure("vitest", "tests")
