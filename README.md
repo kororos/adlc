@@ -638,6 +638,7 @@ Below the changed lines, the re-approve comment also shows the **conflict resolu
 - `max_open_prs` (default off; e.g. 3): no new issue starts while that many agent PRs are open, waiting for your review, a merge or a rework. Reworks still run. The Queue tab and `adlc status` say when new issues are held back.
 - `update_before_merge` (default always): `overlap` merges green PRs that fell behind without another CI run when the base didn't touch what they change. See the merge train above.
 - `verify_scope` (default affected; also auto and full): how much the agent's own verifies test. See **How much the agent tests** above.
+- `max_parallel_runs` (default 1; up to 4; dashboard: **Parallel runs**): how many issues the agents work on at once. Runs share your Claude plan's quota and the dev server, the Android emulator still serves one run at a time, and parallel PRs conflict more often. Below `adlc.yaml`, the runner's `ADLC_MAX_PARALLEL_RUNS` (in `$ADLC_ROOT/config/<slug>.env`) still applies.
 
 ### Risk tiers and merging
 | Risk | Typical changes | Review | Merge |
@@ -864,7 +865,7 @@ By hand: a stack is a plugin in this repository's marketplace, plus optional fil
 | Symptom | Likely cause / fix |
 |---|---|
 | Issue never starts | It's `adlc:queued` (blockers still open), or its author isn't a collaborator (`adlc:needs-human-review`), or the poller is paused or out of quota. |
-| Runs hit usage limits | All agents share your plan's quota. Lower `ADLC_MAX_PARALLEL_RUNS`. The poller backs off and retries automatically. |
+| Runs hit usage limits | All agents share your plan's quota. Lower **Parallel runs** (Health → Automation, or `autonomy.max_parallel_runs`). The poller backs off and retries automatically. |
 | `adlc:blocked` with "environmental" | Sidecar down, emulator missing (`/dev/kvm`), or a domain blocked by the network allowlist. Check the run's `reports/` and the proxy audit log. |
 | Agent blocked on a `tbd` key | `/adlc-core:init --update <section>`, then relabel `adlc:ready`. |
 | Agent blocked because the issue needs `docs/project/setup.md`, `CLAUDE.md` or `adlc.yaml` changed | Those are the project's setup record: only you change them, with `/adlc-core:init --update <section>` in an interactive session (the blocked comment names the section, e.g. `secrets` for secret file locations and modes). Merge its PR, then relabel the issue `adlc:ready`; the agent does the rest. When the issue itself asks for a change there (e.g. "document the convention in CLAUDE.md"), current runs don't block: the agent writes the exact text under **Owner edits needed** in the PR (no auto-merge while it's there), and you commit it to the branch before merging. |

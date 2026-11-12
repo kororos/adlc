@@ -58,7 +58,7 @@ Existing projects: `/init` (to record setup facts), then `/architect --assess` r
 ### Poller responsibilities
 1. **Promotion:** for each `adlc:queued` issue, if every blocked-by issue is closed (`gh issue view --json` dependency fields; REST `issues/{n}/dependencies/blocked_by` as fallback), relabel it `adlc:ready`.
 2. **Pick:** the oldest `adlc:ready` issue by milestone, then backlog order. **Trust:** only issues authored by collaborators.
-3. **Run:** at most `ADLC_MAX_PARALLEL_RUNS` (default 1, since one Max quota is shared). On a rate-limit failure: back off exponentially and relabel `adlc:ready`.
+3. **Run:** at most `max_parallel_runs` (dashboard switch, `autonomy.max_parallel_runs` or `ADLC_MAX_PARALLEL_RUNS`; default 1, since one Max quota is shared). On a rate-limit failure: back off exponentially and relabel `adlc:ready`.
 4. **Health:** pause itself if the `system/init` event reports `plugin_errors` **[verify]** field name. Log an error when GitHub rejects the token.
 5. **Recovery:** on start, issues left `adlc:in-progress` without a live process go back to `adlc:ready` (they resume from `state.json` and the last pushed phase). A run that ends without a terminal label is commented on and set to `adlc:blocked`.
 6. **Cleanup:** when the issue is closed, the run's worktree, local branches and compose environment are removed. Logs are kept 7 days.

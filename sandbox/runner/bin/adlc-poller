@@ -24,7 +24,8 @@ comment() { gh issue comment "$1" -R "$R" --body "$2" >/dev/null 2>&1 || log "WA
 has_label() { gh issue view "$1" -R "$R" --json labels --jq "[.labels[].name] | index(\"$2\") != null" 2>/dev/null | grep -q true; }
 is_running() { local f="$STATE_DIR/running/$1.pid"; [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; }
 running_count() { local n=0 f; for f in "$STATE_DIR"/running/*.pid; do [ -e "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null && n=$((n + 1)); done; echo "$n"; }
-max_runs() { local m; m=$(cfg '.autonomy.max_parallel_runs'); echo "${m:-${ADLC_MAX_PARALLEL_RUNS:-1}}"; }
+# How many delivery runs at once: the max_parallel_runs switch (dashboard, adlc.yaml, ADLC_MAX_PARALLEL_RUNS, 1).
+max_runs() { local m; m=$(setting max_parallel_runs); [[ $m =~ ^[1-9][0-9]*$ ]] && echo "$m" || echo 1; }
 is_collaborator() { gh api "repos/$R/collaborators/$1" --silent >/dev/null 2>&1; }
 
 # The agents' own identity: the GitHub App configured for this project (`adlc app <slug>`), seen
@@ -353,12 +354,14 @@ keep_prs_current|.autonomy.keep_prs_current|on|on off
 rework_first|.autonomy.rework_first|on|on off
 max_open_prs|.autonomy.max_open_prs|off|off 2 3 4 5 6 8
 update_before_merge|.autonomy.update_before_merge|always|always overlap
-verify_scope|.autonomy.verify_scope|affected|affected auto full"
+verify_scope|.autonomy.verify_scope|affected|affected auto full
+max_parallel_runs|.autonomy.max_parallel_runs|1|1 2 3 4"
 setting_def() { grep "^$1|" <<<"$SETTINGS"; }
 norm_value() { case $1 in true|on|yes) echo on ;; false|off|no) echo off ;; *) echo "$1" ;; esac; }
 setting() { # setting <key> → effective value
   local key=$1 def path default v
   def=$(setting_def "$key"); path=$(cut -d'|' -f2 <<<"$def"); default=$(cut -d'|' -f3 <<<"$def")
+  [ "$key" = max_parallel_runs ] && default=${ADLC_MAX_PARALLEL_RUNS:-$default}   # the runner's env, below adlc.yaml
   v=$(cat "$SETTINGS_DIR/$key" 2>/dev/null)
   [ -z "$v" ] && [ "$key" = merge_train ] && v=${ADLC_MERGE_TRAIN:-}
   [ -n "$v" ] || v=$(cfg_raw "$path" "$default")
@@ -369,7 +372,9 @@ setting_source() {
   [ -s "$SETTINGS_DIR/$key" ] && { echo dashboard; return; }
   [ "$key" = merge_train ] && [ -n "${ADLC_MERGE_TRAIN:-}" ] && { echo env; return; }
   def=$(setting_def "$key"); path=$(cut -d'|' -f2 <<<"$def")
-  [ -n "$(cfg_raw "$path" "")" ] && echo adlc.yaml || echo default
+  [ -n "$(cfg_raw "$path" "")" ] && { echo adlc.yaml; return; }
+  [ "$key" = max_parallel_runs ] && [ -n "${ADLC_MAX_PARALLEL_RUNS:-}" ] && [ "$ADLC_MAX_PARALLEL_RUNS" != 1 ] && { echo env; return; }
+  echo default
 }
 write_settings() {
   local key path default allowed out=()

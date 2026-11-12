@@ -30,6 +30,11 @@ const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<st
     what: "No new issue starts while this many agent PRs are open (waiting for your review, a merge or a rework). Reworks still run.",
     values: { off: "no limit" },
   },
+  max_parallel_runs: {
+    title: "Parallel runs",
+    what: "How many issues the agents work on at once. More finishes sooner, but the runs share your Claude plan's quota and the server, the Android emulator still takes one run at a time, and parallel PRs conflict more often.",
+    values: { "1": "1 (one at a time)" },
+  },
   update_before_merge: {
     title: "Update before merge",
     what: "A PR behind main is updated and re-checked before it merges (always), or only when main changed files it changes too, or lockfiles, migrations or CI config (overlap). Overlap needs \"Require branches to be up to date\" off in branch protection.",

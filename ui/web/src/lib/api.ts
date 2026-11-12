@@ -110,7 +110,7 @@ export type CiRun = {
   jobs: CiJob[]
 }
 
-export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current" | "rework_first" | "max_open_prs" | "update_before_merge" | "verify_scope"
+export type SettingKey = "merge_train" | "ci_auto_rework" | "keep_prs_current" | "rework_first" | "max_open_prs" | "update_before_merge" | "verify_scope" | "max_parallel_runs"
 export type Setting = { key: SettingKey; value: string; source: "dashboard" | "env" | "adlc.yaml" | "default"; project: string; allowed: string[] }
 export type ProjectAction = "pause" | "resume" | "run_nightly" | `${SettingKey}:${string}` | `prioritize:${number}` | `deprioritize:${number}` | `start:${number}`
 
