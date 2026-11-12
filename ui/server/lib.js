@@ -175,21 +175,31 @@ const MAESTRO_DONE = /^(\d+)\/(\d+) Flows? (Passed|Failed)/
 const ATTEMPT = /^e2e-link: (\S+) (?:attempt \d+\/\d+ (PASS|FAIL)|FAILED after)/
 const GRADLE_TASK = /^> Task :/
 const GRADLE_DONE = /^BUILD (SUCCESSFUL|FAILED)(?: in (.+))?/
-const MARKER = /^([A-Z][A-Z0-9_]*_EXIT|EXIT_CODE)=(\d+)\s*$/
+const MARKER = /^([A-Z][A-Z0-9_]*_EXIT|EXIT_CODE)=(\d+)\b/
+const JEST_TIME = /^Time:\s+([\d.]+)\s*s/
 
 // "/srv/adlc/projects/diet/runs/427/apps/api" → "apps/api"
 const relDir = (d) => d.replace(/^.*\/runs\/\d+\//, "").replace(/\/$/, "") || "."
 
+// pnpm's recursive runs prefix every line with "<package> <script>: " and interleave packages run in
+// parallel; each package keeps its own segment.
+const PNPM_PREFIX = /^((?:@[\w.-]+\/)?[\w.-]+(?:\/[\w.-]+)*) ((?:test|e2e)[\w:-]*): ?(.*)$/
+const NOISE = /^\((?:node:\d+|Use `node)/
+
 export function jobProgress(text) {
   const segments = []
   const markers = []
-  let cur = null
-  const open = (tool, label, extra = {}) => { cur = { tool, label, done: 0, failed: 0, total: null, finished: false, ...extra }; segments.push(cur); return cur }
-  const ensure = (tool, label) => (cur && cur.tool === tool && !cur.finished ? cur : open(tool, label))
+  const curBy = new Map()   // stream (pnpm package, or "") → its current segment
   let last = ""
   for (const raw of text.split("\n")) {
-    const line = stripAnsi(raw)
-    if (line.trim()) last = line.trim()
+    let line = stripAnsi(raw)
+    let stream = ""
+    const pm = line.match(PNPM_PREFIX)
+    if (pm) { stream = pm[1]; line = pm[3] }
+    if (line.trim() && !NOISE.test(line.trim())) last = `${stream ? `${stream}: ` : ""}${line.trim()}`
+    let cur = curBy.get(stream) ?? null
+    const open = (tool, label, extra = {}) => { cur = { tool, label, done: 0, failed: 0, total: null, finished: false, ...extra }; segments.push(cur); curBy.set(stream, cur); return cur }
+    const ensure = (tool, label) => (cur && cur.tool === tool && !cur.finished ? cur : open(tool, stream || label))
     let m
     if ((m = line.match(VITEST_RUN))) open("vitest", relDir(m[1]))
     else if ((m = line.match(VITEST_FILE))) {
@@ -207,6 +217,9 @@ export function jobProgress(text) {
       if (m[1] === "FAIL") s.failed++
     } else if ((m = line.match(JEST_SUITES)) && cur?.tool === "jest") {
       cur.total = Number(m[1]); cur.done = cur.total; cur.finished = true
+      cur.failed = Number(line.match(/(\d+) failed/)?.[1] ?? cur.failed)
+    } else if ((m = line.match(JEST_TIME)) && cur?.tool === "jest" && cur.finished) {
+      cur.durationS = Math.round(Number(m[1]))
     } else if ((m = line.match(PW_START))) open("playwright", "e2e", { total: Number(m[1]) })
     else if ((m = line.match(PW_TEST)) && cur?.tool === "playwright") {
       cur.done++
@@ -230,7 +243,7 @@ export function jobProgress(text) {
       cur.took = m[2] ?? null
     } else if ((m = line.match(MARKER))) {
       markers.push({ name: m[1], code: Number(m[2]) })
-      if (cur && !cur.finished) cur.finished = true
+      for (const c of curBy.values()) c.finished = true
     }
   }
   return { segments, markers, last: clip(last, 200) }

@@ -141,3 +141,20 @@ test("current step labels name the tool and shorten worktree paths", async () =>
   assert.equal(currentStep([line({ pattern: "flock", path: "/srv/adlc/projects/diet/runs/459/apps" }, "Grep")]).what, "Grep flock in apps")
   assert.equal(currentStep([line({ command: "git status", description: "Show status" }, "Bash")]).what, "Show status")
 })
+
+test("jobProgress splits pnpm's interleaved package output into one segment per package", async () => {
+  const { jobProgress } = await import("../lib.js")
+  const p = jobProgress([
+    "Scope: 3 of 13 workspace projects",
+    "tools/arch test:  RUN  v5.0.5 /srv/adlc/projects/diet/runs/459/tools/arch",
+    "apps/mobile test: (node:1) [UNDICI-EHPA] Warning: x",
+    "apps/mobile test: PASS src/lib/app-lock.test.tsx (8.836 s)",
+    "tools/arch test:  ✓ test/a.test.ts (3 tests) 9ms",
+    "apps/mobile test: FAIL src/b.test.tsx",
+    "apps/mobile test: Test Suites: 1 failed, 1 passed, 2 total",
+    "apps/mobile test: Time:        53.839 s",
+  ].join("\n"))
+  assert.deepEqual(p.segments.map((s) => [s.tool, s.label, s.done, s.failed, s.total, s.finished, s.durationS]),
+    [["vitest", "tools/arch", 1, 0, null, false, undefined], ["jest", "apps/mobile", 2, 1, 2, true, 54]])
+  assert.equal(p.last, "apps/mobile: Time:        53.839 s")
+})
