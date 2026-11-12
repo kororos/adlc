@@ -86,15 +86,15 @@ function SegmentRow({ s, active }: { s: JobSegment; active: boolean }) {
       <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
         <span className="font-medium">{s.label}</span>
         <span>
-          {s.tool === "gradle" ? `${s.done} ${UNIT[s.tool]}${s.finished ? (s.failed ? ", build failed" : `, built${s.took ? ` in ${s.took}` : ""}`) : ""}`
+          {s.tool === "gradle" ? `${s.done}${!s.finished && total ? ` of ${estimate ? "~" : ""}${total}` : ""} ${UNIT[s.tool]}${s.finished ? (s.failed ? ", build failed" : `, built${s.took ? ` in ${s.took}` : ""}`) : ""}`
             : <>{passed} passed{s.failed ? <span className="text-red-600 dark:text-red-400">, {s.failed} failed</span> : null}
               {total ? <> of {estimate ? "~" : ""}{total} {UNIT[s.tool]}</> : <> {UNIT[s.tool]}</>}</>}
         </span>
         {s.current && !s.finished && <span className="text-muted-foreground">· now {s.current}</span>}
         {s.finished && s.durationS != null && <span className="text-muted-foreground">· {duration(s.durationS * 1000)}</span>}
-        {estimate && s.expected?.durationS ? <span className="text-muted-foreground" title="The largest recent run of this suite">· a whole run took {duration(s.expected.durationS * 1000)}</span> : null}
+        {estimate && s.expected?.durationS ? <span className="text-muted-foreground" title="The largest recent run of this suite">· {s.tool === "gradle" ? "a full build took" : "a whole run took"} {duration(s.expected.durationS * 1000)}</span> : null}
       </div>
-      {pct !== null && s.tool !== "gradle" && (
+      {pct !== null && (s.tool !== "gradle" || !s.finished) && (
         <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
           <div className={cn("h-full rounded-full", s.failed ? "bg-red-500" : "bg-primary", active && !s.finished && "animate-pulse")} style={{ width: `${s.finished ? 100 : pct}%` }} />
         </div>

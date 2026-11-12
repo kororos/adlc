@@ -156,6 +156,13 @@ function logProgress(file) {
   progressCache.set(file, { m, p })
   return p
 }
+// "10m 21s" / "1h 2m 3s" / "45s" (Gradle) → seconds.
+const tookSeconds = (t) => {
+  if (!t) return null
+  const g = (u) => Number(t.match(new RegExp(`(\\d+)\\s*${u}`))?.[1] ?? 0)
+  const s = g("h") * 3600 + g("m(?!s)") * 60 + g("s")
+  return s || null
+}
 // Largest finished run of each suite ("vitest apps/api") in the last 14 days: usually the whole suite.
 const historyCache = new Map()
 function suiteHistory(slug) {
@@ -172,9 +179,12 @@ function suiteHistory(slug) {
       const file = path.join(logsDir(slug, n), f)
       try { if (fs.statSync(file).mtimeMs < since) continue } catch { continue }
       for (const s of logProgress(file)?.segments ?? []) {
-        if (!s.finished || !s.total || s.tool === "gradle") continue
+        // A finished Gradle build: its task count (up-to-date tasks are listed too) and "BUILD … in 10m 21s".
+        const total = s.tool === "gradle" ? (s.failed ? 0 : s.done) : s.total
+        if (!s.finished || !total) continue
+        const durationS = s.tool === "gradle" ? tookSeconds(s.took) : s.durationS ?? null
         const key = `${s.tool} ${s.label}`
-        if (!h.has(key) || h.get(key).total < s.total) h.set(key, { total: s.total, durationS: s.durationS ?? null })
+        if (!h.has(key) || h.get(key).total < total) h.set(key, { total, durationS })
       }
     }
   }
