@@ -167,6 +167,33 @@ export type Component = "poller" | "deployer" | "rc"
 
 export type Disk = { freeGb: number; totalGb: number; minFreeGb: number; warnPct: number }
 
+// What an active run is doing now (project detail only): the subagent it waits for, and its long jobs
+// (adlc-bg logs) with counts parsed per test tool.
+export type RunStep = { agent: string; what: string; since: string | null }
+export type JobSegment = {
+  tool: "vitest" | "jest" | "playwright" | "maestro" | "attempts" | "gradle"
+  label: string
+  done: number
+  failed: number
+  total: number | null
+  finished: boolean
+  durationS?: number
+  took?: string | null
+  current?: string
+  expected?: { total: number; durationS: number | null }
+}
+export type Job = {
+  name: string
+  started: string
+  ended: string | null
+  exitCode: number | null
+  cmd: string
+  segments: JobSegment[]
+  markers: { name: string; code: number }[]
+  last: string
+}
+export type ActiveRun = { issue: number; title: string; run: Run | null; progress: RunProgress | null; step?: RunStep | null; jobs?: Job[] }
+
 export type RunProgress = { phase: string; rework?: number | null; risk: "low" | "medium" | "high" | null; scope?: "affected" | "auto" | "full" | null; tasks: number | null }
 
 export type ProjectSummary = {
@@ -175,7 +202,7 @@ export type ProjectSummary = {
   paused: boolean
   backoffUntil: string | null
   pending: { action: string; at: string }[]
-  active: { issue: number; title: string; run: Run | null; progress: RunProgress | null }[]
+  active: ActiveRun[]
   counts: Snapshot["counts"] | null
   snapshotAt: string | null
   attention: number

@@ -16,7 +16,7 @@ import readline from "node:readline"
 import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import fastifyStatic from "@fastify/static"
-import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, cpuPct, eventsFromLine, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
+import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, cpuPct, currentStep, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
 
 const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
@@ -140,7 +140,84 @@ function cachedSummary(dir, f) {
   return s
 }
 
-function state(p) {
+// ── What an active run is doing (Now tab) ────────────────────────────────────
+// Long jobs run detached with adlc-bg in the run's worktree: reports/logs/<name>.log plus .start (epoch s),
+// .exit (exit code) and .cmd. Their progress is parsed from the log (counts per test tool), and finished
+// suites in any run's logs give the expected size and duration of the next run of the same suite.
+const logsDir = (slug, n) => pdir(slug, "runs", String(n), ".adlc", "runs", String(n), "reports", "logs")
+const readText = (f, max = 20 * 2 ** 20) => tailLines(f, Infinity, max).join("\n")
+const progressCache = new Map()
+function logProgress(file) {
+  let m = 0
+  try { m = fs.statSync(file).mtimeMs } catch { return null }
+  const hit = progressCache.get(file)
+  if (hit && hit.m === m) return hit.p
+  const p = jobProgress(readText(file))
+  progressCache.set(file, { m, p })
+  return p
+}
+// Largest finished run of each suite ("vitest apps/api") in the last 14 days: usually the whole suite.
+const historyCache = new Map()
+function suiteHistory(slug) {
+  const hit = historyCache.get(slug)
+  if (hit && Date.now() - hit.at < 60_000) return hit.h
+  const h = new Map()
+  const since = Date.now() - 14 * 24 * 3600 * 1000
+  let runDirs = []
+  try { runDirs = fs.readdirSync(pdir(slug, "runs")).filter((d) => /^\d+$/.test(d)) } catch { /* none */ }
+  for (const n of runDirs) {
+    let files = []
+    try { files = fs.readdirSync(logsDir(slug, n)).filter((f) => f.endsWith(".log")) } catch { continue }
+    for (const f of files) {
+      const file = path.join(logsDir(slug, n), f)
+      try { if (fs.statSync(file).mtimeMs < since) continue } catch { continue }
+      for (const s of logProgress(file)?.segments ?? []) {
+        if (!s.finished || !s.total || s.tool === "gradle") continue
+        const key = `${s.tool} ${s.label}`
+        if (!h.has(key) || h.get(key).total < s.total) h.set(key, { total: s.total, durationS: s.durationS ?? null })
+      }
+    }
+  }
+  historyCache.set(slug, { at: Date.now(), h })
+  return h
+}
+function runJobs(slug, n, since) {
+  const dir = logsDir(slug, n)
+  let starts = []
+  try { starts = fs.readdirSync(dir).filter((f) => f.endsWith(".log.start")) } catch { return [] }
+  const from = since ? Date.parse(since) / 1000 - 60 : 0
+  const num = (f) => { try { return Number(fs.readFileSync(f, "utf8").trim()) } catch { return null } }
+  const history = suiteHistory(slug)
+  return starts.map((f) => ({ log: path.join(dir, f.slice(0, -".start".length)), started: num(path.join(dir, f)) }))
+    .filter((j) => j.started && j.started >= from).sort((a, b) => b.started - a.started).slice(0, 6)
+    .map(({ log, started }) => {
+      const code = num(`${log}.exit`)
+      let ended = null
+      try { if (code !== null) ended = fs.statSync(`${log}.exit`).mtime.toISOString() } catch { /* running */ }
+      let cmd = ""
+      try { cmd = stripAnsi(fs.readFileSync(`${log}.cmd`, "utf8")).trim().slice(0, 400) } catch { /* older adlc-bg */ }
+      const p = logProgress(log) ?? { segments: [], markers: [], last: "" }
+      const segments = p.segments.map((s) => {
+        const e = history.get(`${s.tool} ${s.label}`)
+        return !s.finished && e && e.total >= s.done ? { ...s, expected: e } : s
+      })
+      return { name: path.basename(log, ".log"), started: new Date(started * 1000).toISOString(), ended, exitCode: code,
+        cmd, segments, markers: p.markers, last: p.last }
+    })
+}
+const stepCache = new Map()
+function runStep(slug, file) {
+  const f = pdir(slug, "logs", "runs", file)
+  let m = 0
+  try { m = fs.statSync(f).mtimeMs } catch { return null }
+  const hit = stepCache.get(f)
+  if (hit && hit.m === m) return hit.s
+  const s = currentStep(tailLines(f, Infinity, 4 * 2 ** 20))
+  stepCache.set(f, { m, s })
+  return s
+}
+
+function state(p, detail = false) {
   const st = (...f) => pdir(p.slug, "state", ...f)
   const snapshot = readJson(st("github.json"))
   const titles = new Map((snapshot?.queue ?? []).map((q) => [q.number, q.title]))
@@ -156,7 +233,11 @@ function state(p) {
     const rework = Number.isInteger(j.rework) ? j.rework : Number(/^rework-(\d+)/.exec(phase)?.[1] ?? 0) || null
     return { phase, rework, risk: j.risk ?? null, scope: j.scope ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null }
   }
-  const active = running.map((n) => ({ issue: n, title: titles.get(n) ?? "", run: all.find((r) => r.issue === n) ?? null, progress: runState(n) }))
+  const active = running.map((n) => {
+    const run = all.find((r) => r.issue === n) ?? null
+    return { issue: n, title: titles.get(n) ?? "", run, progress: runState(n),
+      ...(detail ? { step: run ? runStep(p.slug, run.file) : null, jobs: runJobs(p.slug, n, run?.started) } : {}) }
+  })
   let backoffUntil = null
   try {
     const u = Number(fs.readFileSync(st("backoff_until"), "utf8"))
@@ -267,7 +348,7 @@ app.get("/api/projects", async () => projects().map((p) => {
 
 app.get("/api/projects/:slug", async (req, reply) => {
   const p = project(req.params.slug)
-  return p ? state(p) : reply.code(404).send({ error: "unknown project" })
+  return p ? state(p, true) : reply.code(404).send({ error: "unknown project" })
 })
 
 app.get("/api/projects/:slug/runs", async (req, reply) => {

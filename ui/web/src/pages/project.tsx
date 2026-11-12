@@ -7,6 +7,7 @@ import {
 import { useState } from "react"
 import { EmptyState, PhaseStepper, Stat } from "@/components/chrome"
 import { ActivityPanel } from "@/components/activity"
+import { RunNow } from "@/components/run-now"
 import { AutomationCard } from "@/components/automation"
 import { HostsCard } from "@/components/hosts"
 import { NightlyCard } from "@/components/nightly"
@@ -143,6 +144,7 @@ function NowTab({ p }: { p: Project }) {
             </div>
           </div>
           <PhaseStepper progress={a.progress} />
+          <RunNow a={a} />
         </CardHeader>
         <CardContent>{a.run ? <RunLog slug={p.slug} file={a.run.file} /> : <p className="text-muted-foreground">Waiting for the first output…</p>}</CardContent>
       </Card>

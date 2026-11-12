@@ -204,7 +204,7 @@ const TUTS = [
       c: "adlc up <slug> --repo <owner>/<slug>" },
     { t: "Log in Claude and enable Remote Control", w: "dev server", b: "One-time login, then answer “Enable Remote Control? y” in the rc window and detach with Ctrl-b d.",
       c: "adlc login <slug>\nadlc attach <slug>" },
-    { t: "Open the dashboard", w: "dev server", b: "Shows what's running with its live log, the queue, epics, dependencies, what needs you, CI and health.",
+    { t: "Open the dashboard", w: "dev server", b: "Shows what's running with its live log and progress (the step it's on, test files passed and failed so far, e2e flows, app builds), the queue, epics, dependencies, what needs you, CI and health.",
       c: "adlc ui up\nadlc ui token     # the login token" },
   ] },
   { id: "plan", title: "Plan a product", when: "Interactive sessions from the Claude app · a few hours over a few days", steps: [

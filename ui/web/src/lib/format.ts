@@ -18,6 +18,9 @@ export function duration(ms: number | null | undefined): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`
 }
 
+// Milliseconds from `from` to `to` (now while it's still running).
+export const elapsedMs = (from: string, to?: string | null, now = Date.now()) => (to ? Date.parse(to) : now) - Date.parse(from)
+
 export const usd = (n: number | null | undefined) => (n == null ? "–" : `$${n.toFixed(2)}`)
 
 export const dateTime = (iso: string | null | undefined) =>

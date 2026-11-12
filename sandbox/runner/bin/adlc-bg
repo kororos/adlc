@@ -5,7 +5,7 @@
 #   adlc-bg <log> -- <command> [args…]
 #
 # Output goes to <log> (replaced). When the job ends, however it ends, "EXIT_CODE=<n>" is appended to the
-# log and <n> is written to <log>.exit; the job's process id is in <log>.pid. Wait for it with
+# log and <n> is written to <log>.exit; the job's process id is in <log>.pid, the command in <log>.cmd. Wait for it with
 # `adlc-wait <log>`, which returns as soon as it ends.
 set -uo pipefail
 usage() { sed -n '4,5p' "$0" | sed 's/^# //' >&2; exit 2; }
@@ -17,9 +17,10 @@ case $1 in
   *) usage ;;
 esac
 mkdir -p "$(dirname "$log")" || exit 2
-rm -f "$log.exit" "$log.pid"
+rm -f "$log.exit" "$log.pid" "$log.cmd"
 : >"$log"
 date +%s >"$log.start"
+printf '%s\n' "$cmd" >"$log.cmd"   # for the dashboard's Now tab
 exitf=$(printf %q "$log.exit")
 # setsid: its own session, so the job survives the end of the calling shell; nohup and setsid exec, so
 # $! is the job's own bash. The command runs in a subshell, so an `exit` in it still reaches the trailer.

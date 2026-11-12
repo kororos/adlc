@@ -155,3 +155,106 @@ export function hostReport(b) {
   if (r.mem && (r.mem.totalGb == null || r.mem.usedPct == null)) r.mem = null
   return r.cpuPct == null && !r.disk ? null : r
 }
+
+// ── Job progress ─────────────────────────────────────────────────────────────
+// Long jobs (test suites, app builds, e2e) run detached with adlc-bg: <log>, <log>.start (epoch s),
+// <log>.exit (exit code) and <log>.cmd. These turn a log's text into what the Now tab shows: one segment
+// per test tool invocation (vitest, jest, Playwright, Maestro, Gradle) with done/failed counts, the
+// total when the tool has printed it, and the "<NAME>_EXIT=<n>" markers the agents put between steps.
+const VITEST_RUN = /^\s*RUN\s+v\d[\w.-]*\s+(\S+)/
+const VITEST_FILE = /^\s*(✓|❯|×|↓)\s+(?:\S+\s+)?\S+\.(?:test|spec)\.[cm]?[jt]sx?\s+\((\d+) tests?([^)]*)\)/
+const VITEST_FILES = /^\s*Test Files\s+(.*)\((\d+)\)/
+const DURATION = /^\s*Duration\s+([\d.]+)\s*(ms|s)\b/
+const JEST_FILE = /^(PASS|FAIL)\s+\S+/
+const JEST_SUITES = /^Test Suites:.*?(\d+) total/
+const PW_START = /^\s*Running (\d+) tests? using/
+const PW_TEST = /^\s*(✓|✘|-)\s+\d+\s+\[/
+const PW_DONE = /^\s*(\d+) passed \(([\d.]+)(m?s|m)\)/
+const MAESTRO_FLOW = /^\[(Passed|Failed|Skipped)\]\s+(.+?)(?:\s+\((?:[\dhms ]+)\))?$/
+const MAESTRO_DONE = /^(\d+)\/(\d+) Flows? (Passed|Failed)/
+const ATTEMPT = /^e2e-link: (\S+) (?:attempt \d+\/\d+ (PASS|FAIL)|FAILED after)/
+const GRADLE_TASK = /^> Task :/
+const GRADLE_DONE = /^BUILD (SUCCESSFUL|FAILED)(?: in (.+))?/
+const MARKER = /^([A-Z][A-Z0-9_]*_EXIT|EXIT_CODE)=(\d+)\s*$/
+
+// "/srv/adlc/projects/diet/runs/427/apps/api" → "apps/api"
+const relDir = (d) => d.replace(/^.*\/runs\/\d+\//, "").replace(/\/$/, "") || "."
+
+export function jobProgress(text) {
+  const segments = []
+  const markers = []
+  let cur = null
+  const open = (tool, label, extra = {}) => { cur = { tool, label, done: 0, failed: 0, total: null, finished: false, ...extra }; segments.push(cur); return cur }
+  const ensure = (tool, label) => (cur && cur.tool === tool && !cur.finished ? cur : open(tool, label))
+  let last = ""
+  for (const raw of text.split("\n")) {
+    const line = stripAnsi(raw)
+    if (line.trim()) last = line.trim()
+    let m
+    if ((m = line.match(VITEST_RUN))) open("vitest", relDir(m[1]))
+    else if ((m = line.match(VITEST_FILE))) {
+      const s = ensure("vitest", "tests")
+      s.done++
+      if (m[1] === "❯" || m[1] === "×" || /\d+ failed/.test(m[3])) s.failed++
+    } else if ((m = line.match(VITEST_FILES)) && cur?.tool === "vitest") {
+      cur.total = Number(m[2]); cur.failed = Number(m[1].match(/(\d+) failed/)?.[1] ?? cur.failed); cur.finished = true
+      cur.done = cur.total
+    } else if ((m = line.match(DURATION)) && cur?.tool === "vitest" && cur.finished) {
+      cur.durationS = Math.round(Number(m[1]) / (m[2] === "ms" ? 1000 : 1))
+    } else if ((m = line.match(JEST_FILE))) {
+      const s = ensure("jest", "tests")
+      s.done++
+      if (m[1] === "FAIL") s.failed++
+    } else if ((m = line.match(JEST_SUITES)) && cur?.tool === "jest") {
+      cur.total = Number(m[1]); cur.done = cur.total; cur.finished = true
+    } else if ((m = line.match(PW_START))) open("playwright", "e2e", { total: Number(m[1]) })
+    else if ((m = line.match(PW_TEST)) && cur?.tool === "playwright") {
+      cur.done++
+      if (m[1] === "✘") cur.failed++
+    } else if ((m = line.match(PW_DONE)) && cur?.tool === "playwright") cur.finished = true
+    else if ((m = line.match(MAESTRO_FLOW))) {
+      const s = ensure("maestro", "flows")
+      s.done++
+      if (m[1] === "Failed") s.failed++
+    } else if ((m = line.match(MAESTRO_DONE)) && cur?.tool === "maestro") {
+      cur.total = Number(m[2]); cur.finished = true
+    } else if ((m = line.match(ATTEMPT))) {
+      const s = ensure("attempts", "flows with reseed")
+      if (m[2] === "PASS") s.done++
+      else if (!m[2]) { s.done++; s.failed++ }
+      s.current = m[1]
+    } else if (GRADLE_TASK.test(line)) ensure("gradle", "app build").done++
+    else if ((m = line.match(GRADLE_DONE)) && cur?.tool === "gradle") {
+      cur.finished = true
+      if (m[1] === "FAILED") cur.failed = 1
+      cur.took = m[2] ?? null
+    } else if ((m = line.match(MARKER))) {
+      markers.push({ name: m[1], code: Number(m[2]) })
+      if (cur && !cur.finished) cur.finished = true
+    }
+  }
+  return { segments, markers, last: clip(last, 200) }
+}
+
+// The step the run is on, from the end of its stream-json log: the subagent the lead is waiting for
+// (Agent/Task call without a result yet), else the lead's own latest tool call.
+export function currentStep(lines) {
+  let open = new Map()
+  let lead = null
+  for (const line of lines) {
+    let j
+    try { j = JSON.parse(line) } catch { continue }
+    if (j.parent_tool_use_id) continue
+    if (j.type === "assistant") {
+      for (const c of j.message?.content ?? []) {
+        if (c.type !== "tool_use") continue
+        if (c.name === "Agent" || c.name === "Task") {
+          open.set(c.id, { agent: String(c.input?.subagent_type ?? "agent").replace(/^adlc-core:/, ""), what: clip(c.input?.description ?? "", 140), since: j.timestamp ?? null })
+        } else lead = { agent: "lead", what: toolSummary(c.name, c.input), since: j.timestamp ?? null }
+      }
+    } else if (j.type === "user") {
+      for (const c of j.message?.content ?? []) if (c.type === "tool_result") open.delete(c.tool_use_id)
+    }
+  }
+  return [...open.values()].at(-1) ?? lead
+}

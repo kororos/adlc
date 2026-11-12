@@ -82,3 +82,44 @@ test("hostReport keeps known numbers and drops the rest", () => {
   assert.equal(hostReport("x"), null)
   assert.equal(hostReport({ cpuPct: 5, disk: { freeGb: "1" } }).disk, null)
 })
+
+test("jobProgress counts vitest files per invocation, with totals, durations and exit markers", async () => {
+  const { jobProgress } = await import("../lib.js")
+  const log = [
+    " RUN  v5.0.5 /srv/adlc/projects/diet/runs/427/apps/api",
+    " ✓  api  src/a.http.test.ts (36 tests) 20255ms",
+    "   ✓ AC1: a slow test 2063ms",
+    " ❯  api  src/b.test.ts (5 tests | 1 failed) 99ms",
+    " ❯ test/dev-compose.test.ts:569:21",
+    "API_EXIT=1",
+    " RUN  v5.0.5 /srv/adlc/projects/diet/runs/427/tools/arch",
+    " ✓ test/c.test.ts (3 tests) 9ms",
+  ].join("\n")
+  const p = jobProgress(log)
+  assert.deepEqual(p.segments.map((s) => [s.label, s.done, s.failed, s.finished]), [["apps/api", 2, 1, true], ["tools/arch", 1, 0, false]])
+  assert.deepEqual(p.markers, [{ name: "API_EXIT", code: 1 }])
+  const done = jobProgress(" RUN  v5.0.5 /x/runs/1/apps/api\n ✓ src/a.test.ts (2 tests) 1ms\n Test Files  247 passed | 1 skipped (248)\n   Duration  1168.2s\nEXIT_CODE=0")
+  assert.equal(done.segments[0].total, 248)
+  assert.equal(done.segments[0].durationS, 1168)
+  assert.equal(done.last, "EXIT_CODE=0")
+})
+
+test("jobProgress reads Playwright, Gradle, Maestro and reseeded flow attempts", async () => {
+  const { jobProgress } = await import("../lib.js")
+  const pw = jobProgress("Running 11 tests using 2 workers\n  ✓   1 [chromium] › a.spec.ts:1 › x (3s)\n  ✘   2 [chromium] › b.spec.ts:1 › y (4s)")
+  assert.deepEqual(pw.segments.map((s) => [s.tool, s.done, s.failed, s.total]), [["playwright", 2, 1, 11]])
+  const and = jobProgress("> Task :app:a\n> Task :app:b\nBUILD SUCCESSFUL in 10m 21s\n[Passed] AC31-start (50s)\n[Failed] AC27-sign-in (1m 9s)\n1/2 Flows Passed in 2m\ne2e-link: link-a attempt 1/3 PASS\ne2e-link: AC13 attempt 1/3 FAIL")
+  assert.deepEqual(and.segments.map((s) => [s.tool, s.done, s.failed, s.finished]), [["gradle", 2, 0, true], ["maestro", 2, 1, true], ["attempts", 1, 0, false]])
+  assert.equal(and.segments[2].current, "AC13")
+})
+
+test("currentStep is the subagent still running, else the lead's last tool", async () => {
+  const { currentStep } = await import("../lib.js")
+  const call = (id, input, ts) => JSON.stringify({ type: "assistant", timestamp: ts, message: { content: [{ type: "tool_use", id, name: "Agent", input }] } })
+  const result = (id) => JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id }] } })
+  const lines = [call("a", { subagent_type: "adlc-core:build-runner", description: "Verify" }, "t1"), result("a"),
+    call("b", { subagent_type: "adlc-core:debugger", description: "Fix it" }, "t2"),
+    JSON.stringify({ type: "assistant", parent_tool_use_id: "b", message: { content: [{ type: "tool_use", id: "x", name: "Bash", input: { command: "ls" } }] } })]
+  assert.deepEqual(currentStep(lines), { agent: "debugger", what: "Fix it", since: "t2" })
+  assert.equal(currentStep(lines.slice(0, 2)), null)   // finished subagent, no lead tool call since
+})
