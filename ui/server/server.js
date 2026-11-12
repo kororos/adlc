@@ -181,6 +181,29 @@ function suiteHistory(slug) {
   historyCache.set(slug, { at: Date.now(), h })
   return h
 }
+// Test files in a package of the run's worktree (vitest/jest naming), when no earlier run of the suite
+// tells its size: what a whole-package run will go through. Skips dependencies, builds and native dirs.
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", "android", "ios", ".expo", ".adlc", "e2e"])
+const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/
+const fileCountCache = new Map()
+function testFileCount(dir) {
+  const hit = fileCountCache.get(dir)
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.n
+  let n = 0
+  const walk = (d, depth) => {
+    if (depth > 12) return
+    let entries = []
+    try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(path.join(d, e.name), depth + 1) }
+      else if (TEST_FILE.test(e.name)) n++
+    }
+  }
+  if (fs.existsSync(dir)) walk(dir, 0)
+  fileCountCache.set(dir, { at: Date.now(), n })
+  return n
+}
+
 function runJobs(slug, n, since) {
   const dir = logsDir(slug, n)
   let starts = []
@@ -198,8 +221,15 @@ function runJobs(slug, n, since) {
       try { cmd = stripAnsi(fs.readFileSync(`${log}.cmd`, "utf8")).trim().slice(0, 400) } catch { /* older adlc-bg */ }
       const p = logProgress(log) ?? { segments: [], markers: [], last: "" }
       const segments = p.segments.map((s) => {
+        if (s.finished) return s
         const e = history.get(`${s.tool} ${s.label}`)
-        return !s.finished && e && e.total >= s.done ? { ...s, expected: e } : s
+        if (e && e.total >= s.done) return { ...s, expected: e }
+        // No history: count the package's test files (labels are worktree paths such as "apps/api").
+        if ((s.tool === "vitest" || s.tool === "jest") && /^[\w.@-]+(\/[\w.@-]+)*$/.test(s.label) && s.label !== "tests") {
+          const files = testFileCount(pdir(slug, "runs", String(n), s.label))
+          if (files >= s.done && files > 0) return { ...s, expected: { total: files, durationS: null } }
+        }
+        return s
       })
       return { name: path.basename(log, ".log"), started: new Date(started * 1000).toISOString(), ended, exitCode: code,
         cmd, segments, markers: p.markers, last: p.last }
