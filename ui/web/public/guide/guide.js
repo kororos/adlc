@@ -236,7 +236,7 @@ const TUTS = [
   ] },
   { id: "steer", title: "Steer delivery", when: "Day to day · from the dashboard", steps: [
     { t: "Read the queue", w: "dashboard → Queue", b: "Issues in the order they will start: Run next, then epics on Run next, then reworks, then milestone due date and age. Each row shows what it waits for." },
-    { t: "Put one issue first", w: "dashboard → Queue", b: "<b>Run next</b> on a startable issue (ready, or queued with nothing open blocking it). It starts as soon as a run slot is free, even past the open-PR limit. A running delivery isn't interrupted." },
+    { t: "Put one issue first", w: "dashboard → Queue", b: "<b>Run next</b> on a startable issue (ready, or queued with nothing open blocking it); <b>Rework next</b> on one whose PR has conflicts or failed checks sends the PR back now and runs that rework first. It starts as soon as a run slot is free, even past the open-PR limit. A running delivery isn't interrupted." },
     { t: "Put a whole epic first", w: "dashboard → Epics", b: "<b>Run next</b> on an epic: its startable sub-issues go first until you undo it. Dependencies and the open-PR limit still apply. Expand an epic to see each sub-issue's state, queue position, blockers and PR." },
     { t: "See why something waits", w: "dashboard → Dependencies", b: "Open issues and their “blocked by” links, left to right. Hover an issue to light up its chain; click it to see only what it waits for." },
     { t: "Limit work in progress", w: "dashboard → Health → Automation", b: "<b>Rework first</b> (default on) finishes PRs that need work before new issues. <b>Limit open PRs</b> holds new issues while that many agent PRs are open, so merges don't keep causing conflicts." },

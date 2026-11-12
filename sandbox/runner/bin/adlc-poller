@@ -17,8 +17,14 @@ LOG_RETENTION_DAYS=${ADLC_LOG_RETENTION_DAYS:-7}
 R="$ADLC_REPO"
 
 label() { # label <issue> <remove> <add>
-  gh issue edit "$1" -R "$R" ${2:+--remove-label "$2"} ${3:+--add-label "$3"} >/dev/null 2>&1 \
-    || { log "WARN: could not relabel #$1 (-$2 +$3)"; return 1; }
+  gh issue edit "$1" -R "$R" ${2:+--remove-label "$2"} ${3:+--add-label "$3"} >/dev/null 2>&1 && return 0
+  # gh removes and adds in separate calls, so a failure can leave half of it done (#94 lost adlc:blocked
+  # without getting adlc:ready, and no run ever picked it up). Finish what's missing, then check.
+  sleep 2
+  if [ -n "$3" ] && ! has_label "$1" "$3"; then gh issue edit "$1" -R "$R" --add-label "$3" >/dev/null 2>&1 || true; fi
+  if [ -n "$2" ] && has_label "$1" "$2"; then gh issue edit "$1" -R "$R" --remove-label "$2" >/dev/null 2>&1 || true; fi
+  if { [ -z "$3" ] || has_label "$1" "$3"; } && { [ -z "$2" ] || ! has_label "$1" "$2"; }; then return 0; fi
+  log "WARN: could not relabel #$1 (-$2 +$3)"; return 1
 }
 comment() { gh issue comment "$1" -R "$R" --body "$2" >/dev/null 2>&1 || log "WARN: could not comment on #$1"; }
 has_label() { gh issue view "$1" -R "$R" --json labels --jq "[.labels[].name] | index(\"$2\") != null" 2>/dev/null | grep -q true; }
@@ -184,6 +190,15 @@ prioritize() { # prioritize <n>
     return 0
   fi
   case $labels in *,adlc:owner,*|*,owner-task,*) log "WARN: run next: #$n is not agent work"; return 0 ;; esac
+  # An open PR that needs a rework (conflicts, failed checks): send it back now and put the rework first.
+  if [[ $labels == *,adlc:pr-open,* || $labels == *,adlc:blocked,* ]] && ! is_running "$n"; then
+    if rework_now "$n"; then
+      gh label create "$PRIORITY_LABEL" -R "$R" --color B60205 --description "Run this issue next (ADLC dashboard)" >/dev/null 2>&1 || true
+      label "$n" "" "$PRIORITY_LABEL"
+      log "#$n: run next (from the dashboard): its PR's rework goes first"
+      return 0
+    fi
+  fi
   case $labels in
     *,adlc:in-progress,*|*,adlc:pr-open,*|*,adlc:blocked,*|*,adlc:needs-info,*|*,adlc:needs-human-review,*)
       log "WARN: run next: #$n is already in the pipeline (not ready or queued)"; return 0 ;;
@@ -450,12 +465,16 @@ request_rework() { # request_rework <pr> <issue> <head sha> <what> <comment> [al
     log "#$n: PR #$pr: $what after $tried rework(s); needs human review"
     return 0
   fi
-  gh pr comment "$pr" -R "$R" --body "$body
+  if ! grep -qx "$sha" "$f.commented" 2>/dev/null; then
+    gh pr comment "$pr" -R "$R" --body "$body
 The delivery agent will rework this PR (automatic attempt $((tried + 1)) of $max)." >/dev/null 2>&1 \
-    || { log "WARN: could not comment on PR #$pr (retrying next cycle)"; return 0; }
-  # Recorded only once the comment is posted, so a failed attempt is retried.
+      || { log "WARN: could not comment on PR #$pr (retrying next cycle)"; return 0; }
+    echo "$sha" >>"$f.commented"
+  fi
+  # Recorded only once the issue carries adlc:ready, so a failed relabel is retried next cycle (without
+  # commenting again); recorded earlier, the PR would wait for a rework that never starts.
+  label "$n" "$from" adlc:ready || return 0
   echo "$sha" >>"$f"
-  label "$n" "$from" adlc:ready
   log "#$n: PR #$pr: $what on ${sha:0:7}; queued for rework ($((tried + 1))/$max)"
 }
 watch_pr_checks() {
@@ -477,7 +496,7 @@ watch_pr_checks() {
       # ahead of it will change the base again when they merge, so resolving now means resolving twice
       # (and a re-approval each time).
       if train_waiting "$pr"; then continue; fi
-      request_rework "$pr" "$n" "$sha" "merge conflicts with $base" "ADLC: this PR has merge conflicts with \`$base\` at \`${sha:0:7}\`. Merge \`$base\` into the branch and resolve them, keeping the intent of both sides (a quick conflict rework: resolve, check what the resolution touches, push; CI runs the full suite). If the PR's own change stays the same, an approval holds." also-blocked
+      rework_conflicts "$pr" "$n" "$sha" "$base"
       continue
     fi
     # GitHub computes mergeability lazily: UNKNOWN may still turn out CONFLICTING, so don't treat it as green yet.
@@ -486,16 +505,47 @@ watch_pr_checks() {
     # workflows as "name <url>" joined by "; " (empty = all green). Only each workflow's latest run counts:
     # one superseded by a newer run for the same commit doesn't. A latest run that was cancelled (by hand,
     # or the CI registrar's job time limit) counts as failed: its required check never passes otherwise.
-    failed=$(gh run list -R "$R" --commit "$sha" --event pull_request --limit 50 --json name,status,conclusion,url,createdAt --jq '
-      if length == 0 or any(.[]; .status != "completed") then "PENDING" else
-      [group_by(.name)[] | max_by(.createdAt)
-       | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure" or .conclusion == "cancelled")
-       | "\(.name) <\(.url)>\(if .conclusion == "cancelled" then " (cancelled)" else "" end)"] | join("; ") end' 2>/dev/null) || continue
+    failed=$(pr_failed_checks "$sha") || continue
     [ "$failed" != PENDING ] || continue
     if [ -z "$failed" ]; then keep_current "$pr" "$n" "$sha"; continue; fi
-    request_rework "$pr" "$n" "$sha" "checks failed" "ADLC: required checks failed on \`${sha:0:7}\`: ${failed}
-It fixes code and test failures; failures of the environment (runner, emulator, network, disk) it reports instead of changing the code or the tests."
+    rework_checks "$pr" "$n" "$sha" "$failed"
   done <<<"$rows"
+}
+# "PENDING" while any pull_request run for <sha> is unfinished (or none started yet); else the failed
+# workflows as "name <url>" joined by "; " (empty = all green). Only each workflow's latest run counts:
+# one superseded by a newer run for the same commit doesn't. A latest run that was cancelled (by hand,
+# or the CI registrar's job time limit) counts as failed: its required check never passes otherwise.
+pr_failed_checks() { # pr_failed_checks <sha>
+  gh run list -R "$R" --commit "$1" --event pull_request --limit 50 --json name,status,conclusion,url,createdAt --jq '
+    if length == 0 or any(.[]; .status != "completed") then "PENDING" else
+    [group_by(.name)[] | max_by(.createdAt)
+     | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure" or .conclusion == "cancelled")
+     | "\(.name) <\(.url)>\(if .conclusion == "cancelled" then " (cancelled)" else "" end)"] | join("; ") end' 2>/dev/null
+}
+rework_conflicts() { # rework_conflicts <pr> <issue> <sha> <base>
+  request_rework "$1" "$2" "$3" "merge conflicts with $4" "ADLC: this PR has merge conflicts with \`$4\` at \`${3:0:7}\`. Merge \`$4\` into the branch and resolve them, keeping the intent of both sides (a quick conflict rework: resolve, check what the resolution touches, push; CI runs the full suite). If the PR's own change stays the same, an approval holds." also-blocked
+}
+rework_checks() { # rework_checks <pr> <issue> <sha> <failed>
+  request_rework "$1" "$2" "$3" "checks failed" "ADLC: required checks failed on \`${3:0:7}\`: $4
+It fixes code and test failures; failures of the environment (runner, emulator, network, disk) it reports instead of changing the code or the tests."
+}
+# "Run next" on an issue whose agent PR needs a rework (conflicts, or failed checks that have all finished):
+# send it back now, as watch_pr_checks would (also a PR the merge train holds back until its turn), so
+# the rework can go first. Fails when the PR doesn't need one (green, checks still running, or the
+# automatic reworks are used up: then it's labelled adlc:needs-human-review).
+rework_now() { # rework_now <issue>
+  local n=$1 row pr sha mergeable base failed
+  row=$(gh pr list -R "$R" --state open --limit 100 --json number,headRefName,headRefOid,mergeable,baseRefName \
+          --jq ".[] | select(.headRefName | startswith(\"adlc/$n-\")) | [.number, .headRefOid, .mergeable, .baseRefName] | @tsv" 2>/dev/null | head -1)
+  [ -n "$row" ] || return 1
+  IFS=$'\t' read -r pr sha mergeable base <<<"$row"
+  if [ "$mergeable" = CONFLICTING ]; then rework_conflicts "$pr" "$n" "$sha" "$base"
+  else
+    failed=$(pr_failed_checks "$sha") || return 1
+    [ "$failed" != PENDING ] && [ -n "$failed" ] || return 1
+    rework_checks "$pr" "$n" "$sha" "$failed"
+  fi
+  has_label "$n" adlc:ready
 }
 # A push workflow that fails on the default branch's head: one regression issue per commit (the agent
 # picks it up like the nightly's regression issues).

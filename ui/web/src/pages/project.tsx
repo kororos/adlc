@@ -167,7 +167,11 @@ function RunNext({ p, item }: { p: Project; item: QueueItem }) {
     mutationFn: (action: `prioritize:${number}` | `deprioritize:${number}`) => api.action(p.slug, action),
     onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.project(p.slug) }),
   })
-  const startable = (item.state === "ready" || item.state === "queued") && item.blockers.length === 0
+  // Also an issue whose agent PR needs a rework (conflicts, or failed checks): the runner sends it back now
+  // and puts the rework first.
+  const pr = (p.snapshot?.pullRequests ?? []).find((x) => x.closes.includes(item.number))
+  const needsRework = (item.state === "pr-open" || item.state === "blocked") && !!pr && (pr.mergeState === "DIRTY" || pr.checks === "FAILURE" || pr.checks === "ERROR")
+  const startable = ((item.state === "ready" || item.state === "queued") && item.blockers.length === 0) || needsRework
   if (!startable && !item.priority) return null
   const pending = m.isPending || p.pending.some((r) => r.action === `prioritize:${item.number}` || r.action === `deprioritize:${item.number}`)
   if (pending) return <span className="text-xs text-muted-foreground">applying…</span>
@@ -178,8 +182,9 @@ function RunNext({ p, item }: { p: Project; item: QueueItem }) {
     </span>
   ) : (
     <button type="button" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
-      title="Start this issue before the others once a run slot is free" onClick={() => m.mutate(`prioritize:${item.number}`)}>
-      <ArrowUpToLine className="size-3.5" />Run next
+      title={needsRework ? "Send its PR back for the rework now (conflicts or failed checks) and run that rework before the others" : "Start this issue before the others once a run slot is free"}
+      onClick={() => m.mutate(`prioritize:${item.number}`)}>
+      <ArrowUpToLine className="size-3.5" />{needsRework ? "Rework next" : "Run next"}
     </button>
   )
 }
