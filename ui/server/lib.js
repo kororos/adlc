@@ -236,6 +236,14 @@ export function jobProgress(text) {
   return { segments, markers, last: clip(last, 200) }
 }
 
+// "Read apps/mobile/app.json": the tool's name (Bash shows its command or description alone) and
+// paths relative to the run's worktree (…/runs/<n>/).
+const WORKTREE = /(?:\/[^\s/'"]+)*\/runs\/\d+\//g
+function stepLabel(name, input) {
+  const s = toolSummary(name, input).replace(WORKTREE, "")
+  return name === "Bash" ? s : `${name} ${s}`.trim()
+}
+
 // The step the run is on, from the end of its stream-json log: the subagent the lead is waiting for
 // (Agent/Task call without a result yet), else the lead's own latest tool call. `doing` is that agent's
 // latest tool call (a command, a file it edits), with `running` while it has no result yet.
@@ -250,7 +258,7 @@ export function currentStep(lines) {
     if (j.type === "assistant") {
       for (const c of j.message?.content ?? []) {
         if (c.type !== "tool_use") continue
-        const doing = { what: toolSummary(c.name, c.input), since: j.timestamp ?? null, running: true, ...(c.name === "Bash" ? { cmd: String(c.input?.command ?? "") } : {}) }
+        const doing = { what: stepLabel(c.name, c.input), since: j.timestamp ?? null, running: true, ...(c.name === "Bash" ? { cmd: String(c.input?.command ?? "") } : {}) }
         calls.set(c.id, doing)
         if (parent) { const st = open.get(parent); if (st) st.doing = doing; continue }
         if (c.name === "Agent" || c.name === "Task") {

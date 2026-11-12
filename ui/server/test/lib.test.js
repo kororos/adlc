@@ -133,3 +133,11 @@ test("commandLog finds the log a command writes to", async () => {
   assert.equal(commandLog("(pnpm -r lint) > $L/lint-4.log 2>&1"), null)
   assert.equal(commandLog("git status"), null)
 })
+
+test("current step labels name the tool and shorten worktree paths", async () => {
+  const { currentStep } = await import("../lib.js")
+  const line = (input, name) => JSON.stringify({ type: "assistant", timestamp: "t", message: { content: [{ type: "tool_use", id: "r", name, input }] } })
+  assert.equal(currentStep([line({ file_path: "/srv/adlc/projects/diet/runs/459/apps/mobile/app.json" }, "Read")]).what, "Read apps/mobile/app.json")
+  assert.equal(currentStep([line({ pattern: "flock", path: "/srv/adlc/projects/diet/runs/459/apps" }, "Grep")]).what, "Grep flock in apps")
+  assert.equal(currentStep([line({ command: "git status", description: "Show status" }, "Bash")]).what, "Show status")
+})
