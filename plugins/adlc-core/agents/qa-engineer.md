@@ -29,4 +29,4 @@ Deferred to CI: <targets>
 ## Exploratory   - [blocking|minor] AC<k> — observation
 ## Flaky         - flow — passed on retry → quarantined
 ```
-A failing flow is blocking unless it is proven flaky per the contract. Don't fix application code. That is the debugger's job. End with the status block.
+A failing flow is blocking unless it is proven flaky per the contract. Retries follow the contract's flaky policy: two attempts failing at the same step with the same error are a real failure; don't spend more attempts on it, even when the project allows 3. Don't fix application code. That is the debugger's job. End with the status block.

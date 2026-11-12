@@ -59,11 +59,11 @@ Third-party HTTP APIs are mocked in test environments (stack-pack mechanism, e.g
 ## Target scheduling
 Each `testing.e2e.targets.<name>` has `runner`, `cmd` and optionally:
 - `parallel: true`: may run concurrently with other runs.
-- `exclusive: true` + `requires: [<resource>]`: shared resource (e.g. one Android emulator). Hold the lock: `flock "$ADLC_LOCK_DIR/<resource>.lock" <cmd>` (the runner exports `ADLC_LOCK_DIR`, shared by all runs of the project).
+- `exclusive: true` + `requires: [<resource>]`: shared resource (e.g. one Android emulator). Hold the lock: `flock "$ADLC_LOCK_DIR/<resource>.lock" <cmd>` (the runner exports `ADLC_LOCK_DIR`, shared by all runs of the project), and only for the part that uses the resource: build what the target needs (e.g. the APK) before taking it, so other runs don't wait for your build.
 - `where: ci` (+ `workflow:`): not runnable in the runner (e.g. iOS). Covered by the PR's required checks only.
 
 ## Flaky policy
-A failed e2e flow is re-run once in isolation. Pass on retry → flaky: tag it `@quarantine` (excluded from gating), report it, and the lead opens a follow-up issue labelled `adlc:flaky`. Two consecutive failures → real failure (blocking). Never delete or weaken a flow to get green.
+A failed e2e flow is re-run once in isolation. Pass on retry → flaky: tag it `@quarantine` (excluded from gating), report it, and the lead opens a follow-up issue labelled `adlc:flaky`. Two consecutive failures → real failure (blocking). **Identical failures stop early:** when a project allows more attempts (e.g. 3 in its `CLAUDE.md`), two attempts that fail at the same step with the same error are a deterministic failure: report it as a real failure without further attempts. Only failures that differ, or a pass on retry, get the remaining attempts. Never delete or weaken a flow to get green.
 
 ## Evidence
 Keep traces, videos and screenshots only for failures, under `.adlc/runs/<n>/reports/artifacts/` (git-ignored). Reports reference them by path.

@@ -19,7 +19,7 @@ Templates live in `templates/` next to this file. Copy and adapt them; don't rei
 
 ## Modes
 - `start_watch`: API with `tsx watch` and the source mounted; web via Expo dev server (`expo start --web`); Android dev client loading JS from Metro.
-- `start_build`: compiled API (`node dist/main.js`), web via `expo export --platform web` served statically, Android release APK built with `expo prebuild` plus Gradle in the runner (cached in `$ADLC_ROOT/cache/gradle`).
+- `start_build`: compiled API (`node dist/main.js`), web via `expo export --platform web` served statically, Android release APK built with `expo prebuild` plus Gradle in the runner (cached in `$ADLC_ROOT/cache/gradle`); prebuild and the full native build run only when the native fingerprint changed (see `e2e-patterns`).
 - Switch modes with `env.down` → `env.up` → `env.seed` → the other start command.
 
 ## Android emulator
@@ -27,7 +27,7 @@ Templates live in `templates/` next to this file. Copy and adapt them; don't rei
 - **No proxy:** its compose service sets `HTTP_PROXY`, `http_proxy`, `HTTPS_PROXY` and `https_proxy` to `""` (as in the template). `NO_PROXY` isn't enough: the emulator ignores it and sends all the device's connections through the egress proxy, which refuses the per-run hosts (`HTTP proxy handshake … 403` in the emulator log, the app shows offline).
 - **Unhealthy or not booting: recreate, never restart.** `docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d --force-recreate --wait` (under the lock). A restarted container can't start the device again (`sudo chown … /dev/kvm` fails in its log).
 - Reach it at `emulator:5555` on network `adlc-web`. Optional live view (noVNC) at `http://emulator.<slug>.<base>[:port]`.
-- Always use it under `flock "$ADLC_LOCK_DIR/android-emulator.lock"` (see `e2e-patterns`).
+- Always use it under `flock "$ADLC_LOCK_DIR/android-emulator.lock"`, taken after the APK is built (see `e2e-patterns`).
 
 ## Walking-skeleton checklist (environments)
 1. `deploy/compose.yml` (base), `compose.test.yml`, `compose.dev.yml`, `compose.emulator.yml`, `stack.prod.yml` (with `stack-node-api:node-containers`).

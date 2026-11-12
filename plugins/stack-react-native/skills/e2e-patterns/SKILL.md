@@ -23,7 +23,7 @@ The scheduling, selection and flake rules come from the core `testing-contract` 
 
 ## Android: Maestro and the shared emulator
 - Flows: `apps/app/e2e/flows/*.yaml`, `appId` from `app.config.ts`. Use `tags: [smoke]` for smoke flows.
-- The emulator is a **long-lived service** in the project's Docker sidecar (compose project `adlc-emulator`, template in the `rn-test-env` skill). It is shared by all runs, so **always hold the lock**:
+- The emulator is a **long-lived service** in the project's Docker sidecar (compose project `adlc-emulator`, template in the `rn-test-env` skill). It is shared by all runs, so **always hold the lock**, but only around the emulator part (connect, install, flows): **build the APK first, outside the lock**. A build of 10 to 20 minutes inside the lock blocks every other run's Android QA:
   ```bash
   flock "$ADLC_LOCK_DIR/android-emulator.lock" bash -c '
     for _ in $(seq 1 180); do   # adb connect fails silently while the emulator still boots: retry it
@@ -35,6 +35,8 @@ The scheduling, selection and flake rules come from the core `testing-contract` 
     maestro --device emulator:5555 test apps/app/e2e/flows --include-tags smoke'
   ```
 - Build the APK for the emulator's ABI only (`./gradlew assembleRelease -PreactNativeArchitectures=x86_64`): much faster, far less disk. On the shared dev server, don't build while the emulator boots (memory).
+- **Rebuild natively only when native code changed.** Store the native fingerprint (`npx @expo/fingerprint fingerprint:generate`, hash only) next to the build. Same fingerprint and an existing `android/`: skip `expo prebuild` (never `--clean`) and run Gradle incrementally, which only re-bundles the JavaScript and repackages (minutes instead of 10 to 20). A different fingerprint: `expo prebuild --clean` and a full build. Turn on the Gradle build cache (`org.gradle.caching=true`). Skip `adb install` when the installed APK's hash is the same.
+- **Run the selection, not everything.** The e2e script takes the flows to run (tags or a list, e.g. `E2E_FLOWS`): per run, smoke plus the flows the change affects; nightly and CI run all. Flows that consume seeded state reseed only the seed data they use, not the whole test seed.
 - Install the **release APK** built by `env.start_build`, and uninstall or clear app data before each run (`clearState: true` in flows).
 - Common failures:
   - `device offline`: run `adb reconnect`, then retry once.
