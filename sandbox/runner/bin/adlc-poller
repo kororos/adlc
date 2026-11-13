@@ -475,6 +475,10 @@ The delivery agent will rework this PR (automatic attempt $((tried + 1)) of $max
   # commenting again); recorded earlier, the PR would wait for a rework that never starts.
   label "$n" "$from" adlc:ready || return 0
   echo "$sha" >>"$f"
+  # A rework of another kind can be queued after this kind's reworks were used up (failed checks, then
+  # conflicts): the agent acts again, so the PR no longer waits for you. The used-up counter stays, so a
+  # new failure of that kind goes straight back to adlc:needs-human-review.
+  if has_label "$n" adlc:needs-human-review; then label "$n" adlc:needs-human-review "" || true; fi
   log "#$n: PR #$pr: $what on ${sha:0:7}; queued for rework ($((tried + 1))/$max)"
 }
 watch_pr_checks() {
@@ -704,9 +708,11 @@ agent_wont_rework() { # agent_wont_rework <pr> <issue> <conflicts|failed>
   local max tried labels kind=""; [ "$3" = conflicts ] && kind=conflicts; max=$(rework_max "$kind")
   why=""
   labels=,$(gh issue view "$2" -R "$R" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null),
+  # A rework that is queued or under way comes first, even with adlc:needs-human-review still on the issue
+  # (e.g. failed-check reworks used up, then a conflict rework queued): the agent acts before you need to.
+  is_running "$2" && return 1
+  [[ $labels =~ ,adlc:(ready|queued|in-progress), ]] && return 1
   if [[ $labels != *,adlc:needs-human-review,* ]]; then
-    is_running "$2" && return 1
-    [[ $labels =~ ,adlc:(ready|queued|in-progress), ]] && return 1
     if [ "$3" = failed ] && [[ $labels == *,adlc:blocked,* ]]; then
       why="#$2 is adlc:blocked, the agent found nothing to fix (its comment on #$2 says why): re-run the checks if they're flaky, or fix it on the branch, then relabel #$2 adlc:ready"
       return 0
