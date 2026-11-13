@@ -358,7 +358,7 @@ const FIXES = [
     ["Current runners create the branch from the issue (gh issue develop), so it is linked from the start.", "Until then the Now tab and the abort comment name the branch.", "If the runner log says \"could not create a linked branch on GitHub\", the run used a local branch: check that the GitHub App can write contents."]],
   ["Pipeline", "Agents spend long stretches in sleep while tests or the Android e2e run",
     "Older plugins checked long background jobs with fixed sleeps (sleep 540; tail …), which wait their full length even when the job finished a minute in: 10 to 30 minutes per test-heavy run.",
-    ["Current runners have adlc-bg (start a job detached; its log ends with EXIT_CODE=<n>) and adlc-wait (returns as soon as the job ends), and the agents use them.", "Load both: adlc up <slug> for the helpers in the runner image, then adlc restart <slug> for the agents."],
+    ["Current runners have adlc-bg (start a job detached; its log ends with EXIT_CODE=<n>) and adlc-wait (returns as soon as the job ends), and the agents use them; the guard hook rejects any sleep of 60 s or more and points the agent to them.", "Load both: adlc up <slug> for the helpers in the runner image, then adlc restart <slug> for the agents."],
     "adlc up diet && adlc restart diet"],
   ["Pipeline", "Android QA takes 30 minutes or more per attempt, and other runs wait for the emulator",
     "Usually the project's e2e script: a full native rebuild every time (expo prebuild --clean, 10 to 20 minutes) while it holds the emulator lock, every flow instead of smoke plus the affected ones, and 3 retries of a flow that fails the same way.",

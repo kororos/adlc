@@ -221,7 +221,7 @@ The core defines when tests run and what counts as passing (`testing-contract` s
 Controls, strongest first:
 1. **Credential scoping:** a fine-grained GitHub PAT on the project repo only (issues, PRs, contents, no admin). No production credentials in the runner, ever. The Claude OAuth token and PAT are Docker secrets.
 2. **Trusted input only:** the poller and `/deliver` ignore issues and comments from non-collaborators.
-3. **Guard hooks:** no force-push, no pushes to protected branches, no direct merges (only `--auto`), no repo administration, no secret-file reads.
+3. **Guard hooks:** no force-push, no pushes to protected branches, no direct merges (only `--auto`), no repo administration, no secret-file reads, no `sleep` of 60 s or more (long jobs use `adlc-bg`/`adlc-wait`).
 4. **GitHub branch protection:** required checks, no direct pushes.
 5. **Egress proxy** (all HTTP(S) leaves through it) with `network.mode`:
    - `open`: interactive sessions (a human is present).

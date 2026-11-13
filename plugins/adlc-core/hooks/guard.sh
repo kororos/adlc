@@ -60,6 +60,14 @@ case "$tool" in
     if unattended && grep -Eq '(>|sed[[:space:]]+-i|tee|mv|cp|rm)[^;&|]*(adlc\.yaml|CLAUDE\.md|docs/project/)' <<<"$cmd"; then
       block "project setup files are read-only in unattended runs."
     fi
+    # A fixed sleep waits its full length even when the job ended long before; adlc-wait returns as soon as it ends.
+    while read -r n unit; do
+      case $unit in m) n=$((n * 60)) ;; h|d) n=99999 ;; esac
+      if [ "$n" -ge 60 ]; then
+        block "a sleep of 60 s or more is not allowed: it waits its full length even when the job finished long before. Start the job with \`adlc-bg <log> -c '<command>'\` and wait with \`adlc-wait <log>\` (timeout: 600000); it returns as soon as the job ends (exit 124: still running, call it again). To poll something else, loop with a short sleep: \`timeout 570 bash -c 'until <check>; do sleep 5; done'\`."
+      fi
+    done < <(grep -oE '(^|[^[:alnum:]_.-])sleep[[:space:]]+[0-9]+(\.[0-9]+)?[smhd]?([[:space:]]|$|[;&|)])' <<<"$cmd" \
+             | sed -E 's/.*sleep[[:space:]]+([0-9]+)(\.[0-9]+)?([smhd]?).*/\1 \3/')
     if grep -Eq '(cat|less|more|head|tail|source|\.)[[:space:]]+[^;&|]*\.env([[:space:]]|$|\.[a-z]+)' <<<"$cmd" \
        && ! grep -Eq '\.env\.(example|sample|template)' <<<"$cmd"; then
       block "reading .env files is not allowed."

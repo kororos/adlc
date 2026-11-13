@@ -27,7 +27,7 @@ Do:
 - Change only what the task needs. Stay inside the expected files unless that is clearly impossible, and note any deviation.
 - Match the surrounding code: naming, structure, error handling, comment density.
 - Make the acceptance tests for your ACs pass. Add unit tests for any non-trivial logic you introduce. If you add or rename a test that covers an AC, update `.adlc/runs/<n>/tests.md` (the one run file you may edit besides your status).
-- Run lint, typecheck and the relevant tests from `adlc.build.yaml` before committing. Run only the test files you touched or that cover your ACs. The full suite runs later.
+- Run lint, typecheck and the relevant tests from `adlc.build.yaml` before committing. Run only the test files you touched or that cover your ACs. The full suite runs later. A command that may take over 10 minutes (one Bash call's limit) runs with `adlc-bg <log> -c '<command>'` and `adlc-wait <log>` (timeout: 600000), which returns as soon as it ends (exit 124: still running, call it again). Never `sleep N` to wait for it.
 - If those tests need the test environment, start it with `ADLC_RUN=<n>-t<k>` (`env.up`, then `env.seed`) so it doesn't collide with the lead's or another task's, and always run `env.down` with the same `ADLC_RUN` before you end, also when you return blocked.
 - Commit with a conventional message referencing `#<n>`. Don't push or merge. The lead integrates task branches.
 
