@@ -16,7 +16,7 @@ import readline from "node:readline"
 import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import fastifyStatic from "@fastify/static"
-import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, commandLog, cpuPct, currentStep, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
+import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, commandLog, cpuPct, currentStep, taskProgress, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
 
 const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
@@ -245,6 +245,21 @@ function runJobs(slug, n, since) {
         cmd, segments, markers: p.markers, last: p.last }
     })
 }
+// The run's tasks (tasks/T<k>.md from the design) and which the implementers finished, read from the
+// whole lead log (implementer calls are few and spread over hours).
+const taskCache = new Map()
+function runTasks(slug, n, file) {
+  let names = []
+  try { names = fs.readdirSync(pdir(slug, "runs", String(n), ".adlc", "runs", String(n), "tasks")).filter((f) => /^T\d+\.md$/.test(f)) } catch { /* no design yet */ }
+  if (!names.length) return null
+  const f = pdir(slug, "logs", "runs", file)
+  let m = 0
+  try { m = fs.statSync(f).mtimeMs } catch { return null }
+  const hit = taskCache.get(f)
+  const p = hit && hit.m === m ? hit.p : taskProgress(tailLines(f, Infinity, 64 * 2 ** 20))
+  taskCache.set(f, { m, p })
+  return { total: names.length, done: p.done, running: p.running }
+}
 const stepCache = new Map()
 function runStep(slug, file) {
   const f = pdir(slug, "logs", "runs", file)
@@ -293,7 +308,8 @@ function state(p, detail = false) {
   const active = running.map((n) => {
     const run = all.find((r) => r.issue === n) ?? null
     return { issue: n, title: titles.get(n) ?? "", run, progress: runState(n),
-      ...(detail ? { step: run ? stepWithLog(p.slug, n, runStep(p.slug, run.file)) : null, jobs: runJobs(p.slug, n, run?.started) } : {}) }
+      ...(detail ? { step: run ? stepWithLog(p.slug, n, runStep(p.slug, run.file)) : null, jobs: runJobs(p.slug, n, run?.started),
+        tasks: run ? runTasks(p.slug, n, run.file) : null } : {}) }
   })
   let backoffUntil = null
   try {

@@ -337,3 +337,30 @@ export function commandLog(cmd) {
   const m = [...String(cmd ?? "").matchAll(/(?:^|[\s;&|(])(?:&|\d)?>>?\s*([^\s;&|$()`'"]+\.log)\b/g)]
   return m.length ? m.at(-1)[1] : null
 }
+
+// Build progress from the lead's log: implementer calls per task ("… T6 …" in the description), finished
+// (a result came back) or still running. Retried tasks count once; a task is done once any call for it ended.
+export function taskProgress(lines) {
+  const calls = new Map()   // Agent call id → task
+  const done = new Set(), running = new Set()
+  for (const line of lines) {
+    let j
+    try { j = JSON.parse(line) } catch { continue }
+    if (j.parent_tool_use_id) continue
+    if (j.type === "assistant") {
+      for (const c of j.message?.content ?? []) {
+        if (c.type !== "tool_use" || (c.name !== "Agent" && c.name !== "Task")) continue
+        if (!/implementer$/.test(String(c.input?.subagent_type ?? ""))) continue
+        const t = String(c.input?.description ?? "").match(/\bT(\d+)\b/)
+        if (t) { calls.set(c.id, `T${t[1]}`); running.add(`T${t[1]}`) }
+      }
+    } else if (j.type === "user") {
+      for (const c of j.message?.content ?? []) {
+        const t = c.type === "tool_result" && calls.get(c.tool_use_id)
+        if (t) { done.add(t); running.delete(t) }
+      }
+    }
+  }
+  const byNum = (a, b) => Number(a.slice(1)) - Number(b.slice(1))
+  return { done: [...done].sort(byNum), running: [...running].filter((t) => !done.has(t)).sort(byNum) }
+}

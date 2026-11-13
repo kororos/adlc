@@ -185,3 +185,12 @@ test("currentStep lists subagents running in parallel", async () => {
   assert.equal(st.what, "T5 api")
   assert.deepEqual(st.parallel.map((p) => [p.what, p.doing.what]), [["T4 mobile", "Edit apps/mobile/x.tsx"], ["T5 api", "Edit apps/api/y.ts"]])
 })
+
+test("taskProgress counts implementer tasks done and running", async () => {
+  const { taskProgress } = await import("../lib.js")
+  const call = (id, d) => JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Agent", input: { subagent_type: "adlc-core:implementer", description: d } }] } })
+  const res = (id) => JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id }] } })
+  const p = taskProgress([call("a", "Implement T1"), call("b", "Implement T2"), res("a"), call("c", "T10 api"), call("d", "Implement T2 retry"), res("b"),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "e", name: "Agent", input: { subagent_type: "adlc-core:build-runner", description: "Verify T3" } }] } })])
+  assert.deepEqual(p, { done: ["T1", "T2"], running: ["T10"] })
+})

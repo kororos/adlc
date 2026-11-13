@@ -1,5 +1,5 @@
 import { CircleCheck, CircleX, LoaderCircle } from "lucide-react"
-import type { ActiveRun, Job, JobSegment } from "@/lib/api"
+import type { ActiveRun, Job, JobSegment, RunTasks } from "@/lib/api"
 import { ago, duration, elapsedMs } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -11,10 +11,12 @@ const UNIT: Record<JobSegment["tool"], string> = {
 // app builds, e2e) with live counts. The poller refreshes every 10 s.
 export function RunNow({ a }: { a: ActiveRun }) {
   const jobs = a.jobs ?? []
-  if (!a.step && !jobs.length) return null
+  const building = a.progress?.phase === "build" && !a.progress?.rework && a.tasks
+  if (!a.step && !jobs.length && !building) return null
   const [current, ...earlier] = jobs
   return (
     <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+      {building && a.tasks && <TasksRow t={a.tasks} />}
       {a.step?.parallel && a.step.parallel.length > 1 && (
         <div className="grid gap-1">
           <p><span className="text-muted-foreground">Now: </span><span className="font-medium">{a.step.parallel.length} subagents at once</span></p>
@@ -64,6 +66,30 @@ export function RunNow({ a }: { a: ActiveRun }) {
           <div className="mt-2 grid gap-2">{earlier.map((j) => <JobRow key={j.name + j.started} job={j} />)}</div>
         </details>
       )}
+    </div>
+  )
+}
+
+// Build: the design's tasks, done and running (from the implementers' calls).
+function TasksRow({ t }: { t: RunTasks }) {
+  const done = new Set(t.done), running = new Set(t.running)
+  const all = Array.from({ length: t.total }, (_, i) => `T${i + 1}`)
+  const pct = Math.round((t.done.length / t.total) * 100)
+  return (
+    <div className="grid gap-1.5">
+      <p className="text-xs">
+        <span className="font-medium">Build</span> · {t.done.length} of {t.total} tasks done
+        {t.running.length > 0 && <span className="text-muted-foreground"> · now {t.running.join(", ")}</span>}
+      </p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {all.map((k) => (
+          <span key={k} className={cn("rounded px-1.5 font-mono text-[11px]",
+            done.has(k) ? "bg-primary/15 text-primary" : running.has(k) ? "animate-pulse bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{k}</span>
+        ))}
+      </div>
     </div>
   )
 }
