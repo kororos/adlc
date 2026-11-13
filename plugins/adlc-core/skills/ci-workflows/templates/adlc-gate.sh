@@ -12,6 +12,10 @@
 #     version fields release-please-config.json names (checked: nothing else in those files moved), or
 #   - path globs are given and no changed file matches one (e.g. 'apps/mobile/*' for e2e-android;
 #     `*` also matches `/`).
+#   - it is a push to the default branch whose commit has exactly the files of a merged PR's head on
+#     which this job already passed (the merge train brings a PR up to date before it squash-merges
+#     it, so main's run would test the same code again). Needs GH_TOKEN (pull-requests: read,
+#     checks: read) on the gate step; without it, or on any doubt, the job runs.
 # With `--status-only` as the first argument only the first skip applies (no docs-only, release or
 # path skips). publish.yml uses it so that every push to the default branch publishes its images.
 # Never use workflow-level `paths:` filters on required checks instead: a workflow that doesn't
@@ -88,6 +92,26 @@ release_only() {
 if [ "$status_only" = true ]; then
   echo "run=true" >>"$out"
   exit 0
+fi
+
+# Push to the default branch: the PR this commit merged, when its head has the same tree and this
+# job's check passed on that head. Any error, a different tree or no passed check: run.
+already_tested() {
+  [ "${GITHUB_EVENT_NAME:-}" = push ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] || return 1
+  local api=${GITHUB_API_URL:-https://api.github.com}/repos/$GITHUB_REPOSITORY sha tree pr head name
+  get() { curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api/$1"; }
+  sha=$(git rev-parse HEAD) tree=$(git rev-parse 'HEAD^{tree}') name=${ADLC_CHECK_NAME:-${GITHUB_JOB:-}}
+  [ -n "$name" ] || return 1
+  pr=$(get "commits/$sha/pulls" | SHA=$sha yq -p json '[.[] | select(.merge_commit_sha == env(SHA))][0] | (.number | tostring) + " " + (.head.sha // "")') || return 1
+  read -r pr head <<<"$pr"
+  [ -n "$head" ] && [ "$head" != null ] || return 1
+  [ "$(get "git/commits/$head" | yq -p json '.tree.sha')" = "$tree" ] || return 1
+  get "commits/$head/check-runs?check_name=$name&filter=latest" \
+    | yq -p json -e '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length > 0' >/dev/null || return 1
+  echo "PR #$pr ($head)"
+}
+if tested=$(already_tested 2>/dev/null); then
+  skip "this commit has exactly the files of $tested, on which ${ADLC_CHECK_NAME:-$GITHUB_JOB} passed"
 fi
 
 # Pull request: the checkout is the merge commit, whose first parent is the base branch tip.

@@ -7,7 +7,7 @@ on:
   # release.yml dispatches this on the release-please branch: its PR is opened with GITHUB_TOKEN,
   # which starts no workflows, so its required checks would otherwise never report.
   workflow_dispatch:
-permissions: { contents: read }
+permissions: { contents: read, pull-requests: read, checks: read }   # pull-requests, checks: the gate's already-tested check on main
 concurrency: { group: "e2e-${{ github.ref }}", cancel-in-progress: true }
 env: { ADLC_RUN: "ci-${{ github.run_id }}" }
 
@@ -20,6 +20,8 @@ jobs:
         with: { fetch-depth: 2 }
       - id: gate
         run: bash .github/scripts/adlc-gate.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
       - if: steps.gate.outputs.run == 'true'
         uses: pnpm/action-setup@v4
       - if: steps.gate.outputs.run == 'true'
@@ -53,6 +55,8 @@ jobs:
         with: { fetch-depth: 2 }
       - id: gate                     # globs from adlc.yaml ci.e2e_android_paths (`*` also matches `/`)
         run: bash .github/scripts/adlc-gate.sh 'apps/app/*' 'apps/api/*' 'packages/*'
+        env:
+          GH_TOKEN: ${{ github.token }}
       - if: steps.gate.outputs.run == 'true'
         uses: pnpm/action-setup@v4
       - if: steps.gate.outputs.run == 'true'
@@ -130,6 +134,8 @@ jobs:
         with: { fetch-depth: 2 }
       - id: gate
         run: bash .github/scripts/adlc-gate.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
       - if: steps.gate.outputs.run == 'true'
         uses: pnpm/action-setup@v4
       - if: steps.gate.outputs.run == 'true'
