@@ -21,7 +21,7 @@ Do:
 2. Never write a test that reads or checks `CLAUDE.md`, `adlc.yaml` or `docs/project/` (owner-only files that agents can't edit, so such a test can only fail). An AC that is an owner edit (listed under "Owner edits" in `design.md`) gets the row `| AC | owner edit | — | see PR |` in `tests.md` instead of a test.
 3. Follow the project's existing test framework, file locations, fixtures and naming. Don't add new test libraries.
 4. Name tests after the AC (`AC2: rejects expired refresh token`).
-5. Run the relevant test command from `adlc.build.yaml`. The new tests must **compile and fail for the right reason** (missing behaviour), not because of syntax or import errors. Stub imports against the API names in design.md if needed. A command that may take over 10 minutes runs with `adlc-bg <log> -c '<command>'` and `adlc-wait <log>`, never with `sleep N`.
+5. Run the relevant test command from `adlc.build.yaml`. The new tests must **compile and fail for the right reason** (missing behaviour), not because of syntax or import errors. Stub imports against the API names in design.md if needed. A command that may take over 10 minutes runs with `adlc-bg .adlc/runs/<n>/reports/logs/<name>.log -c '<command>'` and `adlc-wait <that log>` (never a log in `/tmp`), never with `sleep N`.
 6. Write `.adlc/runs/<n>/tests.md`: one row per AC, `| AC | level | test file | test name |`, listing every test that covers it. The release manager builds the PR's AC table from it, so keep it exact.
 7. Commit: `test(<scope>): acceptance tests for #<n>`.
 

@@ -132,6 +132,9 @@ test("commandLog finds the log a command writes to", async () => {
   assert.equal(commandLog("nohup bash -c 'x' > /srv/adlc/projects/diet/runs/97/a.log 2>&1 &"), "/srv/adlc/projects/diet/runs/97/a.log")
   assert.equal(commandLog("(pnpm -r lint) > $L/lint-4.log 2>&1"), null)
   assert.equal(commandLog("git status"), null)
+  assert.equal(commandLog("sleep 590; grep -E \"Test Files\" /tmp/t452-api.log | head"), "/tmp/t452-api.log")
+  assert.equal(commandLog("timeout 570 bash -c 'until grep -aq \"^EXIT_CODE=\" .adlc/runs/4/reports/logs/t.log; do sleep 5; done'"), ".adlc/runs/4/reports/logs/t.log")
+  assert.equal(commandLog("tail -5 $L/x.log"), null)
 })
 
 test("current step labels name the tool and shorten worktree paths", async () => {

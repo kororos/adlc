@@ -109,7 +109,7 @@ Depends on: <ids|none>
 ACs: AC1, AC3
 Files: <expected paths>
 Instructions: <≤ 20 lines, concrete>
-Done when: <tests / commands that must pass>
+Done when: <tests / commands that must pass: the test files for this task's files and ACs, lint, typecheck; never a whole stage or suite>
 ```
 
 ## Backlog issue body (created by /plan-backlog)

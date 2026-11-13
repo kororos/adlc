@@ -332,10 +332,14 @@ export function currentStep(lines) {
 }
 
 // The log a running command writes to: the last "> <path>.log" (or "&> …", "2>&1 >…") with a literal
-// path, as the agents write their stage logs. Paths with variables ($L/…) can't be resolved.
+// path, as the agents write their stage logs. Otherwise the last log it reads (a wait such as
+// `until grep -q EXIT_CODE x.log`, `tail x.log`). Paths with variables ($L/…) can't be resolved.
 export function commandLog(cmd) {
-  const m = [...String(cmd ?? "").matchAll(/(?:^|[\s;&|(])(?:&|\d)?>>?\s*([^\s;&|$()`'"]+\.log)\b/g)]
-  return m.length ? m.at(-1)[1] : null
+  const s = String(cmd ?? "")
+  const m = [...s.matchAll(/(?:^|[\s;&|(])(?:&|\d)?>>?\s*([^\s;&|$()`'"]+\.log)\b/g)]
+  if (m.length) return m.at(-1)[1]
+  const r = [...s.matchAll(/(?:^|[\s;&|('"=])([^\s;&|$()`'"=]+\.log)(?=$|[\s;&|)'"])/g)]
+  return r.length ? r.at(-1)[1] : null
 }
 
 // Build progress from the lead's log: implementer calls per task ("… T6 …" in the description), finished

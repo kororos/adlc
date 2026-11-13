@@ -214,14 +214,25 @@ function testFileCount(dir) {
   return n
 }
 
+// Subagents with a worktree of their own (implementers, debuggers) work in repo/.claude/worktrees/<agent>/,
+// so their files are there rather than in the run's worktree.
+function agentWorktrees(slug, n) {
+  const dirs = [pdir(slug, "runs", String(n))]
+  for (const root of [pdir(slug, "repo", ".claude", "worktrees"), pdir(slug, "runs", String(n), ".claude", "worktrees")]) {
+    try { for (const w of fs.readdirSync(root)) dirs.push(path.join(root, w)) } catch { /* none */ }
+  }
+  return dirs
+}
 function runJobs(slug, n, since) {
-  const dir = logsDir(slug, n)
-  let starts = []
-  try { starts = fs.readdirSync(dir).filter((f) => f.endsWith(".log.start")) } catch { return [] }
+  const starts = []
+  for (const wt of agentWorktrees(slug, n)) {
+    const dir = path.join(wt, ".adlc", "runs", String(n), "reports", "logs")
+    try { for (const f of fs.readdirSync(dir)) if (f.endsWith(".log.start")) starts.push(path.join(dir, f)) } catch { /* none */ }
+  }
   const from = since ? Date.parse(since) / 1000 - 60 : 0
   const num = (f) => { try { return Number(fs.readFileSync(f, "utf8").trim()) } catch { return null } }
   const history = suiteHistory(slug)
-  return starts.map((f) => ({ log: path.join(dir, f.slice(0, -".start".length)), started: num(path.join(dir, f)) }))
+  return starts.map((f) => ({ log: f.slice(0, -".start".length), started: num(f) }))
     .filter((j) => j.started && j.started >= from).sort((a, b) => b.started - a.started).slice(0, 6)
     .map(({ log, started }) => {
       const code = num(`${log}.exit`)
@@ -282,8 +293,13 @@ function stepWithLog(slug, n, step) {
   if (step.parallel) out.parallel = step.parallel.map((a) => ({ ...a, doing: a.doing ? (({ cmd: _c, ...d }) => d)(a.doing) : null }))
   const rel = step.doing?.running ? commandLog(cmd) : null
   if (!rel) return out
-  const file = rel.startsWith("/") ? (rel.includes("/projects/") ? path.join(DATA, rel.slice(rel.indexOf("/projects/") + 1)) : null) : pdir(slug, "runs", String(n), rel)
+  // A relative path is in the run's worktree or an agent's own; the newest such file. /tmp and other
+  // paths inside the runner container can't be read from here.
+  const file = rel.startsWith("/") ? (rel.includes("/projects/") ? path.join(DATA, rel.slice(rel.indexOf("/projects/") + 1)) : null)
+    : agentWorktrees(slug, n).map((w) => path.join(w, rel)).filter((f) => fs.existsSync(f)).sort((a, b) => (mtime(b) ?? "").localeCompare(mtime(a) ?? ""))[0]
   if (!file || !file.startsWith(pdir(slug)) || !fs.existsSync(file)) return out
+  // A job started with adlc-bg already has its own row under the step.
+  if (fs.existsSync(`${file}.start`)) return out
   const p = logProgress(file)
   out.doing.log = { name: path.basename(file), segments: p?.segments ?? [], markers: p?.markers ?? [], last: p?.last ?? "", updated: mtime(file) }
   return out
