@@ -286,8 +286,8 @@ export function jobProgress(text) {
 }
 
 // "Read apps/mobile/app.json": the tool's name (Bash shows its command or description alone) and
-// paths relative to the run's worktree (…/runs/<n>/).
-const WORKTREE = /(?:\/[^\s/'"]+)*\/runs\/\d+\//g
+// paths relative to the run's worktree (…/runs/<n>/, or a parallel subagent's …/.claude/worktrees/<name>/).
+const WORKTREE = /(?:\/[^\s/'"]+)*\/(?:runs\/\d+|\.claude\/worktrees\/[^\s/'"]+)\//g
 function stepLabel(name, input) {
   const s = toolSummary(name, input).replace(WORKTREE, "")
   return name === "Bash" ? s : `${name} ${s}`.trim()
@@ -323,9 +323,12 @@ export function currentStep(lines) {
       }
     }
   }
-  const step = [...open.values()].at(-1) ?? lead
-  if (step?.agent === "lead") return { agent: "lead", what: step.what, since: step.since, doing: null }
-  return step
+  const running = [...open.values()]
+  const step = running.at(-1) ?? lead
+  if (!step) return null
+  if (step.agent === "lead") return { agent: "lead", what: step.what, since: step.since, doing: null }
+  // Subagents the lead runs at the same time (e.g. implementers of one wave), oldest first.
+  return running.length > 1 ? { ...step, parallel: running.map(({ agent, what, since, doing }) => ({ agent, what, since, doing })) } : step
 }
 
 // The log a running command writes to: the last "> <path>.log" (or "&> …", "2>&1 >…") with a literal

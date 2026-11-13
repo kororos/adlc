@@ -140,6 +140,7 @@ test("current step labels name the tool and shorten worktree paths", async () =>
   assert.equal(currentStep([line({ file_path: "/srv/adlc/projects/diet/runs/459/apps/mobile/app.json" }, "Read")]).what, "Read apps/mobile/app.json")
   assert.equal(currentStep([line({ pattern: "flock", path: "/srv/adlc/projects/diet/runs/459/apps" }, "Grep")]).what, "Grep flock in apps")
   assert.equal(currentStep([line({ command: "git status", description: "Show status" }, "Bash")]).what, "Show status")
+  assert.equal(currentStep([line({ file_path: "/srv/adlc/projects/diet/repo/.claude/worktrees/agent-ae04/apps/mobile/a.tsx" }, "Edit")]).what, "Edit apps/mobile/a.tsx")
 })
 
 test("jobProgress splits pnpm's interleaved package output into one segment per package", async () => {
@@ -174,4 +175,13 @@ test("jobProgress counts flows of a script that lists them and runs Maestro once
   const done = jobProgress(["e2e-android: flows: a b", " > Flow a", "x... COMPLETED", " > Flow b", "y... COMPLETED", "e2e-link: b attempt 1/3 PASS", "EXIT_CODE=0"].join("\n"))
   const g = done.segments.find((s) => s.label === "flows")
   assert.deepEqual([g.done, g.failed, g.finished], [2, 0, true])
+})
+
+test("currentStep lists subagents running in parallel", async () => {
+  const { currentStep } = await import("../lib.js")
+  const call = (id, d, ts) => JSON.stringify({ type: "assistant", timestamp: ts, message: { content: [{ type: "tool_use", id, name: "Agent", input: { subagent_type: "adlc-core:implementer", description: d } }] } })
+  const sub = (parent, id, file) => JSON.stringify({ type: "assistant", timestamp: "t9", parent_tool_use_id: parent, message: { content: [{ type: "tool_use", id, name: "Edit", input: { file_path: `/srv/adlc/projects/diet/runs/122/${file}` } }] } })
+  const st = currentStep([call("a", "T4 mobile", "t1"), call("b", "T5 api", "t2"), sub("a", "x", "apps/mobile/x.tsx"), sub("b", "y", "apps/api/y.ts")])
+  assert.equal(st.what, "T5 api")
+  assert.deepEqual(st.parallel.map((p) => [p.what, p.doing.what]), [["T4 mobile", "Edit apps/mobile/x.tsx"], ["T5 api", "Edit apps/api/y.ts"]])
 })

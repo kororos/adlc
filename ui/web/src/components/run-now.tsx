@@ -15,7 +15,23 @@ export function RunNow({ a }: { a: ActiveRun }) {
   const [current, ...earlier] = jobs
   return (
     <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-      {a.step && (
+      {a.step?.parallel && a.step.parallel.length > 1 && (
+        <div className="grid gap-1">
+          <p><span className="text-muted-foreground">Now: </span><span className="font-medium">{a.step.parallel.length} subagents at once</span></p>
+          {a.step.parallel.map((x, i) => (
+            <div key={i} className="grid gap-0.5 pl-3">
+              <p className="text-xs"><span className="font-medium">{x.agent}</span>{x.what && <> · {x.what}</>}{x.since && <span className="text-muted-foreground"> · since {ago(x.since)}</span>}</p>
+              {x.doing && (
+                <p className="flex min-w-0 items-center gap-1.5 pl-2 text-[11px] text-muted-foreground" title={x.doing.what}>
+                  {x.doing.running ? <LoaderCircle className="size-3 shrink-0 animate-spin text-primary" /> : <CircleCheck className="size-3 shrink-0" />}
+                  <span className="truncate font-mono text-foreground/80">{x.doing.what}</span>
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {a.step && !(a.step.parallel && a.step.parallel.length > 1) && (
         <p>
           <span className="text-muted-foreground">Now: </span>
           <span className="font-medium">{a.step.agent}</span>
@@ -23,7 +39,7 @@ export function RunNow({ a }: { a: ActiveRun }) {
           {a.step.since && <span className="text-muted-foreground"> · since {ago(a.step.since)}</span>}
         </p>
       )}
-      {a.step?.doing && (
+      {a.step?.doing && !(a.step.parallel && a.step.parallel.length > 1) && (
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={a.step.doing.what}>
           {a.step.doing.running ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-primary" /> : <CircleCheck className="size-3.5 shrink-0" />}
           <span className="shrink-0">{a.step.doing.running ? "running" : "last"}:</span>

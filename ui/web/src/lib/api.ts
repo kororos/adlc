@@ -169,7 +169,11 @@ export type Disk = { freeGb: number; totalGb: number; minFreeGb: number; warnPct
 
 // What an active run is doing now (project detail only): the subagent it waits for, and its long jobs
 // (adlc-bg logs) with counts parsed per test tool.
-export type RunStep = { agent: string; what: string; since: string | null; doing?: {
+export type StepDoing = { what: string; since: string | null; running: boolean }
+export type RunStep = { agent: string; what: string; since: string | null
+  // subagents running at the same time (e.g. one wave's implementers), oldest first
+  parallel?: { agent: string; what: string; since: string | null; doing: StepDoing | null }[]
+  doing?: {
   what: string; since: string | null; running: boolean
   // the log the running command writes to, followed live
   log?: { name: string; segments: JobSegment[]; markers: { name: string; code: number }[]; last: string; updated: string | null }

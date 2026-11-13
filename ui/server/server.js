@@ -263,6 +263,8 @@ function stepWithLog(slug, n, step) {
   if (!step) return step
   const { cmd, ...doing } = step.doing ?? {}
   const out = { ...step, doing: step.doing ? doing : null }
+  // Parallel subagents: their current tool call, without the raw command.
+  if (step.parallel) out.parallel = step.parallel.map((a) => ({ ...a, doing: a.doing ? (({ cmd: _c, ...d }) => d)(a.doing) : null }))
   const rel = step.doing?.running ? commandLog(cmd) : null
   if (!rel) return out
   const file = rel.startsWith("/") ? (rel.includes("/projects/") ? path.join(DATA, rel.slice(rel.indexOf("/projects/") + 1)) : null) : pdir(slug, "runs", String(n), rel)
