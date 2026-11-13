@@ -126,6 +126,13 @@ test("currentStep is the subagent still running, else the lead's last tool", asy
   assert.equal(currentStep(lines.slice(0, 2)), null)   // finished subagent, no lead tool call since
 })
 
+test("jobProgress labels a suite by its package path, also in an agent's worktree", async () => {
+  const { jobProgress } = await import("../lib.js")
+  const p = jobProgress(" RUN  v5.0.5 /srv/adlc/projects/diet/repo/.claude/worktrees/agent-a45/apps/api\n ✓  api  src/a.test.ts (3 tests) 40ms\n")
+  assert.equal(p.segments[0].label, "apps/api")
+  assert.equal(jobProgress(" RUN  v5.0.5 /srv/adlc/projects/diet/runs/97/apps/web\n").segments[0].label, "apps/web")
+})
+
 test("commandLog finds the log a command writes to", async () => {
   const { commandLog } = await import("../lib.js")
   assert.equal(commandLog("s=1; timeout 600 pnpm --filter web exec playwright test a b > .adlc/runs/427/reports/logs/qa-e2e-5-a1.log 2>&1; echo x"), ".adlc/runs/427/reports/logs/qa-e2e-5-a1.log")

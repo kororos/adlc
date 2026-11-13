@@ -185,7 +185,7 @@ const MARKER = /^([A-Z][A-Z0-9_]*_EXIT|EXIT_CODE)=(\d+)\b/
 const JEST_TIME = /^Time:\s+([\d.]+)\s*s/
 
 // "/srv/adlc/projects/diet/runs/427/apps/api" → "apps/api"
-const relDir = (d) => d.replace(/^.*\/runs\/\d+\//, "").replace(/\/$/, "") || "."
+const relDir = (d) => d.replace(/^.*\/(?:runs\/\d+|\.claude\/worktrees\/[^/]+)\//, "").replace(/\/$/, "") || "."
 
 // pnpm's recursive runs prefix every line with "<package> <script>: " and interleave packages run in
 // parallel; each package keeps its own segment.
