@@ -331,6 +331,23 @@ export function currentStep(lines) {
   return running.length > 1 ? { ...step, parallel: running.map(({ agent, what, since, doing }) => ({ agent, what, since, doing })) } : step
 }
 
+// The phase a run is in, from state.json and the subagent running now. The lead writes state.json at
+// phase boundaries and sometimes misses one (it went from verify to QA to review without a write), so
+// a running agent whose phase comes later than the recorded one moves the phase on. Never back: a
+// debugger fixing a failed verify, or the lead between agents, keeps the recorded phase.
+const PHASE_ORDER = ["understand", "design", "tests", "build", "verify", "qa", "review", "release"]
+const AGENT_PHASE = { "codebase-scout": "understand", "feature-architect": "design", "test-designer": "tests", implementer: "build",
+  "build-runner": "verify", "qa-engineer": "qa", "code-reviewer": "review", "security-reviewer": "review", "release-manager": "release" }
+export function runPhase(phase, step) {
+  const p = String(phase ?? "").toLowerCase()
+  if (/aborted|^rework-\d+$/.test(p)) return phase
+  const i = PHASE_ORDER.findIndex((x) => p.startsWith(x))
+  const at = i < 0 ? -1 : p.endsWith("-done") ? i + 1 : i
+  const agents = step?.parallel ? step.parallel.map((a) => a.agent) : step ? [step.agent] : []
+  const j = Math.max(-1, ...agents.map((a) => PHASE_ORDER.indexOf(AGENT_PHASE[a] ?? "")))
+  return j > at ? PHASE_ORDER[j] : phase
+}
+
 // The log a running command writes to: the last "> <path>.log" (or "&> …", "2>&1 >…") with a literal
 // path, as the agents write their stage logs. Otherwise the last log it reads (a wait such as
 // `until grep -q EXIT_CODE x.log`, `tail x.log`). Paths with variables ($L/…) can't be resolved.

@@ -133,6 +133,17 @@ test("jobProgress labels a suite by its package path, also in an agent's worktre
   assert.equal(jobProgress(" RUN  v5.0.5 /srv/adlc/projects/diet/runs/97/apps/web\n").segments[0].label, "apps/web")
 })
 
+test("runPhase moves the phase on to the running agent's, never back", async () => {
+  const { runPhase } = await import("../lib.js")
+  assert.equal(runPhase("verify", { agent: "code-reviewer" }), "review")
+  assert.equal(runPhase("verify", { agent: "x", parallel: [{ agent: "code-reviewer" }, { agent: "security-reviewer" }] }), "review")
+  assert.equal(runPhase("verify", { agent: "debugger" }), "verify")
+  assert.equal(runPhase("review", { agent: "build-runner" }), "review")
+  assert.equal(runPhase("tests-done", { agent: "implementer" }), "tests-done")
+  assert.equal(runPhase("qa-aborted", { agent: "code-reviewer" }), "qa-aborted")
+  assert.equal(runPhase("verify", null), "verify")
+})
+
 test("commandLog finds the log a command writes to", async () => {
   const { commandLog } = await import("../lib.js")
   assert.equal(commandLog("s=1; timeout 600 pnpm --filter web exec playwright test a b > .adlc/runs/427/reports/logs/qa-e2e-5-a1.log 2>&1; echo x"), ".adlc/runs/427/reports/logs/qa-e2e-5-a1.log")
