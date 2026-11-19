@@ -16,7 +16,7 @@ import readline from "node:readline"
 import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import fastifyStatic from "@fastify/static"
-import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, commandLog, runPhase, cpuPct, currentStep, taskProgress, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
+import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, commandLog, repeatedSince, runPhase, cpuPct, currentStep, taskProgress, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
 
 const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
@@ -356,7 +356,8 @@ function state(p, detail = false) {
   try { dockerUsage = { text: fs.readFileSync(st("docker_usage"), "utf8").trim(), updated: fs.statSync(st("docker_usage")).mtime.toISOString() } } catch { /* not yet */ }
   const health = Object.fromEntries(COMPONENTS.map((c) => {
     const f = pdir(p.slug, "logs", `${c}.log`)
-    return [c, { updated: mtime(f), last: stripAnsi(tailLines(f, 1)[0] ?? "").slice(0, 300) }]
+    const lines = tailLines(f, 200)
+    return [c, { updated: mtime(f), last: stripAnsi(lines.at(-1) ?? "").slice(0, 300), lastSince: repeatedSince(lines) }]
   }))
   return {
     ...p,

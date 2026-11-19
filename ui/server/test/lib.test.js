@@ -144,6 +144,14 @@ test("runPhase moves the phase on to the running agent's, never back", async () 
   assert.equal(runPhase("verify", null), "verify")
 })
 
+test("repeatedSince finds when the repeated last message started", async () => {
+  const { repeatedSince } = await import("../lib.js")
+  const w = (t, m) => `2026-11-19T09:${t}Z [deployer] ${m}`
+  assert.equal(repeatedSince([w("30:00", "dev is now at sha-1"), w("41:50", "waiting for CI to publish sha-2: api"), " Container x Starting", w("43:50", "waiting for CI to publish sha-2: api")]), "2026-11-19T09:41:50Z")
+  assert.equal(repeatedSince([w("41:50", "waiting for CI to publish sha-2: api"), w("43:50", "waiting for CI to publish sha-2: web")]), "2026-11-19T09:43:50Z")
+  assert.equal(repeatedSince(["no timestamps"]), null)
+})
+
 test("commandLog finds the log a command writes to", async () => {
   const { commandLog } = await import("../lib.js")
   assert.equal(commandLog("s=1; timeout 600 pnpm --filter web exec playwright test a b > .adlc/runs/427/reports/logs/qa-e2e-5-a1.log 2>&1; echo x"), ".adlc/runs/427/reports/logs/qa-e2e-5-a1.log")

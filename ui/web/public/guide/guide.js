@@ -412,7 +412,7 @@ const FIXES = [
     "GitHub merged it and still answered the merge call with an error, as during its incidents. Current runners check the PR's state after an error and record it as merged.",
     ["Nothing to do: the card disappears on the train's next pass."]],
   ["CI", "Dev waits for CI to publish, and there's no publish run",
-    "No workflow ran for that push to main: GitHub dropped the push event, as during its incidents, so the images are never built. Now's dev deploy line says so.",
+    "No workflow ran for that push to main: GitHub dropped the push event, as during its incidents, so the images are never built. Now's dev deploy line says so once the deploy has waited 5 minutes (right after a merge the run can be missing from the dashboard's last GitHub snapshot).",
     ["Wait a little: GitHub sometimes delivers it late.", "Otherwise push a new commit to main (the next merge does it too).", "To start it by hand next time, add workflow_dispatch: to the publish workflow's on: (a project issue), then Actions → publish → Run workflow."]],
   ["PRs", "Approved PRs merge slowly: after each merge the others wait for a full CI run",
     "Branch protection's \"Require branches to be up to date before merging\" makes the merge train update every approved PR with main and re-run its checks after each merge, although most PRs don't touch what the previous one changed.",

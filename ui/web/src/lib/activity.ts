@@ -114,8 +114,12 @@ function deployState(p: Project): Activity["deploy"] {
   const publish = publishRun(p, /\bsha-([0-9a-f]{7})\b/.exec(msg)?.[1])
   if (fresh && /^deploying /.test(msg)) return { ...idle, state: "deploying", since, detail: msg, publish }
   if (fresh && /^waiting for CI to publish/.test(msg)) {
-    // The snapshot holds the active runs and those finished in the last 6 h, so a missing one never started.
-    return { ...idle, state: "waiting-ci", since, detail: msg, publish, noPublishRun: !publish && !!p.snapshot?.actions && !p.snapshot.actions.error }
+    // The snapshot holds the active runs and those finished in the last 6 h, so a missing one never started,
+    // provided the snapshot was taken well after the wait began: right after a merge the run exists on
+    // GitHub before the next snapshot (about once a minute) shows it.
+    const waitFrom = p.health.deployer?.lastSince ?? since
+    const late = !!p.snapshot?.actions?.generatedAt && new Date(p.snapshot.actions.generatedAt).getTime() - new Date(waitFrom).getTime() > 5 * 60_000
+    return { ...idle, state: "waiting-ci", since: waitFrom, detail: msg, publish, noPublishRun: late && !publish && !!p.snapshot?.actions && !p.snapshot.actions.error }
   }
   if (fresh && /^ERROR/.test(msg)) return { ...idle, state: "error", since, detail: msg.replace(/^ERROR: /, ""), publish }
   return idle

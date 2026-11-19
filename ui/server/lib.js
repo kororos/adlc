@@ -348,6 +348,23 @@ export function runPhase(phase, step) {
   return j > at ? PHASE_ORDER[j] : phase
 }
 
+// When a component started logging its current message: it repeats some on every loop (the deployer's
+// "waiting for CI to publish <tag>" every 2 minutes), so the log's mtime says only when it last did.
+// The timestamp of the first of the trailing lines with the same message, else null.
+export function repeatedSince(lines) {
+  const parse = (l) => /^(\S+Z) \[[\w-]+\] (.*)$/.exec(stripAnsi(l ?? "").trim())
+  const tail = lines.filter((l) => parse(l))
+  const last = parse(tail.at(-1))
+  if (!last) return null
+  let since = last[1]
+  for (let i = tail.length - 2; i >= 0; i--) {
+    const m = parse(tail[i])
+    if (m[2] !== last[2]) break
+    since = m[1]
+  }
+  return since
+}
+
 // The log a running command writes to: the last "> <path>.log" (or "&> …", "2>&1 >…") with a literal
 // path, as the agents write their stage logs. Otherwise the last log it reads (a wait such as
 // `until grep -q EXIT_CODE x.log`, `tail x.log`). Paths with variables ($L/…) can't be resolved.

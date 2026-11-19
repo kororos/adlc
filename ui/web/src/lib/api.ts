@@ -229,7 +229,7 @@ export type Project = Omit<ProjectSummary, "counts" | "snapshotAt" | "attention"
   devMissingSecrets: { tag: string; since: string; missing: { name: string; path: string; hint: string; commit?: string; title?: string; pr?: number }[] } | null
   settings: Setting[] | null
   nightly: Nightly | null
-  health: Record<Component, { updated: string | null; last: string }>
+  health: Record<Component, { updated: string | null; last: string; lastSince?: string | null }>
   snapshot: Snapshot | null
 }
 
