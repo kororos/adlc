@@ -28,6 +28,7 @@ env:
 
 testing:
   exploratory: true
+  env_packages: [apps/api]          # packages whose tests use the env services: a compose change runs only their whole suites
   e2e:
     per_run: smoke+affected
     nightly: full

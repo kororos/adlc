@@ -32,6 +32,7 @@ deploy_files:                            # one compose base, per-environment ove
 
 testing:
   exploratory: true                      # agent-driven exploratory QA on UI changes
+  env_packages: [apps/api]               # packages whose tests use the env services: a compose change runs only their whole suites
   e2e:
     per_run: smoke+affected
     nightly: full
