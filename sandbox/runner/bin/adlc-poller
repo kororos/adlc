@@ -1093,8 +1093,31 @@ cleanup() {
     down_issue_envs "$n"
     log "#$n closed: removed its leftover test environments ($envs)"
   done
+  stop_idle_envs
   git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
   find "$LOG_DIR/runs" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
+}
+# A run that ends without its env.down (it hit the session's time limit, asked a question, was blocked, or
+# a person stopped it) leaves its test environment running while the issue stays open, and on a small dev
+# server those idle Postgres, Redis and stub containers take CPU and memory from the next run. Stop the
+# environments of an open issue that no run is working on and nothing has touched for ADLC_ENV_IDLE_MIN
+# minutes (default 120; 0 = off): no file in its workspace changed (reports, logs, code; node_modules aside)
+# and no container of it started. Stopped, not removed: the next run's env.up starts them again, and the
+# data stays until the issue closes (then the cleanup above removes them).
+stop_idle_envs() {
+  local min=${ADLC_ENV_IDLE_MIN:-120} n p wt started recent
+  [ "$min" -gt 0 ] 2>/dev/null || return 0
+  recent=$(date -u -d "-$min minutes" +%FT%TZ)
+  for n in $(docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sed -nE 's/^adlc-([0-9]+)(-[a-z0-9]+)?$/\1/p' | sort -un); do
+    is_running "$n" && continue
+    wt="$RUNS_DIR/$n"
+    [ -d "$wt" ] && [ -n "$(find "$wt" -path '*/node_modules' -prune -o -type f -newermt "-$min minutes" -print -quit 2>/dev/null)" ] && continue
+    started=$(docker ps -q $(issue_projects "$n" | sed 's/^/--filter label=com.docker.compose.project=/') 2>/dev/null \
+      | xargs -r docker inspect -f '{{.State.StartedAt}}' 2>/dev/null | sort | tail -1)
+    [ -n "$started" ] && [[ "$started" > "$recent" ]] && continue
+    for p in $(issue_projects "$n"); do docker compose -p "$p" stop >/dev/null 2>&1 || true; done
+    log "#$n: stopped its test environments, idle for ${min}+ min with no run working on it ($(issue_projects "$n" | paste -sd' ' -))"
+  done
 }
 
 # The per-issue verify_scope overrides, created once so they can be picked in GitHub's label menu.
