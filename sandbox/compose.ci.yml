@@ -46,7 +46,7 @@ x-ci-env: &ci-env
   ADLC_CI_HOST_ROLES: ${ADLC_CI_ROLES:-test,publish}  # this host's roles (adlc up --ci-roles), for the role priority
   ADLC_CI_PRIORITY: ${ADLC_CI_PRIORITY:-kvm,publish,test} # a waiting job of an earlier role goes first on its host
   ADLC_CI_HOST: ${ADLC_CI_HOST:-}                 # runner names adlc-<slug>[-<host>]-<role>-<time>; capacity is per host
-  ADLC_CI_JOB_MAX_MIN: ${ADLC_CI_JOB_MAX_MIN:-60}   # stop a runner whose job runs longer (0 = off)
+  ADLC_CI_JOB_MAX_MIN: ${ADLC_CI_JOB_MAX_MIN:-75}   # stop a runner whose job runs longer (0 = off)
   ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
   ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
   HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128

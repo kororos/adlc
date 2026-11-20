@@ -375,11 +375,13 @@ yield_capacity() { # remove our idle runner when other roles' jobs fill the capa
 # ── Job time limit ───────────────────────────────────────────────────────────
 # A job without timeout-minutes gets GitHub's 6 hours, so one hung step holds this role's only runner
 # (and its share of the CI capacity) that long, with every later job of the role queued behind it.
-# After ADLC_CI_JOB_MAX_MIN minutes (default 60; 0 = off) the registrar stops the runner: run.sh passes
+# After ADLC_CI_JOB_MAX_MIN minutes (default 75; 0 = off) the registrar stops the runner: run.sh passes
 # the signal on, GitHub ends the job, the poller treats it like a failed check, and the next reset_engine
 # removes what the job started. The clock starts at the job's started_at (or when this registrar first
 # saw the runner busy, if GitHub can't say), so a registrar restart doesn't reset it.
-JOB_MAX_MIN=${ADLC_CI_JOB_MAX_MIN:-60}
+# It stays above the templates' largest timeout-minutes (60), so GitHub's own timeout ends a job first
+# and its cleanup steps still run.
+JOB_MAX_MIN=${ADLC_CI_JOB_MAX_MIN:-75}
 declare -A job_since=() job_desc=()
 last_watch=0
 # The job a runner is running: "<started_at>\t<workflow / job>\t<url>", empty if not found.
