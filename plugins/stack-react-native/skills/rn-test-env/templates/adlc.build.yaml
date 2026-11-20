@@ -19,7 +19,6 @@ env:
   # ADLC_WORKTREE lets compose bind-mount the run's source at the same path in the Docker sidecar.
   up: >-
     export ADLC_WORKTREE=$PWD &&
-    docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d &&
     docker compose -p adlc-${ADLC_RUN} -f deploy/compose.yml -f deploy/compose.test.yml up -d --wait postgres redis mocks
   seed:  pnpm --filter api db:migrate && pnpm --filter api db:seed:test
   start_watch: export ADLC_WORKTREE=$PWD ADLC_MODE_TARGET=dev && pnpm adlc:dev
