@@ -1120,6 +1120,29 @@ stop_idle_envs() {
   done
 }
 
+# The shared Android emulator (compose project adlc-emulator) takes about a third of a core even when idle.
+# Remove it after ADLC_EMULATOR_IDLE_MIN minutes (default 5; 0 = off) in which nobody held its lock
+# ($ADLC_LOCK_DIR/android-emulator.lock) and no Android e2e process ran (a command line matching
+# ADLC_EMULATOR_BUSY_PATTERN, default maestro or e2e-android / e2e:android, which also covers the APK build
+# before the lock), counted from its start at the earliest. Removed (down), not stopped: a restarted emulator
+# container can't start the device again. The e2e script or env.up brings it back (`up -d`, a 1-3 min boot).
+stop_idle_emulator() {
+  local min=${ADLC_EMULATOR_IDLE_MIN:-5} lock=${ADLC_LOCK_DIR:-$ADLC_WS/locks}/android-emulator.lock busy="$STATE_DIR/emulator_busy_at" now last started
+  [ "$min" -gt 0 ] 2>/dev/null || return 0
+  started=$(docker ps -q --filter label=com.docker.compose.project=adlc-emulator 2>/dev/null | xargs -r docker inspect -f '{{.State.StartedAt}}' 2>/dev/null | sort | tail -1)
+  [ -n "$started" ] || return 0
+  now=$(date +%s)
+  if { [ -e "$lock" ] && ! flock -n "$lock" true; } || pgrep -f -- "${ADLC_EMULATOR_BUSY_PATTERN:-maestro|e2e[-:_]android}" >/dev/null; then
+    echo "$now" >"$busy"; return 0
+  fi
+  last=$(cat "$busy" 2>/dev/null || echo 0)
+  started=$(date -d "$started" +%s 2>/dev/null || echo "$now")
+  [ "$last" -ge "$started" ] 2>/dev/null || last=$started
+  [ $((now - last)) -ge $((min * 60)) ] || return 0
+  docker compose -p adlc-emulator down >/dev/null 2>&1 || { log "WARN: could not remove the idle Android emulator (adlc-emulator)"; return 0; }
+  log "the shared Android emulator was idle for ${min}+ min: removed it; the next Android e2e run starts it again"
+}
+
 # The per-issue verify_scope overrides, created once so they can be picked in GitHub's label menu.
 ensure_scope_labels() {
   gh label create adlc:verify-full -R "$R" --color 5319E7 \
@@ -1152,6 +1175,7 @@ while :; do
     launch_ready
   fi
   [ $((i % 10)) = 0 ] && cleanup
+  stop_idle_emulator
   [ $((i % 5)) = 0 ] && write_nightly
   [ $((i % HOUSEKEEP_EVERY)) = 1 ] && housekeep
   write_snapshot

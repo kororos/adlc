@@ -23,9 +23,10 @@ The scheduling, selection and flake rules come from the core `testing-contract` 
 
 ## Android: Maestro and the shared emulator
 - Flows: `apps/app/e2e/flows/*.yaml`, `appId` from `app.config.ts`. Use `tags: [smoke]` for smoke flows.
-- The emulator is a **long-lived service** in the project's Docker sidecar (compose project `adlc-emulator`, template in the `rn-test-env` skill). It is shared by all runs, so **always hold the lock**, but only around the emulator part (connect, install, flows): **build the APK first, outside the lock**. A build of 10 to 20 minutes inside the lock blocks every other run's Android QA:
+- The emulator is a **shared service** in the project's Docker sidecar (compose project `adlc-emulator`, template in the `rn-test-env` skill), started on demand: ADLC removes it after a few idle minutes, so the script brings it up under the lock (`up -d` does nothing when it's running). It is shared by all runs, so **always hold the lock**, but only around the emulator part (connect, install, flows): **build the APK first, outside the lock**. A build of 10 to 20 minutes inside the lock blocks every other run's Android QA:
   ```bash
   flock "$ADLC_LOCK_DIR/android-emulator.lock" bash -c '
+    docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d &&   # removed when idle: start it again
     for _ in $(seq 1 180); do   # adb connect fails silently while the emulator still boots: retry it
       adb connect emulator:5555 >/dev/null 2>&1
       [ "$(adb -s emulator:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = 1 ] && break

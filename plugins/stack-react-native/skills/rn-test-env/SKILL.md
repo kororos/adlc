@@ -23,7 +23,7 @@ Templates live in `templates/` next to this file. Copy and adapt them; don't rei
 - Switch modes with `env.down` → `env.up` → `env.seed` → the other start command.
 
 ## Android emulator
-- Started once by `env.up` if not running: `docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d`. It needs `/dev/kvm`, which the runner passes to the sidecar when the host has it. If `/dev/kvm` is missing, mark Android e2e as `where: ci`.
+- Started by `env.up` if not running: `docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d`. **ADLC removes it when idle** (no lock holder and no Android e2e process for `ADLC_EMULATOR_IDLE_MIN` minutes, default 5), so the e2e script also runs that `up -d` itself, under the lock, before connecting (see `e2e-patterns`); a cold boot takes 1-3 minutes. It needs `/dev/kvm`, which the runner passes to the sidecar when the host has it. If `/dev/kvm` is missing, mark Android e2e as `where: ci`.
 - **No proxy:** its compose service sets `HTTP_PROXY`, `http_proxy`, `HTTPS_PROXY` and `https_proxy` to `""` (as in the template). `NO_PROXY` isn't enough: the emulator ignores it and sends all the device's connections through the egress proxy, which refuses the per-run hosts (`HTTP proxy handshake … 403` in the emulator log, the app shows offline).
 - **Unhealthy or not booting: recreate, never restart.** `docker compose -p adlc-emulator -f deploy/compose.emulator.yml up -d --force-recreate --wait` (under the lock). A restarted container can't start the device again (`sudo chown … /dev/kvm` fails in its log).
 - Reach it at `emulator:5555` on network `adlc-web`. Optional live view (noVNC) at `http://emulator.<slug>.<base>[:port]`.
