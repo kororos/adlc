@@ -204,7 +204,7 @@ export type Job = {
 export type RunTasks = { total: number; done: string[]; running: string[] }
 export type ActiveRun = { issue: number; title: string; run: Run | null; progress: RunProgress | null; step?: RunStep | null; jobs?: Job[]; tasks?: RunTasks | null }
 
-export type RunProgress = { phase: string; rework?: number | null; risk: "low" | "medium" | "high" | null; scope?: "affected" | "auto" | "full" | null; tasks: number | null }
+export type RunProgress = { phase: string; rework?: number | null; risk: "low" | "medium" | "high" | null; scope?: "affected" | "auto" | "full" | null; tasks: number | null; models?: Record<string, string> | null }
 
 export type ProjectSummary = {
   slug: string

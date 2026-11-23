@@ -26,6 +26,7 @@ Closes #<n>
 ## Architecture       (only if design.md says "deviates": ⚠️ link to the proposed ADR, which needs human approval)
 ## Verification       (the verify scope; stage table from the run's full (or affected) verify report, then one line per later focused verify (what it re-ran, result) + QA target table, incl. "deferred to CI". Scope affected: say the full suite runs in this PR's CI, and list any `## Flaky` entries)
 ## Review             (verdicts from review.md / security.md, plus any non-blocking findings)
+## Models             (only if the lead passed the issue's `models`: one line, e.g. "design: fable · build: sonnet (the issue's ADLC models; other agents ran on their defaults)")
 <details><summary>Run artifacts</summary> paths under .adlc/runs/<n>/ </details>
 ```
    **New secrets and settings:** read the branch's changes to the deployment configuration (not source code): `git diff origin/<default>...HEAD -- deploy/ .env.example`. Look for new top-level `secrets:` entries (e.g. `file: ../secrets/dev/<name>` or external `<name>_vN` for prod) and new required `*_FILE` or environment variables. For each one, per environment (dev; prod and staging if their stack files changed):

@@ -243,7 +243,7 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
 <nav class="bar"><div class="wrap">
   <span class="brand">ADLC Field Guide</span>
   <div class="links">
-    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#lifecycle">Lifecycle</a><a href="#labels">Labels</a><a href="#stacks">Stacks</a><a href="#fixes">Fix it</a><a href="#commands">Commands</a>
+    <a href="#overview">Overview</a><a href="#simulator">Simulator</a><a href="#tutorials">Tutorials</a><a href="#lifecycle">Lifecycle</a><a href="#labels">Labels</a><a href="#models">Models</a><a href="#stacks">Stacks</a><a href="#fixes">Fix it</a><a href="#commands">Commands</a>
   </div>
 </div></nav>
 
@@ -338,6 +338,46 @@ footer { padding-block: 36px; color: var(--muted); font-size: 0.85rem }
     <p class="lede">GitHub labels are the pipeline's state. The poller reads and writes them every minute; you change them to steer.</p>
   </header>
   <div class="lgrid" id="lgrid"></div>
+</div></section>
+
+<section id="models"><div class="wrap">
+  <header>
+    <p class="eyebrow">Reference</p>
+    <h2>Models: defaults per project, a different choice per issue</h2>
+    <p class="lede">Every agent has a default model, picked for its job: the most capable for product and architecture work, a balanced one for writing and reviewing code, a fast one for running commands. Most issues should run on those defaults. When one issue deserves different treatment, say so <b>in the issue</b>: for a redesign of the mobile app's screens, let the most capable model make the design, and keep the implementation on the defaults.</p>
+  </header>
+
+  <h3 class="stack-sub">How to ask for it</h3>
+  <div class="lgrid">
+    <div class="lcard"><h3>Add a section to the issue body</h3>
+      <div class="code"><pre>## ADLC models
+design: fable
+build: sonnet</pre></div>
+      <p>One <code>&lt;key&gt;: &lt;model&gt;</code> line each. Only the steps or agents you name change; everything else runs on its default.</p>
+      <p class="do">Edit it any time before the run starts, or before you relabel a PR's issue <code>adlc:ready</code> for a rework: every run reads it again.</p></div>
+    <div class="lcard"><h3>Models</h3>
+      <dl><dt><code>fable</code></dt><dd>the most capable; slowest and costliest</dd><dt><code>opus</code></dt><dd>very capable; the default for product and architecture agents</dd><dt><code>sonnet</code></dt><dd>balanced; the default for the lead and for writing, testing and reviewing code</dd><dt><code>haiku</code></dt><dd>fast and cheap; the default for running commands, scouting the code and the release</dd></dl>
+      <p class="do">Anything else is ignored, and the run says so in its first comment.</p></div>
+    <div class="lcard"><h3>Rules</h3>
+      <ul><li>An agent's own name wins over its step: <code>build: sonnet</code> with <code>debugger: opus</code> gives the implementers Sonnet and the debugger Opus.</li>
+        <li>The issue's choice replaces the built-in escalations (the debugger moves to Opus on its last attempt; code review uses Opus on high-risk issues), but only for the agents it names.</li>
+        <li>Only trusted issues: written by a collaborator or by ADLC itself. An outsider's issue runs on the defaults.</li>
+        <li>The run card on the dashboard shows the choices as a badge, the PR body lists them under <b>Models</b>, and History shows what each run cost.</li></ul></div>
+  </div>
+
+  <h3 class="stack-sub">The keys</h3>
+  <div class="lgrid">
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">lead</span><p>The session that runs the issue from start to PR and starts every other agent. It doesn't read code itself, so it seldom needs more.</p><dl><dt>Default</dt><dd>the project's <code>ADLC_LEAD_MODEL</code> (sonnet)</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">understand</span><p>codebase-scout maps the code the issue touches; requirements-analyst writes the spec and asks questions when something is unclear.</p><dl><dt>Default</dt><dd>haiku (scout), opus (analyst)</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">design</span><p>feature-architect: the design, the tasks and the risk, and any task revision later. The key for UI and architecture-heavy issues.</p><dl><dt>Default</dt><dd>opus</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">tests</span><p>test-designer writes the acceptance tests first, from the spec and design.</p><dl><dt>Default</dt><dd>sonnet</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">build</span><p>implementer writes each task's code (several in parallel); debugger fixes failing tests, QA and review findings.</p><dl><dt>Default</dt><dd>sonnet (debugger: Opus on its last attempt)</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">verify</span><p>build-runner runs install, lint, typecheck, arch checks, build and tests, and reports the failures. It never changes code.</p><dl><dt>Default</dt><dd>haiku</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">qa</span><p>qa-engineer runs the end-to-end flows (web, Android) and explores the change.</p><dl><dt>Default</dt><dd>sonnet</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">review</span><p>code-reviewer, and security-reviewer when the risk or the change calls for it.</p><dl><dt>Default</dt><dd>sonnet (code review: Opus on high risk)</dd></dl></div>
+    <div class="lcard"><span class="lbl c-ready" style="justify-self:start">release</span><p>release-manager writes the PR body, opens the PR and sets auto-merge.</p><dl><dt>Default</dt><dd>haiku</dd></dl></div>
+  </div>
+  <p class="lede" style="margin-top:14px">Agent names work as keys too: <code>codebase-scout</code>, <code>requirements-analyst</code>, <code>feature-architect</code>, <code>test-designer</code>, <code>implementer</code>, <code>debugger</code>, <code>build-runner</code>, <code>qa-engineer</code>, <code>code-reviewer</code>, <code>security-reviewer</code>, <code>release-manager</code>. A better model costs more per run and is usually slower; put it where judgement matters (design, review) rather than where work is mechanical (verify, release).</p>
 </div></section>
 
 <section id="stacks"><div class="wrap">

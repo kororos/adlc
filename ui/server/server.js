@@ -319,7 +319,12 @@ function state(p, detail = false) {
     // A rework records its number in `rework` and the step in `phase`; older runs wrote phase "rework-<k>".
     const phase = String(j.phase ?? "")
     const rework = Number.isInteger(j.rework) ? j.rework : Number(/^rework-(\d+)/.exec(phase)?.[1] ?? 0) || null
-    return { phase, rework, risk: j.risk ?? null, scope: j.scope ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null }
+    // models: the issue's "## ADLC models" choices ({ design: "fable", … }); agents not named run on their defaults.
+    const models = j.models && typeof j.models === "object" && !Array.isArray(j.models)
+      ? Object.fromEntries(Object.entries(j.models).filter(([k, v]) => typeof k === "string" && typeof v === "string").slice(0, 20))
+      : null
+    return { phase, rework, risk: j.risk ?? null, scope: j.scope ?? null, tasks: Array.isArray(j.waves) ? j.waves.flat().length : null,
+      models: models && Object.keys(models).length ? models : null }
   }
   const active = running.map((n) => {
     const run = all.find((r) => r.issue === n) ?? null

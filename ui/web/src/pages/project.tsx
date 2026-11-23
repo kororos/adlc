@@ -141,6 +141,11 @@ function NowTab({ p }: { p: Project }) {
                 </Badge>
               )}
               {a.progress?.risk && <RiskBadge risk={a.progress.risk} />}
+              {a.progress?.models && (
+                <Badge variant="outline" title="The issue's ADLC models section: these steps or agents run on the model named; the others on their defaults">
+                  {Object.entries(a.progress.models).map(([k, v]) => `${k}: ${v}`).join(" · ")}
+                </Badge>
+              )}
             </div>
           </div>
           <PhaseStepper progress={a.progress} />

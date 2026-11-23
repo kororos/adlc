@@ -569,6 +569,37 @@ Unattended: the poller runs the same command for each `adlc:ready` issue, in tha
 
 **Nightly checks on demand:** the dashboard's **Health → Nightly checks** card shows the nightly workflow's latest run (`adlc.yaml → ci.nightly_workflow`, default `nightly.yml`) and starts it with **Run now**. The runner sends a `repository_dispatch` event of type `adlc-nightly`: the agents' token can send that (Contents write) but can't start workflows directly (Actions is read-only). So the workflow needs `repository_dispatch: { types: [adlc-nightly] }` under `on:` (the `ci-workflows` template has it); until then the card says what to add. Never give a deploy workflow that trigger. A failed run opens a regression issue, as on schedule.
 
+### Models: defaults per project, a different choice per issue
+
+Every agent has a default model in its definition (`plugins/*/agents/*.md`): Opus for product and architecture work (requirements-analyst, feature-architect, architecture-reviewer, backlog-planner, product-advisor), Sonnet for writing, testing and reviewing code (implementer, debugger, test-designer, qa-engineer, code-reviewer, security-reviewer, researcher), Haiku for running commands (build-runner, codebase-scout, release-manager). The delivery lead runs on `ADLC_LEAD_MODEL` (default `sonnet`; per project in `/srv/adlc/config/<slug>.env`, then `adlc up <slug>`).
+
+One issue can ask for different models in a `## ADLC models` section of its body, one `<key>: <model>` line each:
+
+```markdown
+## ADLC models
+design: fable
+build: sonnet
+```
+
+| Key | Agents | Default |
+|---|---|---|
+| `lead` | the delivery session (set by the poller as `--model`) | `ADLC_LEAD_MODEL` |
+| `understand` | codebase-scout, requirements-analyst | haiku, opus |
+| `design` | feature-architect (also when it revises a task) | opus |
+| `tests` | test-designer | sonnet |
+| `build` | implementer, debugger | sonnet (debugger: opus on its last attempt) |
+| `verify` | build-runner | haiku |
+| `qa` | qa-engineer | sonnet |
+| `review` | code-reviewer, security-reviewer | sonnet (code-reviewer: opus on high risk) |
+| `release` | release-manager | haiku |
+
+- Models: `fable`, `opus`, `sonnet`, `haiku`. An agent's own name is a key too, and wins over its step (`debugger: opus` next to `build: sonnet`). Other keys or models are ignored, and the run says so in its first comment.
+- The issue's choice replaces the built-in escalations above, for the agents it names only.
+- Only trusted issues (a collaborator's, or ADLC's own) get it; an outsider's issue runs on the defaults.
+- Every run reads the section again, reworks included: edit it before relabelling `adlc:ready`.
+- The run records it as `models` in `state.json`. The dashboard's run card shows it as a badge, the PR body lists it under **Models**, the poller log says "lead model <m>" when the lead differs, and History shows each run's cost.
+- Why: a few issues (a UI redesign, a hard architectural change) are worth the most capable model for their design or review, while their implementation is routine. Changing an agent's default instead would change every issue of every project.
+
 ### Labels
 ```
 (no state) ─► adlc:queued ─► adlc:ready ─► adlc:in-progress ─► adlc:pr-open ─► merged (issue closed)

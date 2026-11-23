@@ -247,6 +247,30 @@ start_regressions() {
   done
 }
 
+# An issue can ask for other models than the defaults in a "## ADLC models" section of its body, one
+# "<key>: <model>" line each (keys: lead, the delivery steps or agent names; models: fable, opus, sonnet,
+# haiku). issue_models reads that section from stdin and prints "<key> <model>" lines, lowercased; the
+# delivery lead applies the rest, the poller only `lead` (the session's own --model).
+issue_models() {
+  awk '{ l = tolower($0) }
+       l ~ /^##[ \t]+adlc models[ \t]*$/ { f = 1; next }
+       f && l ~ /^#/ { exit }
+       f' \
+  | sed -nE 's/^[[:space:]]*[-*]?[[:space:]]*`?([A-Za-z-]+)`?[[:space:]]*:[[:space:]]*`?([A-Za-z0-9.-]+)`?.*$/\1 \2/p' \
+  | tr '[:upper:]' '[:lower:]'
+}
+# lead_model <n>: the issue's `lead` model if it asks for one and is trusted (a collaborator's or ADLC's
+# own issue; an outsider can't pick the costliest model), else the project's ADLC_LEAD_MODEL.
+lead_model() {
+  local j author m
+  j=$(gh issue view "$1" -R "$R" --json body,author 2>/dev/null) || { echo "$LEAD_MODEL"; return; }
+  m=$(jq -r '.body // ""' <<<"$j" | issue_models | awk '$1 == "lead" { m = $2 } END { print m }')
+  case $m in fable|opus|sonnet|haiku) ;; *) echo "$LEAD_MODEL"; return ;; esac
+  author=$(jq -r '.author.login // ""' <<<"$j")
+  [ -n "$SELF" ] || SELF=$(adlc-gh-token --identity 2>/dev/null | cut -f1)
+  if [ "$author" = "app/${SELF%\[bot\]}" ] || is_collaborator "$author"; then echo "$m"; else echo "$LEAD_MODEL"; fi
+}
+
 launch() { # launch <n> <title>
   local n=$1 title=$2 wt ts out err protected mode
   wt=$(prepare_worktree "$n" "$title") || { log "#$n: could not create worktree"; return 1; }
@@ -277,7 +301,8 @@ launch() { # launch <n> <title>
   mode="$mode --scope $scope"
   label "$n" adlc:ready adlc:in-progress
   gh issue edit "$n" -R "$R" --remove-label "$PRIORITY_LABEL" >/dev/null 2>&1 || true
-  log "#$n: starting delivery${pr_state:+ (rework of its open PR)}, $scope verify, in $wt"
+  local model; model=$(lead_model "$n")
+  log "#$n: starting delivery${pr_state:+ (rework of its open PR)}, $scope verify, in $wt$([ "$model" = "$LEAD_MODEL" ] || echo ", lead model $model (the issue's ADLC models)")"
   (
     cd "$wt" || exit 1
     ADLC_MODE=unattended ADLC_RUN=$n \
@@ -291,7 +316,7 @@ launch() { # launch <n> <title>
       claude -p "/adlc-core:deliver $n$mode" \
         --settings "$(claude_settings)" \
         --permission-mode bypassPermissions \
-        --model "$LEAD_MODEL" \
+        --model "$model" \
         --output-format stream-json --verbose \
         >"$out" 2>"$err"
     rc=$?
