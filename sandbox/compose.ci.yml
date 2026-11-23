@@ -48,6 +48,7 @@ x-ci-env: &ci-env
   ADLC_CI_HOST: ${ADLC_CI_HOST:-}                 # runner names adlc-<slug>[-<host>]-<role>-<time>; capacity is per host
   ADLC_CI_JOB_MAX_MIN: ${ADLC_CI_JOB_MAX_MIN:-75}   # stop a runner whose job runs longer (0 = off)
   ADLC_CI_RUNNER_IMAGE: ${ADLC_CI_RUNNER_IMAGE:-ghcr.io/actions/actions-runner:latest}
+  ADLC_CI_BROWSER_DEPS: ${ADLC_CI_BROWSER_DEPS:-1}  # headless Chromium's system libraries in the CI image (0 = without)
   ADLC_INNER_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
   HTTP_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128
   HTTPS_PROXY: http://${ADLC_CI_SUBNET_PREFIX}.2:3128

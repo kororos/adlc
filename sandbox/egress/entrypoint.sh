@@ -75,7 +75,7 @@ EOF
   fi
   cat >>"$CONF.new" <<EOF
 http_access deny all
-logformat adlc %ts %>a %rm %ru %>Hs %Ss
+logformat adlc %ts %>a %rm %ru %>Hs %Ss %tr
 access_log stdio:$LOG/access.log adlc
 logfile_rotate 3
 cache_log stdio:$LOG/cache.log

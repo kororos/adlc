@@ -28,12 +28,31 @@ RUN set -eu; \
     docker compose version; yq --version
 
 # Jobs have no direct internet: everything goes through the egress proxy, whose address Docker
-# passes in as HTTP(S)_PROXY. Keep it across sudo (apt, `playwright install --with-deps`), and let
+# passes in as HTTP(S)_PROXY. Keep it across sudo (a job's own apt-get, `playwright install --with-deps`), and let
 # Node's fetch and corepack use it.
 # (The base image's /etc/sudoers doesn't include /etc/sudoers.d, so add the line there.)
 RUN printf 'Defaults env_keep += "HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy NODE_USE_ENV_PROXY"\n' >>/etc/sudoers \
  && visudo -c
 ENV NODE_USE_ENV_PROXY=1
+
+# The system libraries and fonts a headless Chromium needs (Playwright's list for Ubuntu 24.04, as
+# `playwright install-deps chromium` installs them), so e2e jobs skip `--with-deps`: that step runs
+# apt-get update and install on every job, and a slow Ubuntu mirror once held a job for 27 minutes
+# until it hit its time limit. ADLC_BROWSER_DEPS=1 tells jobs the libraries are here (the templates
+# then download only the browser). ADLC_CI_BROWSER_DEPS=0 on the CI host builds the image without them.
+ARG BROWSER_DEPS=1
+RUN if [ "$BROWSER_DEPS" = 1 ]; then \
+      apt-get update -qq \
+      && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+         libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcairo2 libcups2t64 \
+         libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
+         libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
+         xvfb fonts-noto-color-emoji fonts-unifont libfontconfig1 libfreetype6 xfonts-cyrillic \
+         xfonts-scalable fonts-liberation fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf \
+         fonts-freefont-ttf >/dev/null \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+ENV ADLC_BROWSER_DEPS=${BROWSER_DEPS}
 
 # Entry point: gives the job's Docker client the proxy, then runs the runner.
 COPY adlc-runner-start /usr/local/bin/adlc-runner-start

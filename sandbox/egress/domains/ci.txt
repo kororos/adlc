@@ -2,7 +2,7 @@
 # github.com and *.githubusercontent.com (incl. pipelines/results-receiver.actions) are in core.txt.
 .actions.githubusercontent.com
 codeload.github.com
-# Ubuntu packages for jobs (e.g. playwright install --with-deps in the runner image)
+# Ubuntu packages: the CI runner image build (browser libraries) and jobs' own apt-get (playwright install --with-deps)
 .ubuntu.com
 ppa.launchpadcontent.net
 .pkg.github.com

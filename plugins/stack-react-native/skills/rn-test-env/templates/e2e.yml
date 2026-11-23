@@ -28,7 +28,8 @@ jobs:
         uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - if: steps.gate.outputs.run == 'true'
-        run: pnpm install --frozen-lockfile && pnpm --filter app exec playwright install --with-deps chromium
+        # The ADLC CI image already has the browser's system libraries (ADLC_BROWSER_DEPS=1): download only the browser.
+        run: pnpm install --frozen-lockfile && pnpm --filter app exec playwright install $([ "${ADLC_BROWSER_DEPS:-}" = 1 ] || echo --with-deps) chromium
       - if: steps.gate.outputs.run == 'true'
         run: docker network create adlc-web || true
       - if: steps.gate.outputs.run == 'true'
