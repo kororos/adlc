@@ -104,13 +104,33 @@ export function runSummary(dir, file) {
   return { file, issue: Number(issue), started, updated: mtime(path.join(dir, file)), result }
 }
 
+// Summaries of runs whose log the poller has deleted, from its ledger (logs/runs-ledger.jsonl: one
+// {"file","result"} line per deleted log). Logs still on disk (onDisk: their file names) and repeated lines count once.
+export function ledgerSummaries(text, onDisk = new Set()) {
+  const seen = new Set(onDisk)
+  const out = []
+  for (const line of String(text ?? "").split("\n")) {
+    let j
+    try { j = JSON.parse(line) } catch { continue }
+    const m = typeof j?.file === "string" && j.file.match(RUN_FILE_RE)
+    if (!m || seen.has(j.file)) continue
+    seen.add(j.file)
+    const ts = m[2]
+    const started = `${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)}T${ts.slice(9, 11)}:${ts.slice(11, 13)}:${ts.slice(13, 15)}Z`
+    out.push({ file: j.file, issue: Number(m[1]), started, result: j.result ?? null })
+  }
+  return out
+}
+
 // All-time and last-30-days totals over run summaries (cost is API-equivalent; unfinished runs count as runs only).
+// first: the earliest run's start, since "all time" only reaches back to the oldest log or ledger line.
 export function runTotals(summaries, now = Date.now()) {
   const since = now - 30 * 24 * 3600 * 1000
-  const t = { runs: 0, finished: 0, costUsd: 0, durationMs: 0, last30: { runs: 0, costUsd: 0 } }
+  const t = { runs: 0, finished: 0, costUsd: 0, durationMs: 0, first: null, last30: { runs: 0, costUsd: 0 } }
   for (const s of summaries) {
     const recent = Date.parse(s.started) >= since
     t.runs++
+    if (!t.first || s.started < t.first) t.first = s.started
     if (recent) t.last30.runs++
     if (!s.result) continue
     const cost = s.result.costUsd ?? 0

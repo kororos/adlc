@@ -188,16 +188,30 @@ if (snapshot) {
       checks: p.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null,
     })),
   }
-  // GitHub Actions: runs that are queued or running, plus the most recent finished ones (last 6 h), each
+  // GitHub Actions: runs that are queued or running, plus every run that finished in the last 6 h, each
   // with its jobs and the runner that took them (the ADLC runner's host and role are in its name:
   // adlc-<slug>[-<host>]-<test|publish|kvm>-<time>, no host on the main ADLC host). Best effort: the rest of
   // the snapshot doesn't depend on it.
   try {
     const gh = (path) => JSON.parse(execFileSync("gh", ["api", path], { encoding: "utf8", maxBuffer: 64 << 20 }))
     const since = Date.now() - 6 * 3600_000
-    const runs = gh(`repos/${owner}/${name}/actions/runs?per_page=50`).workflow_runs
+    // Newest first: page on until a page reaches past the 6 hours (at most 5 pages of 100).
+    const runs = []
+    for (let page = 1; page <= 5; page++) {
+      const batch = gh(`repos/${owner}/${name}/actions/runs?per_page=100&page=${page}`).workflow_runs
+      runs.push(...batch)
+      if (batch.length < 100 || new Date(batch[batch.length - 1].created_at).getTime() < since) break
+    }
     const active = runs.filter((r) => r.status !== "completed")
-    const recent = runs.filter((r) => r.status === "completed" && new Date(r.updated_at).getTime() > since).slice(0, 10)
+    const recent = runs.filter((r) => r.status === "completed" && new Date(r.updated_at).getTime() > since)
+    // A finished run's jobs don't change: take them from the previous snapshot instead of asking GitHub again
+    // (the snapshot is written every poll, and a busy day has dozens of finished runs).
+    const known = new Map()
+    try {
+      for (const r of JSON.parse(fs.readFileSync(snapshot, "utf8")).actions?.runs ?? []) {
+        if (r.status === "completed" && r.jobs?.length) known.set(`${r.id}@${r.updatedAt}`, r.jobs)
+      }
+    } catch { /* no previous snapshot */ }
     const runnerName = new RegExp(`^adlc-${process.env.ADLC_SLUG}-(?:([a-z0-9]+)-)?(test|publish|kvm)-\\d+$`)
     const role = (runner) => {
       if (!runner) return null
@@ -208,8 +222,8 @@ if (snapshot) {
     data.actions = {
       generatedAt: new Date().toISOString(),
       runs: [...active, ...recent].map((r) => {
-        let jobs = []
-        try {
+        let jobs = known.get(`${r.id}@${r.updated_at}`) ?? []
+        if (!jobs.length) try {
           jobs = gh(`repos/${owner}/${name}/actions/runs/${r.id}/jobs?per_page=50`).jobs.map((j) => ({
             name: j.name, status: j.status, conclusion: j.conclusion, url: j.html_url,
             queuedAt: j.created_at, startedAt: j.started_at, completedAt: j.completed_at,

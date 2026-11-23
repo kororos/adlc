@@ -16,7 +16,7 @@ import readline from "node:readline"
 import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import fastifyStatic from "@fastify/static"
-import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, commandLog, repeatedSince, runPhase, cpuPct, currentStep, taskProgress, eventsFromLine, jobProgress, hostReport, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
+import { COMPONENTS, HOST_RE, RUN_FILE_RE, SLUG_RE, commandLog, repeatedSince, runPhase, cpuPct, currentStep, taskProgress, eventsFromLine, jobProgress, hostReport, ledgerSummaries, memInfo, mtime, parseEnv, procStat, readJson, runSummary, runTotals, stripAnsi, tailLines } from "./lib.js"
 
 const DATA = process.env.ADLC_DATA ?? "/data"
 const TOKEN_FILE = process.env.ADLC_UI_TOKEN ?? path.join(DATA, "ui", "token")
@@ -450,11 +450,15 @@ app.get("/api/projects/:slug/runs", async (req, reply) => {
   return runs(p.slug, Math.min(Number(req.query.limit ?? 50) || 50, 500))
 })
 
-// Totals over every run on disk (the runs list is capped).
+// Totals over every run: the logs on disk (the runs list is capped) plus the poller's ledger of runs whose
+// log was deleted after the retention period.
 app.get("/api/projects/:slug/runs/totals", async (req, reply) => {
   const p = project(req.params.slug)
   if (!p) return reply.code(404).send({ error: "unknown project" })
-  return runTotals(runs(p.slug, Infinity))
+  const onDisk = runs(p.slug, Infinity)
+  let ledger = ""
+  try { ledger = fs.readFileSync(pdir(p.slug, "logs", "runs-ledger.jsonl"), "utf8") } catch { /* none yet */ }
+  return runTotals([...onDisk, ...ledgerSummaries(ledger, new Set(onDisk.map((r) => r.file)))])
 })
 
 app.post("/api/projects/:slug/actions", async (req, reply) => {

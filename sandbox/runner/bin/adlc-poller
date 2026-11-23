@@ -1095,7 +1095,22 @@ cleanup() {
   done
   stop_idle_envs
   git -C "$REPO_DIR" worktree prune >/dev/null 2>&1 || true
+  ledger_old_run_logs
   find "$LOG_DIR/runs" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
+}
+# Run logs are deleted after LOG_RETENTION_DAYS, but the dashboard's all-time totals (runs, cost, agent time)
+# must outlive them: before a run log goes, its summary (the last top-level result: cost, duration, outcome)
+# is appended to logs/runs-ledger.jsonl, one {"file","result"} line per run (result null: it never finished).
+# The dashboard adds the ledger's runs whose log is gone; a line written twice (a failed delete) counts once.
+ledger_old_run_logs() {
+  local f r
+  while IFS= read -r f; do
+    r=$(grep -F '"type":"result"' "$f" 2>/dev/null \
+      | jq -c 'select(.type == "result" and (.parent_tool_use_id | not))
+               | {costUsd: .total_cost_usd, durationMs: .duration_ms, outcome: (.subtype // ""), error: (.is_error // false)}' 2>/dev/null \
+      | tail -n 1)
+    jq -cn --arg file "${f##*/}" --argjson result "${r:-null}" '{file: $file, result: $result}' >>"$LOG_DIR/runs-ledger.jsonl" || true
+  done < <(find "$LOG_DIR/runs" -type f -name '*.jsonl' -mtime +"$LOG_RETENTION_DAYS" 2>/dev/null)
 }
 # A run that ends without its env.down (it hit the session's time limit, asked a question, was blocked, or
 # a person stopped it) leaves its test environment running while the issue stays open, and on a small dev

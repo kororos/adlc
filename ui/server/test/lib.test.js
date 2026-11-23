@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
-import { cpuPct, eventsFromLine, hostReport, memInfo, parseEnv, procStat, runSummary, runTotals, stripAnsi, tailLines } from "../lib.js"
+import { cpuPct, eventsFromLine, hostReport, ledgerSummaries, memInfo, parseEnv, procStat, runSummary, runTotals, stripAnsi, tailLines } from "../lib.js"
 
 test("parseEnv keeps values and strips quotes", () => {
   assert.deepEqual(parseEnv("ADLC_REPO=kororos/diet\nADLC_REGISTRY_USER='robot$x'\n# c\n"), { ADLC_REPO: "kororos/diet", ADLC_REGISTRY_USER: "robot$x" })
@@ -62,7 +62,28 @@ test("runTotals sums cost and time over all runs and the last 30 days", () => {
     { started: "2026-08-01T10:00:00Z", result: { costUsd: 4, durationMs: 3000 } },
     { started: "2026-08-02T10:00:00Z", result: { costUsd: null, durationMs: null } },
   ], now)
-  assert.deepEqual(t, { runs: 4, finished: 3, costUsd: 6.5, durationMs: 4000, last30: { runs: 2, costUsd: 2.5 } })
+  assert.deepEqual(t, { runs: 4, finished: 3, costUsd: 6.5, durationMs: 4000, first: "2026-08-01T10:00:00Z", last30: { runs: 2, costUsd: 2.5 } })
+})
+
+test("ledgerSummaries adds the runs whose log was deleted, each once", () => {
+  const ledger = [
+    '{"file":"474-20261115T153343Z.jsonl","result":{"costUsd":1.07,"durationMs":762431,"outcome":"success","error":false}}',
+    '{"file":"474-20261115T153343Z.jsonl","result":{"costUsd":1.07,"durationMs":762431,"outcome":"success","error":false}}',
+    '{"file":"93-20261115T200247Z.jsonl","result":null}',
+    '{"file":"511-20261120T101501Z.jsonl","result":{"costUsd":9,"durationMs":1}}',
+    "not json",
+    '{"file":"../etc/passwd","result":null}',
+  ].join("\n")
+  const s = ledgerSummaries(ledger, new Set(["511-20261120T101501Z.jsonl"]))
+  assert.deepEqual(s, [
+    { file: "474-20261115T153343Z.jsonl", issue: 474, started: "2026-11-15T15:33:43Z", result: { costUsd: 1.07, durationMs: 762431, outcome: "success", error: false } },
+    { file: "93-20261115T200247Z.jsonl", issue: 93, started: "2026-11-15T20:02:47Z", result: null },
+  ])
+  const t = runTotals(s, Date.parse("2026-11-23T12:00:00Z"))
+  assert.equal(t.runs, 2)
+  assert.equal(t.costUsd, 1.07)
+  assert.equal(t.first, "2026-11-15T15:33:43Z")
+  assert.deepEqual(ledgerSummaries(""), [])
 })
 
 test("procStat, cpuPct and memInfo read /proc", () => {

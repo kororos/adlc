@@ -485,11 +485,13 @@ function HistoryTab({ slug }: { slug: string }) {
   return (
     <div className="grid gap-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat icon={History} label="Runs" value={q.data.length} hint={`${q.data.length - finished.length} running or interrupted`} />
-        <Stat icon={CircleCheck} label="Succeeded" tone="ok" value={finished.length ? `${Math.round((ok / finished.length) * 100)}%` : "–"} hint={`${ok} of ${finished.length} finished`} />
-        <Stat icon={Clock} label="Agent time" value={duration(time)} hint={finished.length ? `${duration(time / finished.length)} per run` : undefined} />
-        <Stat icon={Rocket} label="Total cost (API-equiv.)" value={usd(totals.data?.costUsd ?? cost)}
-          hint={totals.data ? `${totals.data.runs} runs all-time · ${usd(totals.data.last30.costUsd)} last 30 days · not billed on a subscription` : "not billed on a subscription"} />
+        <Stat icon={History} label="Runs (all time)" value={totals.data?.runs ?? q.data.length}
+          hint={totals.data?.first ? `since ${new Date(totals.data.first).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} · ${totals.data.last30.runs} in the last 30 days` : `${q.data.length - finished.length} running or interrupted`} />
+        <Stat icon={CircleCheck} label="Succeeded" tone="ok" value={finished.length ? `${Math.round((ok / finished.length) * 100)}%` : "–"} hint={`${ok} of the ${finished.length} finished runs listed below`} />
+        <Stat icon={Clock} label="Agent time, all time" value={duration(totals.data?.durationMs ?? time)}
+          hint={(totals.data?.finished ?? finished.length) ? `${duration((totals.data?.durationMs ?? time) / (totals.data?.finished ?? finished.length))} per run` : undefined} />
+        <Stat icon={Rocket} label="Cost, all time (API-equiv.)" value={usd(totals.data?.costUsd ?? cost)}
+          hint={totals.data ? `${usd(totals.data.last30.costUsd)} in the last 30 days · not billed on a subscription` : "not billed on a subscription"} />
       </div>
       <Card className="py-0">
         <Table>

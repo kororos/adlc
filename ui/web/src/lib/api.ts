@@ -147,7 +147,7 @@ export type RunResult = {
   text: string
 }
 
-export type RunTotals = { runs: number; finished: number; costUsd: number; durationMs: number; last30: { runs: number; costUsd: number } }
+export type RunTotals = { runs: number; finished: number; costUsd: number; durationMs: number; first: string | null; last30: { runs: number; costUsd: number } }
 
 export type Run = { file: string; issue: number; started: string; updated: string | null; result: RunResult | null }
 
