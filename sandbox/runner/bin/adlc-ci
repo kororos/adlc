@@ -89,7 +89,12 @@ JOB_NO_PROXY=localhost,127.0.0.1,.lan,.internal
 # job; only then remove its container. GitHub's "busy" flag lags a few seconds behind a job assignment, so
 # removing the container first could kill a job that was just handed out (GitHub then fails it after 10
 # minutes with no steps). Fails (and keeps the runner) when GitHub refuses.
+# GitHub's flag can also be wrong the other way: on 2026-11-23 it reported a runner 20 minutes into a job
+# as not busy and accepted the unregister; removing it killed the nightly Android job and its emulator.
+# So first ask the container itself: a runner running a job has a Runner.Worker process.
+runner_has_job() { docker top "$1" 2>/dev/null | grep -q 'Runner\.Worker'; }
 remove_idle_runner() { # remove_idle_runner <container> <runner id>
+  runner_has_job "$1" && return 1
   GH_TOKEN=$(secret ci_admin_pat) $GH api -X DELETE "repos/$R/actions/runners/$2" >/dev/null 2>&1 || return 1
   docker rm -f "$1" >/dev/null 2>&1
   return 0
@@ -294,6 +299,7 @@ idle_runners() {
   for c in $(my_runners); do
     line=$(awk -v n="$c" '$1 == n' <<<"$list")
     [ "$(cut -d' ' -f2 <<<"$line")" = true ] && continue
+    runner_has_job "$c" && continue       # GitHub said idle, but the runner is running a job
     echo "$c $(cut -s -d' ' -f3 <<<"$line")"
   done
 }
