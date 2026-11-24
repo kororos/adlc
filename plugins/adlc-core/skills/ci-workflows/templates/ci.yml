@@ -15,7 +15,7 @@ env:
 # adlc.build.yaml `status: active`, and on docs-only PRs, the jobs report success without running.
 jobs:
   lint:
-    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(format(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"', github.event.pull_request.number || github.sha)) }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +34,7 @@ jobs:
       - if: steps.gate.outputs.run == 'true'
         run: eval "$(yq '.commands.lint' adlc.build.yaml)"
   typecheck:
-    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(format(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"', github.event.pull_request.number || github.sha)) }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
       - if: steps.gate.outputs.run == 'true'
         run: eval "$(yq '.commands.typecheck' adlc.build.yaml)"
   arch-check:
-    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(format(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"', github.event.pull_request.number || github.sha)) }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +72,7 @@ jobs:
       - if: steps.gate.outputs.run == 'true'
         run: eval "$(yq '.commands.arch_check' adlc.build.yaml)"
   test:
-    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(format(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"', github.event.pull_request.number || github.sha)) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

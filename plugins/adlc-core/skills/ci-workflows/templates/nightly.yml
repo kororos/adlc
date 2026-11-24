@@ -9,7 +9,7 @@ permissions: { contents: read, issues: write }
 
 jobs:
   full-suite:
-    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(format(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"', github.event.pull_request.number || github.sha)) }}
     timeout-minutes: 90
     env: { ADLC_RUN: "nightly-${{ github.run_id }}" }
     steps:

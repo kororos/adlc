@@ -103,13 +103,14 @@ remove_idle_runner() { # remove_idle_runner <container> <runner id>
 }
 
 replace_stale_runners() {
-  local c labels image spec current token id why
+  local c labels image spec current token id why want
   current=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null)
+  want=$(runner_labels)
   for c in $(docker ps --filter label=adlc.ci=runner --format '{{.Names}}'); do
     labels=$(docker inspect -f '{{index .Config.Labels "adlc.ci.labels"}}' "$c" 2>/dev/null)
     image=$(docker inspect -f '{{.Image}}' "$c" 2>/dev/null)
     spec=$(docker inspect -f '{{index .Config.Labels "adlc.ci.spec"}}' "$c" 2>/dev/null)
-    if [ "$labels" != "$LABELS" ]; then why="labels ${labels:-unknown} → $LABELS"
+    if [ "$labels" != "$want" ]; then why="labels ${labels:-unknown} → $want"
     elif [ -n "$current" ] && [ "$image" != "$current" ]; then why="the CI image was updated"
     elif [ "$spec" != "$SPEC" ]; then why="the runner setup changed"
     else continue; fi
@@ -200,11 +201,12 @@ ensure_image() {
 }
 
 start_runner() {
-  local token name jit gid start label_args=() l work
+  local token name jit gid start label_args=() l work labels
   token=$(secret ci_admin_pat)
+  labels=$(runner_labels)
   name="adlc-$ADLC_SLUG${HOST:+-$HOST}-$ROLE-$(date +%s)"
   work=$RUNNER_HOME/_work-$name
-  for l in ${LABELS//,/ }; do label_args+=(-f "labels[]=$l"); done
+  for l in ${labels//,/ }; do label_args+=(-f "labels[]=$l"); done
   jit=$(GH_TOKEN=$token $GH api -X POST "repos/$R/actions/runners/generate-jitconfig" \
           -f name="$name" -F runner_group_id=1 -f work_folder="_work-$name" "${label_args[@]}" \
           --jq .encoded_jit_config 2>&1) || {
@@ -226,12 +228,12 @@ start_runner() {
   # reports it, so `docker stop` (watch_job_time) ends the job on GitHub at once instead of after the
   # runner is declared lost.
   # shellcheck disable=SC2046  # cache_mounts prints -v options
-  docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$LABELS" --label "adlc.ci.spec=$SPEC" \
+  docker run -d --rm --name "$name" --label adlc.ci=runner --label "adlc.ci.labels=$labels" --label "adlc.ci.spec=$SPEC" \
     -v /var/run/docker.sock:/var/run/docker.sock --group-add "$gid" -v "$work:$work" $(cache_mounts) \
     -e NO_PROXY="$JOB_NO_PROXY" -e no_proxy="$JOB_NO_PROXY" -e ADLC_JOB_NO_PROXY="$JOB_NO_PROXY" \
     -e RUNNER_MANUALLY_TRAP_SIG=1 \
     "$IMAGE" "$start" --jitconfig "$jit" >/dev/null \
-    && log "runner $name waiting for a job (labels: $LABELS)"
+    && log "runner $name waiting for a job (labels: $labels)"
 }
 
 
@@ -322,23 +324,64 @@ for _r in ${PRIORITY//,/ }; do
   [[ ",$HOST_ROLES," == *",$_r,"* ]] && HIGHER="$HIGHER $_r"
 done
 HIGHER=${HIGHER# }
-# Roles with a job waiting for a runner on GitHub (status queued), one per line. Cached for a minute:
-# the queued and in-progress runs (a running workflow can have queued jobs) and their jobs' labels.
-waiting_at=0 waiting_cache=""
-waiting_roles() {
-  local now token id
+# ── One PR's checks at a time ───────────────────────────────────────────────
+# GitHub hands a queued job to any idle runner whose labels cover the job's runs-on; a registrar can't
+# choose the job, only its runner's labels. Workflows put a group label in runs-on: adlc-group-<PR number>
+# for a pull request, adlc-group-<commit> otherwise (the templates' runs-on is
+# fromJSON(format(vars.ADLC_TEST_RUNS_ON …, <PR number or commit>)), and the variable carries
+# "adlc-group-{0}"). Then the test and kvm registrars give their new runners the label of one group, the
+# active one, and every job of other groups waits on GitHub until it is done: a PR's checks run to the end
+# before the next PR's start, so it is merge-ready (or reworked) as early as possible.
+# The active group: among the queued and running workflow runs that carry a group label, the oldest run
+# with a job in progress; when none has started, the oldest waiting one. Jobs without a group label (older
+# workflows, the variable without "{0}") keep going to any runner, as before.
+GROUP_RE='^adlc-group-[0-9a-f]+$'
+# The queued and in-progress runs and their jobs, cached for a minute:
+#   "R <created> <started 0|1> <group|->" per run, "Q <role|-> <group|->" per job waiting for a runner.
+scan_at=0 scan_cache="" active_group_seen=""
+ci_scan() {
+  local now token row id created
   now=$(date +%s)
-  if [ $((now - waiting_at)) -ge 60 ]; then
+  if [ $((now - scan_at)) -ge 60 ]; then
     token=$(secret ci_admin_pat)
-    waiting_cache=$(
-      for id in $( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=50" --jq '.workflow_runs[].id'
-                     GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[].id'; } 2>/dev/null | sort -u); do
-        GH_TOKEN=$token $GH api "repos/$R/actions/runs/$id/jobs?filter=latest&per_page=100" \
-          --jq '.jobs[] | select(.status == "queued") | .labels[]' 2>/dev/null
-      done | sed -nE 's/^adlc-(test|publish|kvm)$/\1/p' | sort -u)
-    waiting_at=$now
+    scan_cache=$(
+      for row in $( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'
+                      GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'; } 2>/dev/null | sort -u); do
+        id=${row%%|*} created=${row#*|}
+        GH_TOKEN=$token $GH api "repos/$R/actions/runs/$id/jobs?filter=latest&per_page=100" --jq "
+          ([.jobs[].labels[] | select(test(\"$GROUP_RE\"))] | first // \"-\") as \$g
+          | \"R $created \\(if any(.jobs[]; .status == \"in_progress\") then 1 else 0 end) \\(\$g)\",
+            (.jobs[] | select(.status == \"queued\")
+             | \"Q \\(([.labels[] | capture(\"^adlc-(?<r>test|publish|kvm)$\").r] | first) // \"-\") \\(([.labels[] | select(test(\"$GROUP_RE\"))] | first) // \"-\")\")" 2>/dev/null
+      done)
+    scan_at=$now
   fi
-  printf '%s\n' "$waiting_cache"
+  printf '%s\n' "$scan_cache"
+}
+# The group whose jobs run now (empty: none, every job goes to any runner).
+active_group() {
+  ci_scan | awk '$1 == "R" && $4 != "-"' | sort -k3,3r -k2,2 | head -n 1 | cut -d' ' -f4
+}
+# Labels for this registrar's next runner: the role's labels, plus the active group's for test and kvm
+# (publish jobs carry no group label: the dev deploy never waits for a PR).
+runner_labels() {
+  local g k
+  [ "$ROLE" != publish ] || { echo "$LABELS"; return; }
+  g=$(active_group)
+  if [ "$g" != "$active_group_seen" ]; then
+    k=${g#adlc-group-}
+    if [ -z "$g" ]; then log "CI order: no grouped checks queued or running"
+    elif [ ${#k} -le 10 ]; then log "CI order: running the checks of PR #$k to the end; other PRs' checks wait"
+    else log "CI order: running the checks of commit ${k:0:7} to the end; other PRs' checks wait"; fi
+    active_group_seen=$g
+  fi
+  echo "$LABELS${g:+,$g}"
+}
+# Roles with a job waiting for a runner on GitHub, one per line: jobs of the active group and jobs without
+# a group label (a job of a group that isn't active can't start, so nothing makes room for it).
+waiting_roles() {
+  local g; g=$(active_group)
+  ci_scan | awk -v g="${g:--}" '$1 == "Q" && $2 != "-" && ($3 == "-" || $3 == g) { print $2 }' | sort -u
 }
 # Roles of this host's busy runners, one per line (fails when GitHub can't be asked).
 busy_here() {

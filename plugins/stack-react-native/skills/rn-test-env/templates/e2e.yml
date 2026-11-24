@@ -13,7 +13,7 @@ env: { ADLC_RUN: "ci-${{ github.run_id }}" }
 
 jobs:
   e2e-web:
-    runs-on: ${{ fromJSON(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(format(vars.ADLC_TEST_RUNS_ON || '"ubuntu-latest"', github.event.pull_request.number || github.sha)) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +49,7 @@ jobs:
   e2e-android:
     # GitHub-hosted (default) or your host with `adlc up <slug> --ci-kvm on` and the repository
     # variable ADLC_ANDROID_RUNS_ON='["self-hosted","adlc-kvm"]'. Same check name either way.
-    runs-on: ${{ fromJSON(vars.ADLC_ANDROID_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(format(vars.ADLC_ANDROID_RUNS_ON || '"ubuntu-latest"', github.event.pull_request.number || github.sha)) }}
     timeout-minutes: 60          # a full run (build + about 20 flows) takes 35-45 min; 45 cancelled passing runs
     steps:
       - uses: actions/checkout@v4
