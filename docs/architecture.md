@@ -96,7 +96,7 @@ The runner never gets the host's Docker socket (that would be root on the dev se
 
 ### CI runner (optional, per project, when `ci_admin_pat` is set)
 ```
-adlc-<slug>-ci         registrar: holds ci_admin_pat (repo Administration: write), creates JIT runner configs,
+adlc-<slug>-ci         registrar: holds ci_admin_pat (repo Administration: write, Actions: read), creates JIT runner configs,
                        starts one ephemeral runner at a time, resets ci-docker between jobs; runs no job code
 adlc-<slug>-ci-docker  separate Docker engine (DinD) on its own internal network "ci". Unreachable from the
                        agents' runner, so agents can't exec into a running publish job and read its secrets

@@ -3,7 +3,7 @@
 # the test role starts more while jobs run, up to the host's CI capacity (see Shared CI capacity).
 #
 # - Only this container holds ci_admin_pat (repo Administration: write, needed to create
-#   just-in-time runner configs). It never runs workflow code.
+#   just-in-time runner configs; Actions: read, to see which jobs wait). It never runs workflow code.
 # - Each job runs in a fresh runner container inside the CI Docker engine (ci-docker), which
 #   agents can't reach. A JIT runner takes exactly one job and exits.
 # - Before every new runner, everything finished jobs left in the role's engine is removed, so a
@@ -100,12 +100,16 @@ runner_has_job() { docker top "$1" 2>/dev/null | grep -q 'Runner\.Worker'; }
 # substitutions (subshells), where a cache in a shell variable is lost. (On 2026-11-24 the limit ran out:
 # each check asked for the runner list, and the CI-order scan ran on every pass instead of once a minute.)
 CACHE_DIR=$(mktemp -d)
-cached() { # cached <name> <seconds> <command…>: the command's output, reused for <seconds>; fails if it fails
-  local f=$CACHE_DIR/$1 ttl=$2 at
+fresh() { local at; at=$(stat -c %Y "$1" 2>/dev/null) && [ $(($(date +%s) - at)) -lt "$2" ]; } # fresh <file> <seconds>
+# cached <name> <seconds> <command…>: the command's output, reused for <seconds>. A failure is remembered
+# as long, so a missing permission or the rate limit isn't retried on every check.
+cached() {
+  local f=$CACHE_DIR/$1 ttl=$2
   shift 2
-  if [ -e "$f" ] && at=$(stat -c %Y "$f" 2>/dev/null) && [ $(($(date +%s) - at)) -lt "$ttl" ]; then cat "$f"; return 0; fi
-  "$@" >"$f.tmp" 2>/dev/null || { rm -f "$f.tmp"; return 1; }
-  mv -f "$f.tmp" "$f" && cat "$f"
+  if fresh "$f" "$ttl"; then cat "$f"; return 0; fi
+  fresh "$f.fail" "$ttl" && return 1
+  "$@" >"$f.tmp" 2>/dev/null || { rm -f "$f.tmp"; touch "$f.fail"; return 1; }
+  rm -f "$f.fail"; mv -f "$f.tmp" "$f" && cat "$f"
 }
 # GitHub's runner list, at most every 10 s (fails when GitHub can't be asked).
 runners_json() { cached runners 10 env GH_TOKEN="$(secret ci_admin_pat)" "$GH" api "repos/$R/actions/runners?per_page=100"; }
@@ -360,18 +364,30 @@ ci_switch() { # ci_switch <key> <default>
 }
 # The queued and in-progress runs and their jobs, cached for a minute:
 #   "R <created> <started 0|1> <group|->" per run, "Q <role|-> <group|->" per job waiting for a runner.
-ci_scan() { cached scan 60 scan_runs || true; }
+# Needs Actions: read on ci_admin_pat. Without it the scan fails: no group is active, so jobs that carry a
+# group label find no runner (the registrar logs it once an hour).
+ci_scan() {
+  cached scan 60 scan_runs && return 0
+  fresh "$CACHE_DIR/scan.warned" 3600 && return 0
+  touch "$CACHE_DIR/scan.warned"
+  log "WARN: cannot read the workflow runs (ci_admin_pat needs Actions: read, or the API rate limit is used up): CI order is off, and jobs with an adlc-group label find no runner here"
+}
 scan_runs() {
-  local token row id created
+  local token runs row id created
   token=$(secret ci_admin_pat)
-  for row in $( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'
-                  GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'; } 2>/dev/null | sort -u); do
+  # gh prints an error's JSON body to stdout: check the exit codes, and take only "<id>|<time>" rows.
+  runs=$( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"' \
+            && GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'; } 2>/dev/null) \
+    || return 1
+  for row in $(sort -u <<<"$runs"); do
+    [[ $row =~ ^[0-9]+\|[0-9T:Z-]+$ ]] || continue
     id=${row%%|*} created=${row#*|}
     GH_TOKEN=$token $GH api "repos/$R/actions/runs/$id/jobs?filter=latest&per_page=100" --jq "
       ([.jobs[].labels[] | select(test(\"$GROUP_RE\"))] | first // \"-\") as \$g
       | \"R $created \\(if any(.jobs[]; .status == \"in_progress\") then 1 else 0 end) \\(\$g)\",
         (.jobs[] | select(.status == \"queued\")
-         | \"Q \\(([.labels[] | capture(\"^adlc-(?<r>test|publish|kvm)$\").r] | first) // \"-\") \\(([.labels[] | select(test(\"$GROUP_RE\"))] | first) // \"-\")\")" 2>/dev/null
+         | \"Q \\(([.labels[] | capture(\"^adlc-(?<r>test|publish|kvm)$\").r] | first) // \"-\") \\(([.labels[] | select(test(\"$GROUP_RE\"))] | first) // \"-\")\")" 2>/dev/null \
+      || return 1
   done
 }
 # The group whose jobs run now (empty: none, every job goes to any runner).
@@ -465,6 +481,7 @@ last_watch=0
 runner_job() { # runner_job <runner name> <token>
   local id
   for id in $(GH_TOKEN=$2 $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[].id' 2>/dev/null); do
+    [[ $id =~ ^[0-9]+$ ]] || return 0      # an error's JSON body, not a run id
     GH_TOKEN=$2 $GH api "repos/$R/actions/runs/$id/jobs?filter=latest&per_page=100" --jq \
       ".jobs[] | select(.runner_name == \"$1\" and .status == \"in_progress\") | \"\\(.started_at)\t\\(.workflow_name) / \\(.name)\t\\(.html_url)\"" \
       2>/dev/null | head -1 | grep . && return 0

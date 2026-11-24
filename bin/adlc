@@ -223,7 +223,7 @@ cmd_secrets() {
   say "  gh_pat:             (only without the ADLC GitHub App; see 'adlc app') FINE-GRAINED token, only this repo. Read/write: Contents, Issues, Pull requests, Workflows."
   say "                      Read: Actions, Commit statuses, Metadata. Nothing else (no Administration/Secrets)."
   say "  claude_oauth_token: output of 'claude setup-token' (unattended runs). One string starting with sk-ant-oat"
-  say "  ci_admin_pat:       FINE-GRAINED token, only this repo, Administration: read/write (registers ephemeral CI"
+  say "  ci_admin_pat:       FINE-GRAINED token, only this repo, Administration: read/write and Actions: read (registers ephemeral CI"
   say "                      runners; held only by the CI registrar, never by agents or jobs). Optional: empty = no CI runner"
   say "                      On a CI-only host also Contents: read (the egress proxy's adlc.yaml); the other secrets stay empty there"
   say "  registry_token:     PULL credential for the dev deployer: Harbor robot secret (pull only), or a classic"
