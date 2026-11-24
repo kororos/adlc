@@ -28,6 +28,7 @@ const SWITCHES = {
   rework_first: ["on", "off"], max_open_prs: ["off", "2", "3", "4", "5", "6", "8"],
   update_before_merge: ["always", "overlap"], verify_scope: ["affected", "auto", "full"],
   max_parallel_runs: ["1", "2", "3", "4"], ci_one_pr: ["on", "off"],
+  run_time_limit: ["4h", "6h", "off"],
 }
 const ACTIONS = new Set(["pause", "resume", "run_nightly",
   ...Object.entries(SWITCHES).flatMap(([k, vs]) => [...vs, "default"].map((v) => `${k}:${v}`))])

@@ -65,7 +65,7 @@ services:
       ADLC_LOCK_DIR: ${ADLC_ROOT}/projects/${ADLC_SLUG}/locks
       ADLC_SUBNET_PREFIX: ${ADLC_SUBNET_PREFIX}
       ADLC_MAX_PARALLEL_RUNS: ${ADLC_MAX_PARALLEL_RUNS:-1}
-      ADLC_RUN_TIMEOUT: ${ADLC_RUN_TIMEOUT:-4h}           # a delivery run is stopped after this (timeout(1) duration: 4h, 360m)
+      ADLC_RUN_TIMEOUT: ${ADLC_RUN_TIMEOUT:-4h}           # default run time limit (timeout(1) duration: 4h, 360m); run_time_limit (dashboard, adlc.yaml) overrides it
       ADLC_POLL_INTERVAL: ${ADLC_POLL_INTERVAL:-60}
       ADLC_DEPLOY_INTERVAL: ${ADLC_DEPLOY_INTERVAL:-120}
       ADLC_LOG_RETENTION_DAYS: ${ADLC_LOG_RETENTION_DAYS:-7}

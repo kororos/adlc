@@ -50,6 +50,11 @@ const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<st
     what: "ADLC's CI runners run every check of one PR to the end before the next PR's jobs start, so PRs become ready to merge one by one instead of all late together. Off: jobs of all PRs share the runners. Needs \"adlc-group-{0}\" in the ADLC_TEST_RUNS_ON and ADLC_ANDROID_RUNS_ON variables (without it, every job goes to any runner either way); a CI-only host follows it once it reports to this dashboard.",
     values: { on: "on", off: "off (all PRs share the runners)" },
   },
+  run_time_limit: {
+    title: "Run time limit",
+    what: "A delivery run that takes longer is stopped and its issue blocked; it pushed every finished phase, so relabelling adlc:ready resumes from there. Applies to runs that start after the change. Unlimited: a stuck run holds its slot until you stop it.",
+    values: { "4h": "4 hours", "6h": "6 hours", off: "unlimited" },
+  },
 }
 const SOURCE: Record<Setting["source"], string> = {
   dashboard: "set here", env: "set on the dev server", "adlc.yaml": "from adlc.yaml", default: "default",

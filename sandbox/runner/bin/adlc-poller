@@ -7,6 +7,7 @@ ADLC_COMPONENT=poller
 source /usr/local/bin/adlc-lib.sh
 
 POLL_INTERVAL=${ADLC_POLL_INTERVAL:-60}
+# A delivery run's time limit: the run_time_limit switch (dashboard, adlc.yaml), else ADLC_RUN_TIMEOUT.
 RUN_TIMEOUT=${ADLC_RUN_TIMEOUT:-4h}
 # Unattended runs keep every subagent and command in the foreground
 # (CLAUDE_CODE_DISABLE_BACKGROUND_TASKS). If something still runs in the background, `claude -p`
@@ -302,7 +303,15 @@ launch() { # launch <n> <title>
   label "$n" adlc:ready adlc:in-progress
   gh issue edit "$n" -R "$R" --remove-label "$PRIORITY_LABEL" >/dev/null 2>&1 || true
   local model; model=$(lead_model "$n")
-  log "#$n: starting delivery${pr_state:+ (rework of its open PR)}, $scope verify, in $wt$([ "$model" = "$LEAD_MODEL" ] || echo ", lead model $model (the issue's ADLC models)")"
+  # The time limit (run_time_limit): a timeout(1) duration (4h, 360m), or off for none.
+  local limit tmo=()
+  limit=$(setting run_time_limit)
+  case $limit in
+    off|0|none|unlimited) limit="no time limit" ;;
+    *) [[ $limit =~ ^[1-9][0-9]*[smhd]?$ ]] || { log "WARN: run_time_limit '$limit' is not a duration (e.g. 4h, 360m): using 4h"; limit=4h; }
+       tmo=(timeout --kill-after=60 "$limit"); limit="time limit $limit" ;;
+  esac
+  log "#$n: starting delivery${pr_state:+ (rework of its open PR)}, $scope verify, $limit, in $wt$([ "$model" = "$LEAD_MODEL" ] || echo ", lead model $model (the issue's ADLC models)")"
   (
     cd "$wt" || exit 1
     ADLC_MODE=unattended ADLC_RUN=$n \
@@ -312,7 +321,7 @@ launch() { # launch <n> <title>
     CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1 \
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
-      timeout --kill-after=60 "$RUN_TIMEOUT" \
+      ${tmo[@]+"${tmo[@]}"} \
       claude -p "/adlc-core:deliver $n$mode" \
         --settings "$(claude_settings)" \
         --permission-mode bypassPermissions \
@@ -396,13 +405,15 @@ max_open_prs|.autonomy.max_open_prs|off|off 2 3 4 5 6 8
 update_before_merge|.autonomy.update_before_merge|always|always overlap
 verify_scope|.autonomy.verify_scope|affected|affected auto full
 max_parallel_runs|.autonomy.max_parallel_runs|1|1 2 3 4
-ci_one_pr|.autonomy.ci_one_pr|on|on off"
+ci_one_pr|.autonomy.ci_one_pr|on|on off
+run_time_limit|.autonomy.run_time_limit|4h|4h 6h off"
 setting_def() { grep "^$1|" <<<"$SETTINGS"; }
 norm_value() { case $1 in true|on|yes) echo on ;; false|off|no) echo off ;; *) echo "$1" ;; esac; }
 setting() { # setting <key> → effective value
   local key=$1 def path default v
   def=$(setting_def "$key"); path=$(cut -d'|' -f2 <<<"$def"); default=$(cut -d'|' -f3 <<<"$def")
   [ "$key" = max_parallel_runs ] && default=${ADLC_MAX_PARALLEL_RUNS:-$default}   # the runner's env, below adlc.yaml
+  [ "$key" = run_time_limit ] && default=$RUN_TIMEOUT
   v=$(cat "$SETTINGS_DIR/$key" 2>/dev/null)
   [ -z "$v" ] && [ "$key" = merge_train ] && v=${ADLC_MERGE_TRAIN:-}
   [ -n "$v" ] || v=$(cfg_raw "$path" "$default")
@@ -415,6 +426,7 @@ setting_source() {
   def=$(setting_def "$key"); path=$(cut -d'|' -f2 <<<"$def")
   [ -n "$(cfg_raw "$path" "")" ] && { echo adlc.yaml; return; }
   [ "$key" = max_parallel_runs ] && [ -n "${ADLC_MAX_PARALLEL_RUNS:-}" ] && [ "$ADLC_MAX_PARALLEL_RUNS" != 1 ] && { echo env; return; }
+  [ "$key" = run_time_limit ] && [ "$RUN_TIMEOUT" != 4h ] && { echo env; return; }
   echo default
 }
 write_settings() {
