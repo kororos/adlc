@@ -335,7 +335,18 @@ HIGHER=${HIGHER# }
 # The active group: among the queued and running workflow runs that carry a group label, the oldest run
 # with a job in progress; when none has started, the oldest waiting one. Jobs without a group label (older
 # workflows, the variable without "{0}") keep going to any runner, as before.
+# The ci_one_pr switch (dashboard → Automation, or adlc.yaml autonomy.ci_one_pr; default on) turns it off:
+# then a new runner carries the labels of every group with a queued or running job, so it takes a job of
+# any PR. The main host's registrars read the poller's settings.json; a CI-only host's reporter
+# (adlc-hoststats) writes ci-switches.json from the dashboard's answer. Neither: on.
 GROUP_RE='^adlc-group-[0-9a-f]+$'
+SWITCH_DIR=/run/adlc/state
+ci_switch() { # ci_switch <key> <default>
+  local v
+  v=$(jq -r --arg k "$1" '.settings[]? | select(.key == $k) | .value' "$SWITCH_DIR/settings.json" 2>/dev/null)
+  [ -n "$v" ] || v=$(jq -r --arg k "$1" '.[$k] // empty' "$SWITCH_DIR/ci-switches.json" 2>/dev/null)
+  echo "${v:-$2}"
+}
 # The queued and in-progress runs and their jobs, cached for a minute:
 #   "R <created> <started 0|1> <group|->" per run, "Q <role|-> <group|->" per job waiting for a runner.
 scan_at=0 scan_cache="" active_group_seen=""
@@ -362,11 +373,20 @@ ci_scan() {
 active_group() {
   ci_scan | awk '$1 == "R" && $4 != "-"' | sort -k3,3r -k2,2 | head -n 1 | cut -d' ' -f4
 }
+# ci_one_pr off: every group with a queued or running job, comma-separated (at most 20).
+all_groups() {
+  ci_scan | awk '$1 == "R" && $4 != "-" { print $4 }' | sort -u | head -n 20 | paste -sd, -
+}
 # Labels for this registrar's next runner: the role's labels, plus the active group's for test and kvm
 # (publish jobs carry no group label: the dev deploy never waits for a PR).
 runner_labels() {
   local g k
   [ "$ROLE" != publish ] || { echo "$LABELS"; return; }
+  if [ "$(ci_switch ci_one_pr on)" = off ]; then
+    g=$(all_groups)
+    [ "$active_group_seen" = "*off" ] || { log "CI order: off (ci_one_pr): runners take jobs of every PR"; active_group_seen="*off"; }
+    echo "$LABELS${g:+,$g}"; return
+  fi
   g=$(active_group)
   if [ "$g" != "$active_group_seen" ]; then
     k=${g#adlc-group-}
@@ -378,10 +398,12 @@ runner_labels() {
   echo "$LABELS${g:+,$g}"
 }
 # Roles with a job waiting for a runner on GitHub, one per line: jobs of the active group and jobs without
-# a group label (a job of a group that isn't active can't start, so nothing makes room for it).
+# a group label (a job of a group that isn't active can't start, so nothing makes room for it); with
+# ci_one_pr off, every waiting job.
 waiting_roles() {
-  local g; g=$(active_group)
-  ci_scan | awk -v g="${g:--}" '$1 == "Q" && $2 != "-" && ($3 == "-" || $3 == g) { print $2 }' | sort -u
+  local g="*"
+  [ "$(ci_switch ci_one_pr on)" = off ] || g=$(active_group)
+  ci_scan | awk -v g="${g:--}" '$1 == "Q" && $2 != "-" && (g == "*" || $3 == "-" || $3 == g) { print $2 }' | sort -u
 }
 # Roles of this host's busy runners, one per line (fails when GitHub can't be asked).
 busy_here() {

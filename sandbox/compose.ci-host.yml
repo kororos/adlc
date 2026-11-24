@@ -35,9 +35,12 @@ services:
     environment:
       ADLC_DASHBOARD_URL: ${ADLC_DASHBOARD_URL:-}
       ADLC_CI_HOST: ${ADLC_CI_HOST:-}
+      ADLC_SLUG: ${ADLC_SLUG}
     volumes:
       - ${ADLC_ROOT}/config/dashboard-token:/run/adlc/dashboard-token:ro
       - ${ADLC_ROOT}/projects/${ADLC_SLUG}/repo:/disk:ro
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/state:/state     # the dashboard's CI switches for the registrars
+    tmpfs: [/tmp]
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

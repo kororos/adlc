@@ -393,7 +393,7 @@ set_ci_roles() { # set_ci_roles <cfg file> <roles option> <kvm option>
 up_ci_only() { # up_ci_only <slug> <repo> <roles> <host> <dind> <registry> <registry ca> <kvm option>
   local slug=$1 repo=$2 roles=$3 host=$4 dind=$5 reg=$6 reg_ca=$7 kvm=$8 f
   f=$(cfg_file "$slug")
-  mkdir -p "$ADLC_ROOT"/{config,cache} "$ADLC_ROOT/projects/$slug"/{repo,logs/egress}
+  mkdir -p "$ADLC_ROOT"/{config,cache} "$ADLC_ROOT/projects/$slug"/{repo,state,logs/egress}
   if [ ! -f "$f" ]; then
     [ -n "$repo" ] || die "first start needs --repo owner/name"
     [ -n "$roles" ] || die "first start needs --ci-roles (e.g. kvm, or test,kvm): the roles this host takes over"

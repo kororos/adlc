@@ -27,7 +27,7 @@ const SWITCHES = {
   merge_train: ["on", "dry-run", "off"], ci_auto_rework: ["on", "off"], keep_prs_current: ["on", "off"],
   rework_first: ["on", "off"], max_open_prs: ["off", "2", "3", "4", "5", "6", "8"],
   update_before_merge: ["always", "overlap"], verify_scope: ["affected", "auto", "full"],
-  max_parallel_runs: ["1", "2", "3", "4"],
+  max_parallel_runs: ["1", "2", "3", "4"], ci_one_pr: ["on", "off"],
 }
 const ACTIONS = new Set(["pause", "resume", "run_nightly",
   ...Object.entries(SWITCHES).flatMap(([k, vs]) => [...vs, "default"].map((v) => `${k}:${v}`))])
@@ -431,8 +431,14 @@ app.post("/api/host-reports/:name", async (req, reply) => {
   const tmp = path.join(HOSTS_DIR, `.${name}.json.tmp`)
   fs.writeFileSync(tmp, JSON.stringify({ ...r, at: new Date().toISOString() }))
   fs.renameSync(tmp, path.join(HOSTS_DIR, `${name}.json`))
-  return { ok: true }
+  return { ok: true, ci: ciSwitches() }
 })
+// The switches a CI-only host's registrars follow, per project ({ diet: { ci_one_pr: "on" } }). Its
+// reporter writes them where the registrars read them; the main host's registrars read the poller's file.
+const CI_SWITCHES = new Set(["ci_one_pr"])
+const ciSwitches = () => Object.fromEntries(projects().map((p) => [p.slug, Object.fromEntries(
+  (readJson(pdir(p.slug, "state", "settings.json"))?.settings ?? [])
+    .filter((s) => CI_SWITCHES.has(s.key) && typeof s.value === "string").map((s) => [s.key, s.value]))]))
 
 app.get("/api/projects", async () => projects().map((p) => {
   const s = state(p)

@@ -45,6 +45,11 @@ const ABOUT: Record<SettingKey, { title: string; what: string; values: Record<st
     what: "What the run's one full verify runs (later verifies re-run only the failed tests and the tests of what changed): the tests the change affects, plus lint, typecheck, arch checks and build on everything (affected), the whole suite (full), or full for high-risk issues and affected for the rest (auto; the run decides once its design sets the risk). PR CI always runs the full suite before a merge. The label adlc:verify-full or adlc:verify-affected on an issue overrides this for that issue.",
     values: { affected: "affected", auto: "auto (full if high risk)", full: "full" },
   },
+  ci_one_pr: {
+    title: "One PR's checks at a time",
+    what: "ADLC's CI runners run every check of one PR to the end before the next PR's jobs start, so PRs become ready to merge one by one instead of all late together. Off: jobs of all PRs share the runners. Needs \"adlc-group-{0}\" in the ADLC_TEST_RUNS_ON and ADLC_ANDROID_RUNS_ON variables (without it, every job goes to any runner either way); a CI-only host follows it once it reports to this dashboard.",
+    values: { on: "on", off: "off (all PRs share the runners)" },
+  },
 }
 const SOURCE: Record<Setting["source"], string> = {
   dashboard: "set here", env: "set on the dev server", "adlc.yaml": "from adlc.yaml", default: "default",

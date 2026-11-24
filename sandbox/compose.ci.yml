@@ -89,6 +89,7 @@ services:
       DOCKER_HOST: tcp://ci-docker:2376
     volumes:
       - ci-certs:/certs:ro
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/state:/run/adlc/state:ro   # CI switches (ci_one_pr)
     networks:
       ci:
         ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.4
@@ -152,6 +153,7 @@ services:
       DOCKER_HOST: tcp://ci-docker-kvm:2376
     volumes:
       - ci-certs-kvm:/certs:ro
+      - ${ADLC_ROOT}/projects/${ADLC_SLUG}/state:/run/adlc/state:ro   # CI switches (ci_one_pr)
     networks:
       ci:
         ipv4_address: ${ADLC_CI_SUBNET_PREFIX}.8

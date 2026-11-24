@@ -118,6 +118,7 @@ platforms: [web, android, ios]     # ios e2e runs in CI (macOS runner), not in t
 autonomy:
   auto_merge: [low, medium]              # risk tiers allowed to auto-merge on green CI
   max_parallel_implementers: 3
+  # ci_one_pr: on                        # ADLC CI runs one PR's checks to the end before the next PR's (needs adlc-group-{0} in the runner variables)
   retries: { build: 3, qa: 2, review: 2 }
 
 network:

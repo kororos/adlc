@@ -395,7 +395,8 @@ rework_first|.autonomy.rework_first|on|on off
 max_open_prs|.autonomy.max_open_prs|off|off 2 3 4 5 6 8
 update_before_merge|.autonomy.update_before_merge|always|always overlap
 verify_scope|.autonomy.verify_scope|affected|affected auto full
-max_parallel_runs|.autonomy.max_parallel_runs|1|1 2 3 4"
+max_parallel_runs|.autonomy.max_parallel_runs|1|1 2 3 4
+ci_one_pr|.autonomy.ci_one_pr|on|on off"
 setting_def() { grep "^$1|" <<<"$SETTINGS"; }
 norm_value() { case $1 in true|on|yes) echo on ;; false|off|no) echo off ;; *) echo "$1" ;; esac; }
 setting() { # setting <key> → effective value

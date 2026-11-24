@@ -2,6 +2,8 @@
 # adlc-hoststats: on a CI-only host, report this machine's CPU, memory and disk to the main host's
 # dashboard every 30 s (`adlc ui report <url>` sets it up). /proc in a container is the host's;
 # /disk is a read-only mount on the filesystem that holds ADLC_ROOT and Docker's data.
+# The dashboard answers with the project's CI switches (ci_one_pr); they go to /state/ci-switches.json,
+# where this host's CI registrars read them.
 set -uo pipefail
 url=${ADLC_DASHBOARD_URL:?ADLC_DASHBOARD_URL not set}
 host=${ADLC_CI_HOST:?ADLC_CI_HOST not set}
@@ -18,8 +20,13 @@ while sleep 30; do
   disk=$(df -Pk /disk | awk 'NR==2{ printf "{\"freeGb\":%d,\"totalGb\":%d}", $4/1048576, $2/1048576 }')
   body=$(jq -nc --argjson cpu "$cpu" --argjson l1 "$l1" --argjson cores "$(nproc)" --argjson mem "$mem" --argjson disk "$disk" \
     '{cpuPct: $cpu, load1: $l1, cores: $cores, mem: $mem, disk: $disk}')
-  code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST "${url%/}/api/host-reports/$host" \
+  code=$(curl -s -m 10 -o /tmp/answer -w '%{http_code}' -X POST "${url%/}/api/host-reports/$host" \
     -H "authorization: Bearer $tok" -H 'x-adlc-request: 1' -H 'content-type: application/json' -d "$body")
+  if [ "$code" = 200 ] && [ -d /state ] && sw=$(jq -ce --arg s "${ADLC_SLUG:-}" '.ci[$s] // empty | objects' /tmp/answer 2>/dev/null); then
+    cmp -s <(printf '%s\n' "$sw") /state/ci-switches.json \
+      || { printf '%s\n' "$sw" >/state/.ci-switches.json && mv -f /state/.ci-switches.json /state/ci-switches.json \
+           && echo "hoststats: CI switches from the dashboard: $sw"; }
+  fi
   # Log only changes, so a dashboard that's down doesn't fill the log.
   [ "$code" = "$last" ] || echo "hoststats: dashboard answered $code$([ "$code" = 401 ] && echo ' (token: adlc ui host-token '"$host"' on the main host)')"
   last=$code
