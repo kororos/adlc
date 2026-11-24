@@ -95,6 +95,20 @@ JOB_NO_PROXY=localhost,127.0.0.1,.lan,.internal
 # as not busy and accepted the unregister; removing it killed the nightly Android job and its emulator.
 # So first ask the container itself: a runner running a job has a Runner.Worker process.
 runner_has_job() { docker top "$1" 2>/dev/null | grep -q 'Runner\.Worker'; }
+# GitHub answers are cached in files: every request counts against the ci_admin_pat owner's 5000 an hour,
+# which all registrars (every host and role) and the owner's own gh share, and the checks run in command
+# substitutions (subshells), where a cache in a shell variable is lost. (On 2026-11-24 the limit ran out:
+# each check asked for the runner list, and the CI-order scan ran on every pass instead of once a minute.)
+CACHE_DIR=$(mktemp -d)
+cached() { # cached <name> <seconds> <command…>: the command's output, reused for <seconds>; fails if it fails
+  local f=$CACHE_DIR/$1 ttl=$2 at
+  shift 2
+  if [ -e "$f" ] && at=$(stat -c %Y "$f" 2>/dev/null) && [ $(($(date +%s) - at)) -lt "$ttl" ]; then cat "$f"; return 0; fi
+  "$@" >"$f.tmp" 2>/dev/null || { rm -f "$f.tmp"; return 1; }
+  mv -f "$f.tmp" "$f" && cat "$f"
+}
+# GitHub's runner list, at most every 10 s (fails when GitHub can't be asked).
+runners_json() { cached runners 10 env GH_TOKEN="$(secret ci_admin_pat)" "$GH" api "repos/$R/actions/runners?per_page=100"; }
 remove_idle_runner() { # remove_idle_runner <container> <runner id>
   runner_has_job "$1" && return 1
   GH_TOKEN=$(secret ci_admin_pat) $GH api -X DELETE "repos/$R/actions/runners/$2" >/dev/null 2>&1 || return 1
@@ -115,8 +129,7 @@ replace_stale_runners() {
     elif [ "$spec" != "$SPEC" ]; then why="the runner setup changed"
     else continue; fi
     token=$(secret ci_admin_pat)
-    id=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
-          --jq ".runners[] | select(.name == \"$c\") | select(.busy | not) | .id" 2>/dev/null)
+    id=$(runners_json | jq -r ".runners[] | select(.name == \"$c\") | select(.busy | not) | .id" 2>/dev/null)
     if [ -z "$id" ]; then
       log "runner $c is outdated ($why) but busy or unknown to GitHub; leaving it"
       continue
@@ -279,8 +292,7 @@ role_weight() { case $1 in kvm) echo "${ADLC_CI_WEIGHT_KVM:-2}" ;; *) echo 1 ;; 
 # Weight of this host's busy runners, all roles; "?" when GitHub can't be asked (then don't block).
 host_load() {
   local names n r h sum=0
-  names=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
-            --jq ".runners[] | select(.busy) | .name" 2>/dev/null) || { echo "?"; return; }
+  names=$(runners_json | jq -r ".runners[] | select(.busy) | .name" 2>/dev/null) || { echo "?"; return; }
   for n in $names; do
     if [[ "$n" =~ ^adlc-$ADLC_SLUG-(([a-z0-9]+)-)?(test|publish|kvm)-[0-9]+$ ]]; then
       h=${BASH_REMATCH[2]} r=${BASH_REMATCH[3]}
@@ -298,8 +310,7 @@ capacity_ok() { local b; b=$(host_load); [ "$b" = "?" ] || [ $((b + WEIGHT)) -le
 # still registering. Fails when GitHub can't be asked.
 idle_runners() {
   local list c line
-  list=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
-           --jq '.runners[] | "\(.name) \(.busy) \(.id)"' 2>/dev/null) || return 1
+  list=$(runners_json | jq -r '.runners[] | "\(.name) \(.busy) \(.id)"' 2>/dev/null) || return 1
   for c in $(my_runners); do
     line=$(awk -v n="$c" '$1 == n' <<<"$list")
     [ "$(cut -d' ' -f2 <<<"$line")" = true ] && continue
@@ -349,25 +360,19 @@ ci_switch() { # ci_switch <key> <default>
 }
 # The queued and in-progress runs and their jobs, cached for a minute:
 #   "R <created> <started 0|1> <group|->" per run, "Q <role|-> <group|->" per job waiting for a runner.
-scan_at=0 scan_cache="" active_group_seen=""
-ci_scan() {
-  local now token row id created
-  now=$(date +%s)
-  if [ $((now - scan_at)) -ge 60 ]; then
-    token=$(secret ci_admin_pat)
-    scan_cache=$(
-      for row in $( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'
-                      GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'; } 2>/dev/null | sort -u); do
-        id=${row%%|*} created=${row#*|}
-        GH_TOKEN=$token $GH api "repos/$R/actions/runs/$id/jobs?filter=latest&per_page=100" --jq "
-          ([.jobs[].labels[] | select(test(\"$GROUP_RE\"))] | first // \"-\") as \$g
-          | \"R $created \\(if any(.jobs[]; .status == \"in_progress\") then 1 else 0 end) \\(\$g)\",
-            (.jobs[] | select(.status == \"queued\")
-             | \"Q \\(([.labels[] | capture(\"^adlc-(?<r>test|publish|kvm)$\").r] | first) // \"-\") \\(([.labels[] | select(test(\"$GROUP_RE\"))] | first) // \"-\")\")" 2>/dev/null
-      done)
-    scan_at=$now
-  fi
-  printf '%s\n' "$scan_cache"
+ci_scan() { cached scan 60 scan_runs || true; }
+scan_runs() {
+  local token row id created
+  token=$(secret ci_admin_pat)
+  for row in $( { GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=queued&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'
+                  GH_TOKEN=$token $GH api "repos/$R/actions/runs?status=in_progress&per_page=50" --jq '.workflow_runs[] | "\(.id)|\(.created_at)"'; } 2>/dev/null | sort -u); do
+    id=${row%%|*} created=${row#*|}
+    GH_TOKEN=$token $GH api "repos/$R/actions/runs/$id/jobs?filter=latest&per_page=100" --jq "
+      ([.jobs[].labels[] | select(test(\"$GROUP_RE\"))] | first // \"-\") as \$g
+      | \"R $created \\(if any(.jobs[]; .status == \"in_progress\") then 1 else 0 end) \\(\$g)\",
+        (.jobs[] | select(.status == \"queued\")
+         | \"Q \\(([.labels[] | capture(\"^adlc-(?<r>test|publish|kvm)$\").r] | first) // \"-\") \\(([.labels[] | select(test(\"$GROUP_RE\"))] | first) // \"-\")\")" 2>/dev/null
+  done
 }
 # The group whose jobs run now (empty: none, every job goes to any runner).
 active_group() {
@@ -384,16 +389,16 @@ runner_labels() {
   [ "$ROLE" != publish ] || { echo "$LABELS"; return; }
   if [ "$(ci_switch ci_one_pr on)" = off ]; then
     g=$(all_groups)
-    [ "$active_group_seen" = "*off" ] || { log "CI order: off (ci_one_pr): runners take jobs of every PR"; active_group_seen="*off"; }
+    [ "$(cat "$CACHE_DIR/order" 2>/dev/null)" = "*off" ] || { log "CI order: off (ci_one_pr): runners take jobs of every PR"; echo "*off" >"$CACHE_DIR/order"; }
     echo "$LABELS${g:+,$g}"; return
   fi
   g=$(active_group)
-  if [ "$g" != "$active_group_seen" ]; then
+  if [ "$g" != "$(cat "$CACHE_DIR/order" 2>/dev/null)" ]; then
     k=${g#adlc-group-}
     if [ -z "$g" ]; then log "CI order: no grouped checks queued or running"
     elif [ ${#k} -le 10 ]; then log "CI order: running the checks of PR #$k to the end; other PRs' checks wait"
     else log "CI order: running the checks of commit ${k:0:7} to the end; other PRs' checks wait"; fi
-    active_group_seen=$g
+    echo "$g" >"$CACHE_DIR/order"
   fi
   echo "$LABELS${g:+,$g}"
 }
@@ -408,8 +413,7 @@ waiting_roles() {
 # Roles of this host's busy runners, one per line (fails when GitHub can't be asked).
 busy_here() {
   local names n
-  names=$(GH_TOKEN=$(secret ci_admin_pat) $GH api "repos/$R/actions/runners?per_page=100" \
-            --jq ".runners[] | select(.busy) | .name" 2>/dev/null) || return 1
+  names=$(runners_json | jq -r ".runners[] | select(.busy) | .name" 2>/dev/null) || return 1
   for n in $names; do
     [[ "$n" =~ ^adlc-$ADLC_SLUG-(([a-z0-9]+)-)?(test|publish|kvm)-[0-9]+$ ]] || continue
     [ "${BASH_REMATCH[2]}" = "$HOST" ] && echo "${BASH_REMATCH[3]}"
@@ -475,8 +479,7 @@ watch_job_time() {
   for c in "${!job_since[@]}"; do grep -qx "$c" <<<"$live" || unset "job_since[$c]" "job_desc[$c]"; done
   [ -n "$live" ] || return 0
   token=$(secret ci_admin_pat)
-  busy=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" \
-           --jq '.runners[] | select(.busy) | .name' 2>/dev/null) || return 0
+  busy=$(runners_json | jq -r '.runners[] | select(.busy) | .name' 2>/dev/null) || return 0
   for c in $live; do
     grep -qx "$c" <<<"$busy" || continue
     if [ -z "${job_since[$c]:-}" ]; then
@@ -490,7 +493,7 @@ watch_job_time() {
     [ $((now - job_since[$c])) -ge $((JOB_MAX_MIN * 60)) ] || continue
     log "WARN: runner $c has run ${job_desc[$c]} for $(((now - job_since[$c]) / 60)) min (limit ADLC_CI_JOB_MAX_MIN=$JOB_MAX_MIN): stopping it; GitHub ends the job and what it left in the engine is removed"
     docker stop -t 60 "$c" >/dev/null 2>&1 || docker rm -f "$c" >/dev/null 2>&1
-    id=$(GH_TOKEN=$token $GH api "repos/$R/actions/runners?per_page=100" --jq ".runners[] | select(.name == \"$c\") | .id" 2>/dev/null)
+    id=$(runners_json | jq -r ".runners[] | select(.name == \"$c\") | .id" 2>/dev/null)
     [ -z "$id" ] || GH_TOKEN=$token $GH api -X DELETE "repos/$R/actions/runners/$id" >/dev/null 2>&1 || true
     unset "job_since[$c]" "job_desc[$c]"
   done
